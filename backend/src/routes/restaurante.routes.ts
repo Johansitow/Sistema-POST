@@ -1,0 +1,82 @@
+/**
+ * Restaurante Routes
+ */
+
+import { Router, Request, Response, NextFunction } from 'express';
+import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
+import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
+import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
+import {
+  listar,
+  obtener,
+  obtenerDefault,
+  crear,
+  actualizar,
+  toggleActivo,
+  listarUsuarios,
+  asignarUsuario,
+  removerUsuario,
+} from '../controller/restaurante.controller';
+import { restauranteService } from '../services/restaurante.service';
+
+const router = Router();
+router.use(authenticate);
+
+router.get('/',              listar);           // ?todos=true → incluye inactivos (superadmin)
+router.get('/default',       obtenerDefault);   // Restaurante marcado como default
+router.get('/:id',           obtener);
+router.post('/',             requireSuperAdmin, crear);
+router.put('/:id',           requireSuperAdmin, actualizar);
+router.patch('/:id/toggle',  requireSuperAdmin, toggleActivo);
+
+// ── Gestión de usuarios por restaurante (superadmin) ──────────────────────────
+router.get('/:id/usuarios',              requireSuperAdmin, listarUsuarios);
+router.post('/:id/usuarios',             requireSuperAdmin, asignarUsuario);
+router.delete('/:id/usuarios/:userId',   requireSuperAdmin, removerUsuario);
+
+// ── Configuración por restaurante ─────────────────────────────────────────────
+// Accesible por el propio tenant (tenantContext) o por superadmin
+
+router.get('/:id/config', tenantContextOptional, tenantIsolation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await restauranteService.listarConfig(Number(req.params.id));
+      res.json({ success: true, data });
+    } catch (e) { next(e); }
+  }
+);
+
+router.put('/:id/config/:clave', tenantContext, tenantIsolation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { valor } = req.body;
+      if (valor === undefined) { res.status(400).json({ error: 'valor es requerido' }); return; }
+      const clave = Array.isArray(req.params.clave) ? req.params.clave[0] : req.params.clave;
+      const data = await restauranteService.setConfig(Number(req.params.id), clave, String(valor));
+      res.json({ success: true, data, message: 'Configuración guardada' });
+    } catch (e) { next(e); }
+  }
+);
+
+router.patch('/:id/config', tenantContext, tenantIsolation,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const { items } = req.body;
+      if (!Array.isArray(items)) { res.status(400).json({ error: 'items debe ser un array [{ clave, valor }]' }); return; }
+      const data = await restauranteService.setConfigBulk(Number(req.params.id), items);
+      res.json({ success: true, data, message: 'Configuración actualizada' });
+    } catch (e) { next(e); }
+  }
+);
+
+router.delete('/:id/config/:clave', requireSuperAdmin,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const clave = Array.isArray(req.params.clave) ? req.params.clave[0] : req.params.clave;
+      await restauranteService.deleteConfig(Number(req.params.id), clave);
+      res.json({ success: true, message: 'Configuración eliminada' });
+    } catch (e) { next(e); }
+  }
+);
+
+export default router;

@@ -1,0 +1,470 @@
+/**
+ * Tests para ordenService
+ *
+ * Cubre:
+ *   - crear: llama verificarDisponibilidadParaDetalles; productos con receta no descuentan stock propio
+ *   - actualizarEstado: transición inválida, ENTREGADA sin pagos, total insuficiente, verifica stock de receta
+ *   - agregarDetalle: llama verificarDisponibilidadParaDetalles
+ *   - actualizarDetalle: llama verificarDisponibilidadParaDetalles solo cuando la cantidad sube
+ *   - eliminar: productos con receta no recuperan stock; productos sin receta sí
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { Decimal } from '@prisma/client/runtime/library';
+
+// ── Mocks: se definen con vi.hoisted para que estén disponibles dentro de vi.mock ──
+
+const { mockTx } = vi.hoisted(() => {
+  const mockTx: any = {
+    receta:       { findFirst: vi.fn() },
+    producto:     { findUnique: vi.fn(), update: vi.fn() },
+    movimiento:   { create: vi.fn() },
+    orden:        { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
+    ordenDetalle: { create: vi.fn(), update: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn(), findUnique: vi.fn() },
+    factura:      { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    pago:         { create: vi.fn() },
+  };
+  return { mockTx };
+});
+
+vi.mock('../../repositories/orden.repository', () => ({
+  ordenRepository: {
+    findAll:       vi.fn(),
+    findById:      vi.fn(),
+    findUltima:    vi.fn(),
+    update:        vi.fn(),
+    count:         vi.fn(),
+    groupByEstado: vi.fn(),
+    groupByTipo:   vi.fn(),
+    aggregate:     vi.fn(),
+  },
+}));
+
+vi.mock('../../repositories/estado.repository', () => ({
+  estadoRepository: {
+    findTransicion: vi.fn(),
+    findById:       vi.fn(),
+  },
+}));
+
+vi.mock('../../repositories/configuracion.repository', () => ({
+  configuracionRepository: {
+    findByClave:  vi.fn(),
+    parseValor:   vi.fn(),
+  },
+}));
+
+vi.mock('../../lib/numero-generator', () => ({
+  generarNumeroOrden: vi.fn(() => 'ORD-000001'),
+}));
+
+vi.mock('../receta.service', () => ({
+  recetaService: {
+    verificarDisponibilidadParaDetalles: vi.fn(),
+    verificarStockParaOrden:             vi.fn(),
+    descontarIngredientesOrden:          vi.fn(),
+  },
+}));
+
+vi.mock('../factura.service', () => ({
+  facturaService: {
+    generarDesdeOrden: vi.fn(),
+  },
+}));
+
+vi.mock('../../config/database', () => ({
+  default: {
+    $transaction:  vi.fn((fn: any) => fn(mockTx)),
+    ordenDetalle:  { findUnique: vi.fn() },
+  },
+}));
+
+// ── Imports ───────────────────────────────────────────────────────────────────
+
+import { ordenService } from '../orden.service';
+import { ordenRepository } from '../../repositories/orden.repository';
+import { estadoRepository } from '../../repositories/estado.repository';
+import { configuracionRepository } from '../../repositories/configuracion.repository';
+import { recetaService } from '../receta.service';
+import { facturaService } from '../factura.service';
+import prisma from '../../config/database';
+import { BadRequestError, NotFoundError } from '../../exceptions/HttpErrors';
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+const mockOrdenBase = {
+  id:       1,
+  id_estado: 2,
+  numero_orden: 'ORD-000001',
+  total:    new Decimal('25000'),
+  subtotal: new Decimal('21000'),
+  impuestos: new Decimal('4000'),
+  descuento: new Decimal('0'),
+  propina:   new Decimal('0'),
+  costo_domicilio: new Decimal('0'),
+  estado: { id: 2, codigo: 'PENDIENTE', nombre: 'Pendiente' },
+  detalles: [
+    { id: 10, id_producto: 5, cantidad: new Decimal(2), subtotal: new Decimal('10000'), producto: { id: 5, nombre: 'Café', stock_actual: new Decimal('10') } },
+  ],
+  pagos: [],
+};
+
+// Silencia el fallback de getTasaIva (impuestos desactivados → null)
+const setupIva = (activo = false, tasa = 19) => {
+  (configuracionRepository.findByClave as any).mockImplementation((clave: string) => {
+    if (clave === 'impuestos_activos') return Promise.resolve({ valor: activo ? 'true' : 'false' });
+    if (clave === 'porcentaje_iva')    return Promise.resolve({ valor: String(tasa) });
+    return Promise.resolve(null);
+  });
+  (configuracionRepository.parseValor as any).mockImplementation((r: any) => {
+    if (r?.valor === 'true')  return true;
+    if (r?.valor === 'false') return false;
+    return Number(r?.valor);
+  });
+};
+
+// ── crear ─────────────────────────────────────────────────────────────────────
+
+describe('ordenService.crear', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupIva(false);
+  });
+
+  it('llama verificarDisponibilidadParaDetalles antes de abrir la transacción', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+
+    // Tx mocks
+    mockTx.receta.findFirst.mockResolvedValue(null); // sin receta → descuenta stock
+    const mockProd = { id: 5, nombre: 'Café', stock_actual: new Decimal('10'), unidad_medida: 'unidad' };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.orden.create.mockResolvedValue({ ...mockOrdenBase, estado: { codigo: 'PENDIENTE' } });
+
+    await ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1,
+      detalles: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000, descuento: 0 }],
+    });
+
+    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledOnce();
+    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
+      { id_producto: 5, cantidad: 1 },
+    ]);
+  });
+
+  it('no crea la orden si verificarDisponibilidadParaDetalles lanza error', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockRejectedValue(
+      new BadRequestError('Stock insuficiente')
+    );
+
+    await expect(ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1,
+      detalles: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000, descuento: 0 }],
+    })).rejects.toThrow(BadRequestError);
+
+    expect(mockTx.orden.create).not.toHaveBeenCalled();
+  });
+
+  it('producto SIN receta: descuenta su stock en la transacción', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+
+    mockTx.receta.findFirst.mockResolvedValue(null); // sin receta
+    const mockProd = { id: 5, nombre: 'Café', stock_actual: new Decimal('10'), unidad_medida: 'unidad' };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.orden.create.mockResolvedValue({ ...mockOrdenBase, estado: { codigo: 'PENDIENTE' } });
+
+    await ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1,
+      detalles: [{ id_producto: 5, cantidad: 3, precio_unitario: 10000, descuento: 0 }],
+    });
+
+    // Debe actualizar el stock del producto
+    expect(mockTx.producto.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 5 } })
+    );
+    // Debe registrar movimiento de venta
+    expect(mockTx.movimiento.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ tipo_movimiento: 'venta' }) })
+    );
+  });
+
+  it('producto CON receta: NO descuenta su stock en la transacción (lo hará descontarIngredientesOrden)', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+
+    // Ambas llamadas a receta.findFirst (check en 1er bucle + skip en 2do bucle)
+    mockTx.receta.findFirst.mockResolvedValue({ id: 99 }); // siempre tiene receta
+    const mockProd = { id: 5, nombre: 'Bandeja', stock_actual: new Decimal('0'), unidad_medida: 'unidad' };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.orden.create.mockResolvedValue({ ...mockOrdenBase, estado: { codigo: 'PENDIENTE' } });
+
+    await ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1,
+      detalles: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000, descuento: 0 }],
+    });
+
+    // No debe descontar stock del producto (el descuento ocurre al entregar vía ingredientes)
+    expect(mockTx.producto.update).not.toHaveBeenCalled();
+    expect(mockTx.movimiento.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── actualizarEstado ──────────────────────────────────────────────────────────
+
+describe('ordenService.actualizarEstado', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupIva(false);
+  });
+
+  it('lanza BadRequestError si la transición de estado no está permitida', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue(null); // transición no existe
+
+    await expect(ordenService.actualizarEstado(1, 5)).rejects.toThrow(BadRequestError);
+  });
+
+  it('lanza NotFoundError si el estado destino no existe en BD', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue(null); // estado no encontrado
+
+    await expect(ordenService.actualizarEstado(1, 99)).rejects.toThrow(NotFoundError);
+  });
+
+  it('lanza BadRequestError al pasar a ENTREGADA sin proveer pagos', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA', nombre: 'Entregada' });
+    (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
+
+    await expect(ordenService.actualizarEstado(1, 4, [])).rejects.toThrow(BadRequestError);
+    await expect(ordenService.actualizarEstado(1, 4, undefined)).rejects.toThrow(BadRequestError);
+  });
+
+  it('lanza BadRequestError si el total pagado es menor al total de la orden', async () => {
+    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('25000') });
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
+    (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
+
+    await expect(
+      ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }])
+    ).rejects.toThrow(BadRequestError);
+  });
+
+  it('llama verificarStockParaOrden antes de abrir la transacción al pasar a ENTREGADA', async () => {
+    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('10000') });
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
+    (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
+    (recetaService.descontarIngredientesOrden as any).mockResolvedValue(undefined);
+
+    mockTx.pago.create.mockResolvedValue({});
+    mockTx.factura.findUnique.mockResolvedValue({ id: 1 });
+    mockTx.factura.update.mockResolvedValue({});
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
+
+    await ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }]);
+
+    expect(recetaService.verificarStockParaOrden).toHaveBeenCalledWith(1);
+    // Se verifica ANTES de la tx → si falla, no hay rollback innecesario
+    const verificarCallOrder = (recetaService.verificarStockParaOrden as any).mock.invocationCallOrder[0];
+    const txCallOrder = (prisma.$transaction as any).mock.invocationCallOrder[0];
+    expect(verificarCallOrder).toBeLessThan(txCallOrder);
+  });
+
+  it('NO llama verificarStockParaOrden para estados distintos a ENTREGADA', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
+    mockTx.factura.findUnique.mockResolvedValue(null);
+    (facturaService.generarDesdeOrden as any).mockResolvedValue({});
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
+
+    await ordenService.actualizarEstado(1, 3);
+
+    expect(recetaService.verificarStockParaOrden).not.toHaveBeenCalled();
+  });
+
+  it('genera factura automáticamente al pasar a EN_PREPARACION (si no existe)', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
+    mockTx.factura.findUnique.mockResolvedValue(null); // no existe factura
+    (facturaService.generarDesdeOrden as any).mockResolvedValue({});
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
+
+    await ordenService.actualizarEstado(1, 3);
+
+    expect(facturaService.generarDesdeOrden).toHaveBeenCalledWith(1, mockTx);
+  });
+
+  it('NO genera factura si ya existe al pasar a EN_PREPARACION', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
+    mockTx.factura.findUnique.mockResolvedValue({ id: 5 }); // ya existe
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
+
+    await ordenService.actualizarEstado(1, 3);
+
+    expect(facturaService.generarDesdeOrden).not.toHaveBeenCalled();
+  });
+
+  it('al pasar a ENTREGADA llama descontarIngredientesOrden dentro de la transacción', async () => {
+    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('10000') });
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
+    (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
+    (recetaService.descontarIngredientesOrden as any).mockResolvedValue(undefined);
+
+    mockTx.pago.create.mockResolvedValue({});
+    mockTx.factura.findUnique.mockResolvedValue({ id: 1 });
+    mockTx.factura.update.mockResolvedValue({});
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
+
+    await ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }]);
+
+    expect(recetaService.descontarIngredientesOrden).toHaveBeenCalledWith(1, mockTx);
+  });
+});
+
+// ── agregarDetalle ────────────────────────────────────────────────────────────
+
+describe('ordenService.agregarDetalle', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('llama verificarDisponibilidadParaDetalles antes de abrir la transacción', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+
+    mockTx.producto.findUnique.mockResolvedValue({ id: 7, nombre: 'Jugo', stock_actual: new Decimal('5'), unidad_medida: 'unidad' });
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.ordenDetalle.create.mockResolvedValue({ id: 20, id_producto: 7 });
+    mockTx.ordenDetalle.findMany.mockResolvedValue([]);
+    mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
+    mockTx.orden.update.mockResolvedValue({});
+
+    await ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 });
+
+    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
+      { id_producto: 7, cantidad: 2 },
+    ]);
+  });
+
+  it('no agrega el detalle si verificarDisponibilidadParaDetalles lanza error', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockRejectedValue(
+      new BadRequestError('Ingredientes insuficientes')
+    );
+
+    await expect(
+      ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 })
+    ).rejects.toThrow(BadRequestError);
+
+    expect(mockTx.ordenDetalle.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── actualizarDetalle ─────────────────────────────────────────────────────────
+
+describe('ordenService.actualizarDetalle', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('llama verificarDisponibilidadParaDetalles cuando la cantidad aumenta', async () => {
+    (prisma.ordenDetalle.findUnique as any).mockResolvedValue({
+      id: 10, id_producto: 5, cantidad: new Decimal(2),
+    });
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+
+    mockTx.ordenDetalle.findUnique.mockResolvedValue({
+      id: 10, id_producto: 5, cantidad: new Decimal(2),
+      precio_unitario: new Decimal(5000), descuento: new Decimal(0),
+      producto: { stock_actual: new Decimal(10) },
+    });
+    mockTx.ordenDetalle.update.mockResolvedValue({});
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.ordenDetalle.findMany.mockResolvedValue([]);
+    mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
+    mockTx.orden.update.mockResolvedValue({});
+
+    await ordenService.actualizarDetalle(10, { cantidad: 5 }); // 5 > 2 → verifica dif = 3
+
+    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
+      { id_producto: 5, cantidad: 3 }, // diferencia = 5 - 2 = 3
+    ]);
+  });
+
+  it('NO llama verificarDisponibilidadParaDetalles cuando la cantidad baja', async () => {
+    (prisma.ordenDetalle.findUnique as any).mockResolvedValue({
+      id: 10, id_producto: 5, cantidad: new Decimal(5),
+    });
+
+    mockTx.ordenDetalle.findUnique.mockResolvedValue({
+      id: 10, id_producto: 5, cantidad: new Decimal(5),
+      precio_unitario: new Decimal(5000), descuento: new Decimal(0),
+      id_orden: 1,
+      producto: { stock_actual: new Decimal(10) },
+    });
+    mockTx.ordenDetalle.update.mockResolvedValue({});
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.ordenDetalle.findMany.mockResolvedValue([]);
+    mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
+    mockTx.orden.update.mockResolvedValue({});
+
+    await ordenService.actualizarDetalle(10, { cantidad: 2 }); // 2 < 5 → no verifica
+
+    expect(recetaService.verificarDisponibilidadParaDetalles).not.toHaveBeenCalled();
+  });
+});
+
+// ── eliminar ──────────────────────────────────────────────────────────────────
+
+describe('ordenService.eliminar', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('devuelve stock del producto SIN receta al eliminar la orden', async () => {
+    const detalles = [{ id: 10, id_producto: 5, cantidad: new Decimal(3) }];
+    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, detalles });
+
+    mockTx.receta.findFirst.mockResolvedValue(null); // sin receta
+    const mockProd = { id: 5, stock_actual: new Decimal('7') };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.ordenDetalle.deleteMany.mockResolvedValue({});
+    mockTx.orden.delete.mockResolvedValue({});
+
+    await ordenService.eliminar(1);
+
+    // stock devuelto: 7 + 3 = 10
+    expect(mockTx.producto.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 5 } })
+    );
+  });
+
+  it('NO devuelve stock del producto CON receta al eliminar (nunca se descontó)', async () => {
+    const detalles = [{ id: 10, id_producto: 5, cantidad: new Decimal(2) }];
+    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, detalles });
+
+    mockTx.receta.findFirst.mockResolvedValue({ id: 99 }); // tiene receta
+    mockTx.ordenDetalle.deleteMany.mockResolvedValue({});
+    mockTx.orden.delete.mockResolvedValue({});
+
+    await ordenService.eliminar(1);
+
+    expect(mockTx.producto.update).not.toHaveBeenCalled();
+  });
+
+  it('lanza NotFoundError si la orden no existe', async () => {
+    (ordenRepository.findById as any).mockResolvedValue(null);
+
+    await expect(ordenService.eliminar(999)).rejects.toThrow(NotFoundError);
+    expect(mockTx.orden.delete).not.toHaveBeenCalled();
+  });
+});

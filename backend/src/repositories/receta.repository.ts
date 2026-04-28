@@ -1,0 +1,258 @@
+/**
+ * RecetaRepository
+ */
+
+import prisma from '../config/database';
+
+const ingredienteSelect = {
+  include: {
+    producto: {
+      select: { id: true, nombre: true, sku: true, precio_unitario: true,
+                unidad_medida: true, stock_actual: true, tipo_materia: true },
+    },
+  },
+  orderBy: { orden: 'asc' as const },
+};
+
+export const recetaRepository = {
+
+  findAll: (params: { skip: number; take: number; id_producto?: number; estado?: string }) =>
+    prisma.$transaction([
+      prisma.receta.findMany({
+        skip: params.skip, take: params.take,
+        where: {
+          ...(params.id_producto && { id_producto_final: params.id_producto }),
+          ...(params.estado      && { estado: params.estado as any }),
+        },
+        include: {
+          producto_final: {
+            select: { id: true, nombre: true, sku: true, precio_venta: true,
+                      precio_unitario: true, unidad_medida: true },
+          },
+          ingredientes: ingredienteSelect,
+          fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
+        },
+        orderBy: { fecha_creacion: 'desc' },
+      }),
+      prisma.receta.count(),
+    ]),
+
+  findById: (id: number) =>
+    prisma.receta.findUnique({
+      where: { id },
+      include: {
+        producto_final: true,
+        ingredientes: ingredienteSelect,
+        fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
+      },
+    }),
+
+  findByProductoFinal: (id_producto: number) =>
+    prisma.receta.findFirst({
+      where: { id_producto_final: id_producto, estado: 'activo' },
+      include: {
+        ingredientes: {
+          include: { producto: true },
+          orderBy: { orden: 'asc' },
+        },
+        fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
+      },
+    }),
+
+  create: (data: {
+    id_producto_final:              number;
+    id_restaurante:                 number;
+    nombre_receta:                  string;
+    descripcion?:                   string;
+    cantidad_producida:             number;
+    unidad_produccion:              string;
+    tiempo_preparacion?:            number;
+    instrucciones?:                 string;
+    instrucciones_almacenamiento?:  string;
+    notas?:                         string;
+    merma_esperada_porcentaje?:     number;
+    merma_maxima_porcentaje?:       number;
+    medio_refrigeracion?:           string;
+    ingredientes: {
+      id_producto:          number;
+      cantidad:             number;
+      unidad:               string;
+      es_opcional?:         boolean;
+      notas?:               string;
+      orden?:               number;
+      numero_fase?:         number;
+      tipo_formula?:        string;
+      factor_formula?:      number;
+      id_ingrediente_base?: number;
+      formula_descripcion?: string;
+    }[];
+    fases?: {
+      numero_fase:                number;
+      nombre:                     string;
+      descripcion:                string;
+      duracion_minutos?:          number;
+      merma_esperada_porcentaje?: number;
+    }[];
+  }) =>
+    prisma.receta.create({
+      data: {
+        id_producto_final:              data.id_producto_final,
+        id_restaurante:                 data.id_restaurante,
+        nombre_receta:                  data.nombre_receta,
+        descripcion:                    data.descripcion,
+        cantidad_producida:             data.cantidad_producida,
+        unidad_produccion:              data.unidad_produccion as any,
+        tiempo_preparacion:             data.tiempo_preparacion,
+        instrucciones:                  data.instrucciones,
+        instrucciones_almacenamiento:   data.instrucciones_almacenamiento,
+        notas:                          data.notas,
+        merma_esperada_porcentaje:      data.merma_esperada_porcentaje,
+        merma_maxima_porcentaje:        data.merma_maxima_porcentaje,
+        medio_refrigeracion:            data.medio_refrigeracion,
+        ingredientes: {
+          create: data.ingredientes.map((ing, idx) => ({
+            id_producto:          ing.id_producto,
+            cantidad:             ing.cantidad,
+            unidad:               ing.unidad as any,
+            es_opcional:          ing.es_opcional ?? false,
+            notas:                ing.notas,
+            orden:                ing.orden ?? idx,
+            numero_fase:          ing.numero_fase,
+            tipo_formula:         ing.tipo_formula as any,
+            factor_formula:       ing.factor_formula,
+            id_ingrediente_base:  ing.id_ingrediente_base,
+            formula_descripcion:  ing.formula_descripcion,
+          })),
+        },
+        ...(data.fases && data.fases.length > 0 ? {
+          fases: {
+            create: data.fases.map((f) => ({
+              numero_fase:                f.numero_fase,
+              nombre:                     f.nombre,
+              descripcion:                f.descripcion,
+              duracion_minutos:           f.duracion_minutos,
+              merma_esperada_porcentaje:  f.merma_esperada_porcentaje,
+            })),
+          },
+        } : {}),
+      },
+      include: {
+        producto_final: true,
+        ingredientes: ingredienteSelect,
+        fases: { orderBy: { numero_fase: 'asc' } },
+      },
+    }),
+
+  update: (id: number, data: Partial<{
+    nombre_receta:                  string;
+    descripcion:                    string;
+    cantidad_producida:             number;
+    unidad_produccion:              string;
+    tiempo_preparacion:             number;
+    instrucciones:                  string;
+    instrucciones_almacenamiento:   string;
+    notas:                          string;
+    merma_esperada_porcentaje:      number;
+    merma_maxima_porcentaje:        number;
+    estado:                         string;
+  }>) =>
+    prisma.receta.update({
+      where: { id }, data: data as any,
+      include: {
+        producto_final: true,
+        ingredientes: ingredienteSelect,
+        fases: { orderBy: { numero_fase: 'asc' } },
+      },
+    }),
+
+  // Reemplaza ingredientes completamente
+  reemplazarIngredientes: (id_receta: number, ingredientes: {
+    id_producto:          number;
+    cantidad:             number;
+    unidad:               string;
+    es_opcional?:         boolean;
+    notas?:               string;
+    orden?:               number;
+    numero_fase?:         number;
+    tipo_formula?:        string;
+    factor_formula?:      number;
+    id_ingrediente_base?: number;
+    formula_descripcion?: string;
+  }[]) =>
+    prisma.$transaction(async (tx) => {
+      await tx.recetaIngrediente.deleteMany({ where: { id_receta } });
+      await tx.recetaIngrediente.createMany({
+        data: ingredientes.map((ing, idx) => ({
+          id_receta,
+          id_producto:          ing.id_producto,
+          cantidad:             ing.cantidad,
+          unidad:               ing.unidad as any,
+          es_opcional:          ing.es_opcional ?? false,
+          notas:                ing.notas,
+          orden:                ing.orden ?? idx,
+          numero_fase:          ing.numero_fase,
+          tipo_formula:         ing.tipo_formula as any,
+          factor_formula:       ing.factor_formula,
+          id_ingrediente_base:  ing.id_ingrediente_base,
+          formula_descripcion:  ing.formula_descripcion,
+        })),
+      });
+      return tx.receta.findUnique({
+        where: { id: id_receta },
+        include: {
+          producto_final: true,
+          ingredientes: ingredienteSelect,
+          fases: { orderBy: { numero_fase: 'asc' } },
+        },
+      });
+    }),
+
+  // ─── Fases ───────────────────────────────────────────────────────────────────
+
+  findFasesByReceta: (id_receta: number) =>
+    prisma.recetaFase.findMany({
+      where:   { id_receta, estado: 'activo' },
+      orderBy: { numero_fase: 'asc' },
+    }),
+
+  createFase: (data: {
+    id_receta:                  number;
+    numero_fase:                number;
+    nombre:                     string;
+    descripcion:                string;
+    duracion_minutos?:          number;
+    merma_esperada_porcentaje?: number;
+  }) => prisma.recetaFase.create({ data }),
+
+  updateFase: (id: number, data: Partial<{
+    numero_fase:                number;
+    nombre:                     string;
+    descripcion:                string;
+    duracion_minutos:           number;
+    merma_esperada_porcentaje:  number;
+    estado:           string;
+  }>) => prisma.recetaFase.update({ where: { id }, data: data as any }),
+
+  deleteFase: (id: number) =>
+    prisma.recetaFase.update({ where: { id }, data: { estado: 'eliminado' as any } }),
+
+  // ─── Disponibilidad ──────────────────────────────────────────────────────────
+
+  findRecetaConStock: (id_receta: number) =>
+    prisma.receta.findUnique({
+      where: { id: id_receta },
+      include: {
+        producto_final: {
+          select: { id: true, nombre: true, sku: true, unidad_medida: true },
+        },
+        ingredientes: {
+          include: {
+            producto: {
+              select: { id: true, nombre: true, sku: true, stock_actual: true, unidad_medida: true },
+            },
+          },
+          orderBy: { orden: 'asc' },
+        },
+      },
+    }),
+};

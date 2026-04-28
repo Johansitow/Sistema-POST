@@ -1,0 +1,1 @@
+{"version":3,"file":"inventario.controller.d.ts","sourceRoot":"","sources":["../../src/controller/inventario.controller.ts"],"names":[],"mappings":"AAAA;;GAEG;AAEH,OAAO,EAAE,OAAO,EAAE,QAAQ,EAAE,MAAM,SAAS,CAAC;AAQ5C,eAAO,MAAM,cAAc,qFAUzB,CAAC;AAEH,eAAO,MAAM,mBAAmB,qFAI9B,CAAC;AAEH,eAAO,MAAM,eAAe,qFAI1B,CAAC;AAEH,eAAO,MAAM,mBAAmB,qFAI9B,CAAC;AAEH,eAAO,MAAM,kBAAkB,qFAG7B,CAAC"}

@@ -1,0 +1,419 @@
+/**
+ * RecetaService
+ */
+
+import prisma from '../config/database';
+import { recetaRepository } from '../repositories/receta.repository';
+import { alertaService }    from './alerta.service';
+import { NotFoundError, BadRequestError, ConflictError } from '../exceptions/HttpErrors';
+import { getPaginationParams, getSkip, buildPaginatedResult } from '../lib/pagination';
+import { toDecimal } from '../lib/decimal';
+
+const MARGEN_DEFAULT = 0.40;
+
+// ── Conversión de unidades ──────────────────────────────────────────────────
+/** Convierte una cantidad a la unidad base del grupo (gramo o mililitro) */
+function toBase(qty: number, unit: string): { value: number; base: string } {
+  switch (unit.toLowerCase()) {
+    case 'kilogramo': return { value: qty * 1000, base: 'gramo' };
+    case 'gramo':     return { value: qty,        base: 'gramo' };
+    case 'litro':     return { value: qty * 1000, base: 'mililitro' };
+    case 'mililitro': return { value: qty,        base: 'mililitro' };
+    default:          return { value: qty,        base: unit.toLowerCase() };
+  }
+}
+
+/** ¿El stock disponible cubre la cantidad necesaria teniendo en cuenta las unidades? */
+function tieneStock(stockActual: number, stockUnit: string, cantNecesaria: number, needUnit: string): boolean {
+  const stock  = toBase(stockActual, stockUnit);
+  const needed = toBase(cantNecesaria, needUnit);
+  if (stock.base === needed.base) return stock.value >= needed.value;
+  return stockActual >= cantNecesaria; // bases distintas: comparación directa como fallback
+}
+
+/** Convierte qty de fromUnit a toUnit (dentro del mismo grupo de medida) */
+function convertUnits(qty: number, fromUnit: string, toUnit: string): number {
+  const from = toBase(qty, fromUnit);
+  const one  = toBase(1, toUnit);
+  if (from.base !== one.base || one.value === 0) return qty; // no convertible → sin cambio
+  return from.value / one.value;
+}
+// ───────────────────────────────────────────────────────────────────────────
+
+export const recetaService = {
+
+  async listar(params: { page?: unknown; limit?: unknown; id_producto?: number; estado?: string }) {
+    const p = getPaginationParams(params.page, params.limit);
+    const [data, total] = await recetaRepository.findAll({
+      skip:        getSkip(p),
+      take:        p.limit,
+      id_producto: params.id_producto,
+      estado:      params.estado,
+    });
+    return buildPaginatedResult(
+      data.map(r => ({ ...r, rentabilidad: this._calcularRentabilidad(r as any) })),
+      total, p
+    );
+  },
+
+  async obtenerPorId(id: number) {
+    const receta = await recetaRepository.findById(id);
+    if (!receta) throw new NotFoundError('Receta');
+    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+  },
+
+  async obtenerPorProducto(id_producto: number) {
+    const receta = await recetaRepository.findByProductoFinal(id_producto);
+    if (!receta) throw new NotFoundError('Receta para este producto');
+    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+  },
+
+  async crear(data: {
+    id_producto_final:              number;
+    id_restaurante:                 number;
+    nombre_receta:                  string;
+    descripcion?:                   string;
+    cantidad_producida:             number;
+    unidad_produccion:              string;
+    tiempo_preparacion?:            number;
+    instrucciones?:                 string;
+    instrucciones_almacenamiento?:  string;
+    notas?:                         string;
+    merma_esperada_porcentaje?:     number;
+    merma_maxima_porcentaje?:       number;
+    medio_refrigeracion?:           string;
+    ingredientes: {
+      id_producto: number; cantidad: number; unidad: string;
+      es_opcional?: boolean; notas?: string; orden?: number; numero_fase?: number;
+      tipo_formula?: string; factor_formula?: number;
+      id_ingrediente_base?: number; formula_descripcion?: string;
+    }[];
+    fases?: {
+      numero_fase: number; nombre: string; descripcion: string;
+      duracion_minutos?: number; merma_esperada_porcentaje?: number;
+    }[];
+  }) {
+    const producto = await prisma.producto.findUnique({ where: { id: data.id_producto_final } });
+    if (!producto) throw new NotFoundError('Producto final');
+
+    const existente = await recetaRepository.findByProductoFinal(data.id_producto_final);
+    if (existente) throw new ConflictError('Este producto ya tiene una receta activa');
+
+    await this._verificarIngredientes(data.ingredientes);
+
+    const receta = await recetaRepository.create(data);
+    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+  },
+
+  async actualizar(id: number, data: any) {
+    await this.obtenerPorId(id);
+    return recetaRepository.update(id, data);
+  },
+
+  async actualizarIngredientes(id: number, ingredientes: any[]) {
+    await this.obtenerPorId(id);
+    await this._verificarIngredientes(ingredientes);
+    const receta = await recetaRepository.reemplazarIngredientes(id, ingredientes);
+    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+  },
+
+  // ─── Fases ───────────────────────────────────────────────────────────────────
+
+  async listarFases(id_receta: number) {
+    await this.obtenerPorId(id_receta);
+    return recetaRepository.findFasesByReceta(id_receta);
+  },
+
+  async crearFase(id_receta: number, data: {
+    numero_fase: number; nombre: string; descripcion: string;
+    duracion_minutos?: number; merma_esperada_porcentaje?: number;
+  }) {
+    await this.obtenerPorId(id_receta);
+    const faseExistente = await prisma.recetaFase.findUnique({
+      where: { id_receta_numero_fase: { id_receta, numero_fase: data.numero_fase } },
+    });
+    if (faseExistente && faseExistente.estado === 'activo') {
+      throw new ConflictError(`Ya existe una fase número ${data.numero_fase} para esta receta`);
+    }
+    return recetaRepository.createFase({ id_receta, ...data });
+  },
+
+  async actualizarFase(id: number, data: Partial<{
+    numero_fase: number; nombre: string; descripcion: string;
+    duracion_minutos: number; merma_esperada_porcentaje: number;
+  }>) {
+    const fase = await prisma.recetaFase.findUnique({ where: { id } });
+    if (!fase || fase.estado === 'eliminado') throw new NotFoundError('Fase de receta');
+    return recetaRepository.updateFase(id, data);
+  },
+
+  async eliminarFase(id: number) {
+    const fase = await prisma.recetaFase.findUnique({ where: { id } });
+    if (!fase || fase.estado === 'eliminado') throw new NotFoundError('Fase de receta');
+    return recetaRepository.deleteFase(id);
+  },
+
+  // ─── Disponibilidad ──────────────────────────────────────────────────────────
+
+  async calcularDisponibilidad(id_receta: number) {
+    const receta = await recetaRepository.findRecetaConStock(id_receta);
+    if (!receta) throw new NotFoundError('Receta');
+
+    const cantidadProducida = Number(receta.cantidad_producida);
+    let disponibilidadMinima = Infinity;
+    let ingredienteLimitante: any = null;
+
+    const detalleIngredientes = receta.ingredientes.map(ing => {
+      const stockActual    = Number(ing.producto.stock_actual);
+      const cantNecesaria  = Number(ing.cantidad);
+      // Convertir cantNecesaria (unidad receta) a la unidad del stock del producto
+      const cantEnStockUnit = convertUnits(cantNecesaria, ing.unidad, ing.producto.unidad_medida);
+      const unidadesPosibl = cantEnStockUnit > 0
+        ? Math.floor((stockActual / cantEnStockUnit) * cantidadProducida)
+        : Infinity;
+
+      if (!ing.es_opcional && unidadesPosibl < disponibilidadMinima) {
+        disponibilidadMinima  = unidadesPosibl;
+        ingredienteLimitante  = ing.producto;
+      }
+
+      return {
+        id_producto:       ing.id_producto,
+        nombre:            ing.producto.nombre,
+        cantidad_por_lote: cantNecesaria,
+        stock_actual:      stockActual,
+        unidad:            ing.unidad,
+        unidades_posibles: unidadesPosibl === Infinity ? 9999 : unidadesPosibl,
+        es_opcional:       ing.es_opcional,
+        suficiente:        unidadesPosibl > 0,
+      };
+    });
+
+    const disponibilidad = disponibilidadMinima === Infinity ? 0 : disponibilidadMinima;
+
+    return {
+      id_receta,
+      nombre_receta:      receta.nombre_receta,
+      producto_final:     receta.producto_final,
+      disponibilidad:     disponibilidad,
+      unidad_produccion:  receta.unidad_produccion,
+      ingrediente_limitante: ingredienteLimitante,
+      detalle_ingredientes:  detalleIngredientes,
+    };
+  },
+
+  // ─── Rentabilidad ────────────────────────────────────────────────────────────
+
+  _calcularRentabilidad(receta: {
+    ingredientes: { cantidad: number; producto: { precio_unitario: number } }[];
+    merma_esperada_porcentaje?: number | null;
+    cantidad_producida: number;
+    producto_final: { precio_venta?: number | null; precio_unitario: number };
+  }) {
+    const costoIngredientes = receta.ingredientes.reduce((sum, ing) => {
+      return sum + Number(ing.cantidad) * Number(ing.producto.precio_unitario);
+    }, 0);
+
+    const merma     = Number(receta.merma_esperada_porcentaje ?? 0) / 100;
+    const costoCon  = merma > 0 ? costoIngredientes / (1 - merma) : costoIngredientes;
+    const costoUnit = costoCon / Number(receta.cantidad_producida);
+    const precioSugeridoMinimo = Math.ceil(costoUnit / (1 - MARGEN_DEFAULT));
+
+    const precioActual = Number(receta.producto_final.precio_venta ?? receta.producto_final.precio_unitario);
+    const margenActual = precioActual > 0
+      ? ((precioActual - costoUnit) / precioActual) * 100
+      : 0;
+
+    return {
+      costo_ingredientes:       Math.round(costoIngredientes),
+      costo_con_merma:          Math.round(costoCon),
+      costo_unitario:           Math.round(costoUnit),
+      precio_sugerido_minimo:   precioSugeridoMinimo,
+      precio_actual:            Math.round(precioActual),
+      margen_actual_porcentaje: Math.round(margenActual * 100) / 100,
+      es_rentable:              margenActual >= MARGEN_DEFAULT * 100,
+      diferencia_precio:        Math.round(precioActual - precioSugeridoMinimo),
+      alerta_rentabilidad:      precioActual < precioSugeridoMinimo
+        ? `El precio actual ($${precioActual.toLocaleString()}) está $${Math.abs(precioActual - precioSugeridoMinimo).toLocaleString()} por debajo del mínimo rentable ($${precioSugeridoMinimo.toLocaleString()})`
+        : null,
+    };
+  },
+
+  /**
+   * Verifica disponibilidad de ingredientes para una lista de productos+cantidades
+   * ANTES de crear la orden (no requiere que la orden exista).
+   */
+  async verificarDisponibilidadParaDetalles(
+    detalles: { id_producto: number; cantidad: number }[]
+  ) {
+    const faltantes: {
+      producto: string; ingrediente: string;
+      cantidad_necesaria: number; stock_actual: number; unidad: string;
+    }[] = [];
+
+    for (const det of detalles) {
+      const receta = await recetaRepository.findByProductoFinal(det.id_producto);
+      if (!receta) continue; // Sin receta: el stock del producto ya lo valida crear()
+
+      for (const ing of receta.ingredientes) {
+        if (ing.es_opcional) continue;
+        const cantNecesaria = Number(ing.cantidad) * det.cantidad;
+        const stockActual   = Number(ing.producto.stock_actual);
+        if (!tieneStock(stockActual, ing.producto.unidad_medida, cantNecesaria, ing.unidad)) {
+          const prodFinal = await prisma.producto.findUnique({ where: { id: det.id_producto }, select: { nombre: true } });
+          faltantes.push({
+            producto:           prodFinal?.nombre ?? `Producto ${det.id_producto}`,
+            ingrediente:        ing.producto.nombre,
+            cantidad_necesaria: cantNecesaria,
+            stock_actual:       stockActual,
+            unidad:             ing.unidad,
+          });
+        }
+      }
+    }
+
+    if (faltantes.length > 0) {
+      throw new BadRequestError(
+        `Materias primas insuficientes para preparar ${faltantes.length} ingrediente(s).`,
+        // @ts-ignore
+        { ingredientes_faltantes: faltantes }
+      );
+    }
+    return { ok: true };
+  },
+
+  async verificarStockParaOrden(id_orden: number) {
+    const orden = await prisma.orden.findUnique({
+      where: { id: id_orden },
+      include: { detalles: { include: { producto: true } } },
+    });
+    if (!orden) throw new NotFoundError('Orden');
+
+    const faltantes: {
+      producto: string; ingrediente: string;
+      cantidad_necesaria: number; stock_actual: number; unidad: string;
+    }[] = [];
+
+    for (const detalle of orden.detalles) {
+      const receta = await recetaRepository.findByProductoFinal(detalle.id_producto);
+
+      if (!receta) {
+        if (Number(detalle.producto.stock_actual) < Number(detalle.cantidad)) {
+          faltantes.push({
+            producto:           detalle.producto.nombre,
+            ingrediente:        detalle.producto.nombre,
+            cantidad_necesaria: Number(detalle.cantidad),
+            stock_actual:       Number(detalle.producto.stock_actual),
+            unidad:             detalle.producto.unidad_medida,
+          });
+        }
+        continue;
+      }
+
+      const cantidadPlatos = Number(detalle.cantidad);
+      for (const ing of receta.ingredientes) {
+        if (ing.es_opcional) continue;
+        const cantidadNecesaria = Number(ing.cantidad) * cantidadPlatos;
+        const stockActual       = Number(ing.producto.stock_actual);
+        if (!tieneStock(stockActual, ing.producto.unidad_medida, cantidadNecesaria, ing.unidad)) {
+          faltantes.push({
+            producto:           detalle.producto.nombre,
+            ingrediente:        ing.producto.nombre,
+            cantidad_necesaria: cantidadNecesaria,
+            stock_actual:       stockActual,
+            unidad:             ing.unidad,
+          });
+        }
+      }
+    }
+
+    if (faltantes.length > 0) {
+      try { await alertaService.sincronizar(); } catch { /* no bloquear */ }
+      throw new BadRequestError(
+        `Stock insuficiente para completar la orden. Faltan ${faltantes.length} ingrediente(s).`,
+        // @ts-ignore
+        { ingredientes_faltantes: faltantes }
+      );
+    }
+
+    return { ok: true };
+  },
+
+  async descontarIngredientesOrden(id_orden: number, tx: any) {
+    const orden = await tx.orden.findUnique({
+      where: { id: id_orden },
+      include: { detalles: { include: { producto: true } } },
+    });
+    if (!orden) return;
+
+    for (const detalle of orden.detalles) {
+      // Usar tx para que la lectura de receta sea parte de la misma transacción
+      const receta = await tx.receta.findFirst({
+        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        include: {
+          ingredientes: {
+            include: { producto: true },
+            orderBy: { orden: 'asc' },
+          },
+        },
+      });
+      if (!receta) continue;
+
+      const cantidadPlatos = Number(detalle.cantidad);
+
+      for (const ing of receta.ingredientes) {
+        if (ing.es_opcional) continue;
+
+        const cantidadEnReceta = Number(ing.cantidad) * cantidadPlatos;
+        const producto = await tx.producto.findUnique({ where: { id: ing.id_producto } });
+        if (!producto) continue;
+
+        // Convertir la cantidad de la receta a la unidad en que está el stock del producto
+        const cantidadDescontar = convertUnits(cantidadEnReceta, ing.unidad, producto.unidad_medida);
+        const stockNuevo = Math.max(0, Number(producto.stock_actual) - cantidadDescontar);
+
+        await tx.producto.update({
+          where: { id: ing.id_producto },
+          data:  { stock_actual: toDecimal(stockNuevo) },
+        });
+
+        await tx.movimiento.create({
+          data: {
+            id_producto:     ing.id_producto,
+            tipo_movimiento: 'salida',
+            cantidad:        toDecimal(cantidadDescontar),
+            stock_anterior:  toDecimal(Number(producto.stock_actual)),
+            stock_nuevo:     toDecimal(stockNuevo),
+            motivo:          `Ingrediente receta "${receta.nombre_receta}" - Orden ${orden.numero_orden}`,
+            id_orden:        id_orden,
+          },
+        });
+      }
+    }
+
+    try {
+      await alertaService.sincronizar();
+    } catch { /* no bloquear el flujo principal */ }
+  },
+
+  async _verificarIngredientes(ingredientes: { id_producto: number }[]) {
+    const ids = [...new Set(ingredientes.map(i => i.id_producto))];
+    const existentes = await prisma.producto.findMany({
+      where: { id: { in: ids } }, select: { id: true, nombre: true, tipo_materia: true },
+    });
+
+    const encontrados = new Set(existentes.map(p => p.id));
+    const faltantes   = ids.filter(id => !encontrados.has(id));
+    if (faltantes.length > 0)
+      throw new BadRequestError(`Los productos con ID [${faltantes.join(', ')}] no existen`);
+
+    const procesados = existentes.filter(p => p.tipo_materia === 'procesada');
+    return {
+      advertencias_ingredientes_procesados: procesados.map(p => ({
+        id:     p.id,
+        nombre: p.nombre,
+        aviso:  `'${p.nombre}' es un producto procesado. Si tiene stock insuficiente, se requerirá producirlo primero.`,
+      })),
+    };
+  },
+};

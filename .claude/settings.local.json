@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install swagger-ui-express swagger-jsdoc --save)",
+      "Bash(npm install @types/swagger-ui-express @types/swagger-jsdoc --save-dev)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npx prisma generate)",
+      "Bash(npx prisma migrate dev --name add_cliente_to_orden)",
+      "Bash(npm install socket.io)",
+      "Bash(npm install --save-dev @types/socket.io)",
+      "Bash(node -e \"require\\(''socket.io''\\); console.log\\(''socket.io ok''\\)\")",
+      "Bash(npm install socket.io-client)",
+      "Bash(npm install ioredis)",
+      "Bash(npm install node-cron)",
+      "Bash(npm install --save-dev @types/node-cron)",
+      "Bash(npm install --save-dev vitest @vitest/coverage-v8)",
+      "Bash(npx vitest run)",
+      "Bash(python -c \":*)",
+      "Bash(pip install pdfplumber --quiet)",
+      "Bash(npm run seed:vylonia)",
+      "Bash(npx prisma:*)",
+      "Bash(node -e \":*)",
+      "Bash(node -e \"const { PrismaClient } = require\\(''@prisma/client''\\); const p = new PrismaClient\\(\\); p.producto.findMany\\({ where: { nombre: { contains: ''Stromboli'' } }, select: { sku: true, nombre: true }, orderBy: { sku: ''asc'' } }\\).then\\(rows => { rows.forEach\\(r => console.log\\(r.sku, r.nombre\\)\\); p.disconnect\\(\\); }\\);\")",
+      "Bash(del \"C:\\\\Users\\\\jnosp\\\\pos-restaurante\\\\fronted\\\\src\\\\pages\\\\Carta.tsx\")",
+      "Bash(xargs grep:*)"
+    ]
+  }
+}

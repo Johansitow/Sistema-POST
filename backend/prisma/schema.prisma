@@ -1,0 +1,1474 @@
+// ============================================================================
+// SCHEMA PRISMA - SISTEMA POS COCINA OCULTA
+// Versión simplificada con schema único
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// MÓDULO: ADMINISTRACIÓN
+// ============================================================================
+
+model Rol {
+  id                 Int           @id @default(autoincrement())
+  nombre             String        @unique @db.VarChar(100)
+  descripcion        String?       @db.Text
+  es_super_admin     Boolean       @default(false)
+  es_sistema         Boolean       @default(false)
+  color              String?       @db.VarChar(20)
+  estado             EstadoGeneral @default(activo)
+  fecha_creacion     DateTime      @default(now())
+  fecha_modificacion DateTime      @updatedAt
+
+  usuarios Usuario[]
+  permisos RolPermiso[]
+
+  @@map("roles")
+}
+
+model Permiso {
+  id             Int      @id @default(autoincrement())
+  nombre         String   @unique @db.VarChar(100)
+  codigo         String   @unique @db.VarChar(100)
+  modulo         String   @db.VarChar(50)
+  descripcion    String?  @db.Text
+  es_sistema     Boolean  @default(false)
+  fecha_creacion DateTime @default(now())
+
+  roles RolPermiso[]
+
+  @@map("permisos")
+}
+
+model RolPermiso {
+  id               Int      @id @default(autoincrement())
+  id_rol           Int
+  id_permiso       Int
+  fecha_asignacion DateTime @default(now())
+
+  rol     Rol     @relation(fields: [id_rol], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [id_permiso], references: [id], onDelete: Cascade)
+
+  @@unique([id_rol, id_permiso])
+  @@map("rol_permisos")
+}
+
+// ── GrupoNegocio — tenant raíz del sistema SaaS ──────────────────────────────
+// Cada GrupoNegocio es un cliente SaaS independiente.
+// Puede tener uno o varios Restaurante bajo él.
+// Multi-DB ready: db_schema / db_connection_url para futura separación física.
+
+model GrupoNegocio {
+  id                    Int      @id @default(autoincrement())
+  uuid                  String   @unique @default(uuid()) @db.Uuid
+  nombre                String   @db.VarChar(200)
+  nit                   String?  @unique @db.VarChar(50)
+  logo_url              String?  @db.VarChar(500)
+
+  // Plan SaaS — controla límites y funcionalidades
+  plan                  PlanSaaS @default(starter)
+  plan_max_restaurantes Int      @default(3)
+
+  // Multi-DB readiness — para futura separación física de datos
+  db_schema             String?  @db.VarChar(100) // schema PostgreSQL del grupo
+  db_connection_url     String?  @db.Text         // cifrada — para multi-DB futuro
+
+  activo                Boolean  @default(true)
+  fecha_creacion        DateTime @default(now())
+  fecha_modificacion    DateTime @updatedAt
+
+  restaurantes          Restaurante[]
+  usuarios              UsuarioGrupo[]
+  ordenes_grupo         OrdenGrupo[]
+  ordenes               Orden[]              // relación directa para nueva arquitectura
+  categorias            Categoria[]
+  productos             Producto[]
+  proveedores           Proveedor[]
+  clientes              Cliente[]
+  plantillas            PlantillaImpresion[]
+  auditorias            Auditoria[]          @relation("AuditoriaGrupo")
+
+  @@map("grupo_negocio")
+}
+
+// ── UsuarioGrupo — relación usuario ↔ grupo con rol ──────────────────────────
+model UsuarioGrupo {
+  id               Int      @id @default(autoincrement())
+  id_usuario       Int
+  id_grupo         Int
+  rol_en_grupo     RolGrupo @default(operador)
+  es_activo        Boolean  @default(true)
+  fecha_asignacion DateTime @default(now())
+
+  usuario          Usuario      @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+  grupo            GrupoNegocio @relation(fields: [id_grupo],   references: [id], onDelete: Cascade)
+
+  @@unique([id_usuario, id_grupo])
+  @@index([id_usuario])
+  @@index([id_grupo])
+  @@map("usuario_grupo")
+}
+
+// ── Restaurante (multi-tenant foundation) ────────────────────────────────────
+
+model Restaurante {
+  id                 Int        @id @default(autoincrement())
+  uuid               String     @unique @default(uuid()) @db.Uuid
+
+  // ── Grupo al que pertenece (tenant raíz) ──────────────────────────────────
+  id_grupo           Int
+  grupo              GrupoNegocio @relation(fields: [id_grupo], references: [id])
+
+  // ── Tipo de aislamiento ───────────────────────────────────────────────────
+  // compartido: comparte usuarios y catálogo con otros del mismo grupo
+  // aislado:    se comporta como un tenant completamente independiente
+  tipo_tenant        TipoTenant @default(compartido)
+
+  nombre             String     @db.VarChar(200)
+  nit                String?    @db.VarChar(50)
+  descripcion        String?    @db.Text
+  logo_url           String?    @db.VarChar(500)
+  direccion          String?    @db.VarChar(300)
+  ciudad             String?    @db.VarChar(100)
+  telefono           String?    @db.VarChar(20)
+  email              String?    @db.VarChar(150)
+  zona_horaria       String     @default("America/Bogota") @db.VarChar(50)
+  moneda             String     @default("COP") @db.VarChar(10)
+  activo             Boolean    @default(true)
+  es_default         Boolean    @default(false)
+  config             Json?      // configuración específica del restaurante
+  fecha_creacion     DateTime   @default(now())
+  fecha_modificacion DateTime   @updatedAt
+
+  ordenes          Orden[]
+  orden_sedes      OrdenSede[]                // sedes de órdenes multi-restaurante
+  cierres          CierreCaja[]
+  lotes            Lote[]
+  listasCompras    ListaCompras[]
+  usuarios         UsuarioRestaurante[]
+  movimientos      Movimiento[]
+  recetas          Receta[]
+  stocks           ProductoStock[]
+  turnos           TurnoCaja[]
+  alertas          Alerta[]
+  plantillas       PlantillaImpresion[]
+  configuraciones  ConfiguracionRestaurante[]
+  auditorias       Auditoria[]                @relation("AuditoriaRestaurante")
+
+  @@index([id_grupo])
+  @@map("restaurantes")
+}
+
+model Usuario {
+  id                 Int           @id @default(autoincrement())
+  uuid               String        @unique @default(uuid()) @db.Uuid
+  nombre_completo    String        @db.VarChar(200)
+  email              String        @unique @db.VarChar(150)
+  telefono           String?       @db.VarChar(20)
+  usuario            String        @unique @db.VarChar(50)
+  password_hash      String        @db.VarChar(255)
+  id_rol             Int
+  estado             EstadoGeneral @default(activo)
+  ultimo_acceso      DateTime?
+  fecha_creacion     DateTime      @default(now())
+  fecha_modificacion DateTime      @updatedAt
+  creado_por         Int?
+
+  // ── Datos personales del empleado ──────────────────────────────────────────
+  documento_identidad           String?   @db.VarChar(20)
+  fecha_nacimiento              DateTime?
+  direccion                     String?   @db.VarChar(300)
+
+  // ── Datos laborales ────────────────────────────────────────────────────────
+  cargo                         String?   @db.VarChar(100)
+  fecha_ingreso                 DateTime?
+  turno                         String?   @db.VarChar(20)   // mañana | tarde | noche | mixto
+  tipo_contrato                 String?   @db.VarChar(20)   // fijo | parcial | temporal
+
+  // ── Contacto de emergencia ─────────────────────────────────────────────────
+  contacto_emergencia_nombre    String?   @db.VarChar(200)
+  contacto_emergencia_telefono  String?   @db.VarChar(20)
+
+  // ── Notas internas ─────────────────────────────────────────────────────────
+  notas                         String?   @db.Text
+
+  // ── SUPER ADMIN ÚNICO ──────────────────────────────────────────────────────
+  // Este flag identifica al único super administrador del sistema.
+  // No puede ser modificado por ningún usuario (ni siquiera admins).
+  // La unicidad se garantiza con un índice parcial en la migración SQL:
+  //   CREATE UNIQUE INDEX "idx_usuario_super_admin_unico"
+  //   ON "usuarios" ("es_super_admin") WHERE "es_super_admin" = true;
+  es_super_admin                Boolean   @default(false)
+
+  rol              Rol       @relation(fields: [id_rol], references: [id])
+  creador          Usuario?  @relation("UsuarioCreador", fields: [creado_por], references: [id])
+  usuarios_creados Usuario[] @relation("UsuarioCreador")
+
+  auditorias       Auditoria[]
+  ordenes          Orden[]
+  cierres_caja     CierreCaja[]
+  lotes_producidos Lote[]      @relation("LoteResponsable")
+  listas_compras   ListaCompras[]
+  nomina           NominaEmpleado?
+  restaurantes     UsuarioRestaurante[]
+  grupos           UsuarioGrupo[]
+  ordenes_grupo    OrdenGrupo[]
+
+  @@map("usuarios")
+}
+
+// ── UsuarioRestaurante — Acceso multi-restaurante ─────────────────────────────
+// Cada fila representa que un usuario tiene acceso a un restaurante.
+// Un superadmin accede a todos sin necesitar filas aquí.
+
+model UsuarioRestaurante {
+  id               Int      @id @default(autoincrement())
+  id_usuario       Int
+  id_restaurante   Int
+  es_activo        Boolean  @default(true)
+  fecha_asignacion DateTime @default(now())
+
+  usuario    Usuario     @relation(fields: [id_usuario],     references: [id], onDelete: Cascade)
+  restaurante Restaurante @relation(fields: [id_restaurante], references: [id], onDelete: Cascade)
+
+  @@unique([id_usuario, id_restaurante])
+  @@index([id_usuario])
+  @@index([id_restaurante])
+  @@map("usuario_restaurantes")
+}
+
+model NominaEmpleado {
+  id                 Int      @id @default(autoincrement())
+  id_usuario         Int      @unique
+  salario_base       Decimal  @default(0) @db.Decimal(12, 2)
+  tipo_pago          String   @default("mensual") @db.VarChar(20)  // mensual | quincenal | semanal
+  banco              String?  @db.VarChar(100)
+  tipo_cuenta        String?  @db.VarChar(20)                      // ahorros | corriente
+  numero_cuenta      String?  @db.VarChar(30)
+  observaciones      String?  @db.Text
+  fecha_modificacion DateTime @updatedAt
+
+  usuario Usuario @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+
+  @@map("nomina_empleados")
+}
+
+model Auditoria {
+  id                   BigInt   @id @default(autoincrement())
+  id_usuario           Int?
+  accion               String   @db.VarChar(100)
+  modulo               String   @db.VarChar(50)
+  tabla_afectada       String?  @db.VarChar(100)
+  id_registro_afectado Int?
+  datos_anteriores     Json?
+  datos_nuevos         Json?
+  ip_address           String?  @db.VarChar(50)
+  user_agent           String?  @db.Text
+  fecha_hora           DateTime @default(now())
+
+  // Contexto tenant para filtrar auditorías por sede o grupo
+  id_restaurante       Int?
+  id_grupo             Int?
+
+  usuario              Usuario?      @relation(fields: [id_usuario],      references: [id])
+  restaurante          Restaurante?  @relation("AuditoriaRestaurante", fields: [id_restaurante], references: [id])
+  grupo                GrupoNegocio? @relation("AuditoriaGrupo",       fields: [id_grupo],       references: [id])
+
+  @@index([id_usuario])
+  @@index([fecha_hora])
+  @@index([modulo])
+  @@index([id_restaurante])
+  @@index([id_grupo])
+  @@map("auditoria")
+}
+
+model Configuracion {
+  id                 Int      @id @default(autoincrement())
+  clave              String   @unique @db.VarChar(100)
+  valor              String   @db.Text
+  tipo_dato          TipoDato @default(string)
+  descripcion        String?  @db.Text
+  categoria          String   @db.VarChar(50)
+  es_editable        Boolean  @default(true)
+  fecha_creacion     DateTime @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  @@map("configuracion")
+}
+
+// ============================================================================
+// MÓDULO: INVENTARIO
+// ============================================================================
+
+model Categoria {
+  id              Int           @id @default(autoincrement())
+  nombre          String        @db.VarChar(100)
+  descripcion     String?       @db.Text
+  categoria_padre Int?
+  imagen_url      String?       @db.VarChar(255)
+  estado          EstadoGeneral @default(activo)
+  orden           Int           @default(0)
+  icono           String?       @db.VarChar(50)
+  color           String?       @db.VarChar(20)
+  fecha_creacion  DateTime      @default(now())
+
+  // Scoping por grupo: null = categoría global del sistema (visible a todos)
+  id_grupo        Int?
+
+  padre         Categoria?   @relation("CategoriaPadre", fields: [categoria_padre], references: [id])
+  subcategorias Categoria[]  @relation("CategoriaPadre")
+  productos     Producto[]
+  grupo         GrupoNegocio? @relation(fields: [id_grupo], references: [id])
+
+  @@unique([nombre, id_grupo])
+  @@index([id_grupo])
+  @@map("categorias")
+}
+
+model Producto {
+  id                     Int           @id @default(autoincrement())
+  codigo_barras          String?       @unique @db.VarChar(50)
+  sku                    String        @unique @db.VarChar(50)
+  nombre                 String        @db.VarChar(150)
+  descripcion            String?       @db.Text
+  id_categoria           Int?
+  tipo_materia           TipoMateria
+  unidad_medida          UnidadMedida
+  precio_unitario        Decimal       @db.Decimal(12, 2)
+  precio_venta           Decimal?      @db.Decimal(12, 2)
+  stock_actual           Decimal       @default(0) @db.Decimal(12, 3)
+  stock_minimo           Decimal       @default(0) @db.Decimal(12, 3)
+  stock_maximo           Decimal?      @db.Decimal(12, 3)
+  punto_reorden          Decimal?      @db.Decimal(12, 3)
+  dias_vida_util         Int?
+  requiere_refrigeracion Boolean       @default(false)
+  imagen_url             String?       @db.VarChar(255)
+  es_vendible            Boolean       @default(false)
+  estado                 EstadoGeneral @default(activo)
+  fecha_creacion         DateTime      @default(now())
+  fecha_modificacion     DateTime      @updatedAt
+
+  // Scoping por grupo: null = producto global del sistema (visible a todos)
+  id_grupo                 Int?
+
+  categoria                Categoria?          @relation(fields: [id_categoria], references: [id])
+  grupo                    GrupoNegocio?       @relation(fields: [id_grupo], references: [id])
+  recetas_como_final       Receta[]            @relation("ProductoFinal")
+  recetas_como_ingrediente RecetaIngrediente[] @relation("Ingrediente")
+  movimientos              Movimiento[]
+  alertas                  Alerta[]
+  lotes_produccion         Lote[]
+  orden_detalles           OrdenDetalle[]
+  orden_sede_items         OrdenSedeItem[]     // ítems de nueva arquitectura
+  proveedor_productos      ProveedorProducto[]
+  lista_compras_items      ListaComprasItem[]
+  variantes                ProductoVariante[]
+  stocks                   ProductoStock[]     // stock por restaurante
+
+  @@index([id_categoria])
+  @@index([tipo_materia])
+  @@index([sku])
+  @@index([id_grupo])
+  @@map("productos")
+}
+
+// ── ProductoStock — stock segregado por restaurante ───────────────────────────
+// El modelo Producto es el catálogo global (compartido en el grupo).
+// ProductoStock es el stock REAL de ese producto en cada restaurante.
+// Un mismo producto puede tener diferentes stocks y precios por sede.
+model ProductoStock {
+  id                 Int         @id @default(autoincrement())
+  id_producto        Int
+  id_restaurante     Int
+
+  // Stock por restaurante — independiente del stock global del catálogo
+  stock_actual       Decimal     @default(0) @db.Decimal(12, 3)
+  stock_minimo       Decimal     @default(0) @db.Decimal(12, 3)
+  stock_maximo       Decimal?    @db.Decimal(12, 3)
+  punto_reorden      Decimal?    @db.Decimal(12, 3)
+
+  // Precio local — puede diferir del precio_venta del catálogo
+  precio_venta_local Decimal?    @db.Decimal(12, 2)
+
+  activo             Boolean     @default(true)
+  fecha_modificacion DateTime    @updatedAt
+
+  producto           Producto    @relation(fields: [id_producto],    references: [id])
+  restaurante        Restaurante @relation(fields: [id_restaurante], references: [id])
+
+  // Un producto tiene UN único registro de stock POR restaurante
+  @@unique([id_producto, id_restaurante])
+  @@index([id_restaurante])
+  @@map("producto_stock")
+}
+
+model ProductoVariante {
+  id          Int           @id @default(autoincrement())
+  id_producto Int
+  nombre      String        @db.VarChar(100)
+  precio      Decimal       @db.Decimal(12, 2)
+  sku         String?       @unique @db.VarChar(50)
+  atributos   Json?
+  orden       Int           @default(0)
+  estado      EstadoGeneral @default(activo)
+  fecha_creacion DateTime   @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  producto         Producto        @relation(fields: [id_producto], references: [id])
+  orden_detalles   OrdenDetalle[]
+  orden_sede_items OrdenSedeItem[] // ítems de nueva arquitectura
+
+  @@index([id_producto])
+  @@map("producto_variantes")
+}
+
+model Receta {
+  id                              Int           @id @default(autoincrement())
+  id_producto_final               Int
+  // Cada restaurante puede tener su propia receta del mismo producto
+  id_restaurante                  Int
+  nombre_receta                   String        @db.VarChar(150)
+  descripcion                     String?       @db.Text
+  cantidad_producida              Decimal       @db.Decimal(12, 3)
+  unidad_produccion               UnidadMedida
+  tiempo_preparacion              Int?
+  instrucciones                   String?       @db.Text
+  instrucciones_almacenamiento    String?       @db.Text
+  notas                           String?       @db.Text
+  merma_esperada_porcentaje       Decimal?      @db.Decimal(5, 2)
+  merma_maxima_porcentaje         Decimal?      @db.Decimal(5, 2)
+  medio_refrigeracion             String?       @db.VarChar(200)
+  estado                          EstadoGeneral @default(activo)
+  fecha_creacion                  DateTime      @default(now())
+  fecha_modificacion              DateTime      @updatedAt
+
+  producto_final Producto            @relation("ProductoFinal", fields: [id_producto_final], references: [id])
+  restaurante    Restaurante         @relation(fields: [id_restaurante], references: [id])
+  ingredientes   RecetaIngrediente[]
+  fases          RecetaFase[]
+
+  @@index([id_restaurante])
+  @@map("recetas")
+}
+
+model RecetaIngrediente {
+  id                   Int                     @id @default(autoincrement())
+  id_receta            Int
+  id_producto          Int
+  cantidad             Decimal                 @db.Decimal(12, 3)
+  unidad               UnidadMedida
+  es_opcional          Boolean                 @default(false)
+  notas                String?                 @db.VarChar(255)
+  orden                Int                     @default(0)
+  numero_fase          Int?
+  tipo_formula         TipoFormulaIngrediente?
+  factor_formula       Decimal?                @db.Decimal(10, 4)
+  id_ingrediente_base  Int?
+  formula_descripcion  String?                 @db.VarChar(500)
+
+  receta   Receta   @relation(fields: [id_receta], references: [id], onDelete: Cascade)
+  producto Producto @relation("Ingrediente", fields: [id_producto], references: [id])
+
+  @@map("receta_ingredientes")
+}
+
+model RecetaFase {
+  id                        Int           @id @default(autoincrement())
+  id_receta                 Int
+  numero_fase               Int
+  nombre                    String        @db.VarChar(150)
+  descripcion               String        @db.Text
+  duracion_minutos          Int?
+  merma_esperada_porcentaje Decimal?      @db.Decimal(5, 2)
+  estado                    EstadoGeneral @default(activo)
+
+  receta Receta @relation(fields: [id_receta], references: [id], onDelete: Cascade)
+
+  @@unique([id_receta, numero_fase])
+  @@index([id_receta])
+  @@map("receta_fases")
+}
+
+model Movimiento {
+  id               Int            @id @default(autoincrement())
+  id_producto      Int
+  id_restaurante   Int            // aislamiento: cada movimiento pertenece a una sede
+  tipo_movimiento  TipoMovimiento
+  cantidad         Decimal        @db.Decimal(12, 3)
+  stock_anterior   Decimal        @db.Decimal(12, 3)
+  stock_nuevo      Decimal        @db.Decimal(12, 3)
+  motivo           String         @db.VarChar(255)
+  id_proveedor     Int?
+  id_lote          Int?
+  id_orden         Int?
+  referencia       String?        @db.VarChar(100)
+  fecha_movimiento DateTime       @default(now())
+
+  producto    Producto    @relation(fields: [id_producto],    references: [id])
+  restaurante Restaurante @relation(fields: [id_restaurante], references: [id])
+
+  @@index([id_producto])
+  @@index([id_restaurante])
+  @@index([fecha_movimiento])
+  @@index([tipo_movimiento])
+  @@map("movimientos")
+}
+
+model TipoAlerta {
+  id                Int      @id @default(autoincrement())
+  nombre            String   @unique @db.VarChar(100)
+  codigo            String   @unique @db.VarChar(50)
+  descripcion       String?  @db.Text
+  icono             String?  @db.VarChar(50)
+  color             String?  @db.VarChar(20)
+  prioridad_default String   @default("media") @db.VarChar(20)
+  es_sistema        Boolean  @default(false)
+  activo            Boolean  @default(true)
+  fecha_creacion    DateTime @default(now())
+
+  alertas Alerta[]
+
+  @@map("tipos_alerta")
+}
+
+model Alerta {
+  id              Int       @id @default(autoincrement())
+  id_tipo_alerta  Int
+  id_producto     Int?
+  mensaje         String    @db.Text
+  nivel_prioridad String    @db.VarChar(20)
+  es_leida        Boolean   @default(false)
+  fecha_creacion  DateTime  @default(now())
+  fecha_leida     DateTime?
+
+  // Scoping por restaurante: alerta siempre pertenece a una sede
+  id_restaurante Int?
+
+  tipo_alerta TipoAlerta  @relation(fields: [id_tipo_alerta], references: [id])
+  producto    Producto?   @relation(fields: [id_producto],    references: [id])
+  restaurante Restaurante? @relation(fields: [id_restaurante], references: [id])
+
+  @@index([es_leida])
+  @@index([fecha_creacion])
+  @@index([nivel_prioridad])
+  @@index([id_restaurante])
+  @@map("alertas")
+}
+
+// ============================================================================
+// MÓDULO: VENTAS
+// ============================================================================
+
+model EstadoOrden {
+  id              Int      @id @default(autoincrement())
+  nombre          String   @unique @db.VarChar(50)
+  codigo          String   @unique @db.VarChar(50)
+  descripcion     String?  @db.Text
+  color           String?  @db.VarChar(20)
+  icono           String?  @db.VarChar(50)
+  orden           Int      @default(0)
+  es_inicial      Boolean  @default(false)
+  es_final        Boolean  @default(false)
+  permite_edicion Boolean  @default(true)
+  imprime_comanda Boolean  @default(false)
+  es_sistema      Boolean  @default(false)
+  activo          Boolean  @default(true)
+  fecha_creacion  DateTime @default(now())
+
+  ordenes            Orden[]
+  transiciones_desde EstadoTransicion[] @relation("EstadoDesde")
+  transiciones_hacia EstadoTransicion[] @relation("EstadoHacia")
+
+  @@map("estados_orden")
+}
+
+model EstadoTransicion {
+  id                   Int     @id @default(autoincrement())
+  id_estado_desde      Int
+  id_estado_hacia      Int
+  requiere_permiso     String? @db.VarChar(100)
+  puede_ser_automatico Boolean @default(false)
+  orden                Int     @default(0)
+
+  estado_desde EstadoOrden @relation("EstadoDesde", fields: [id_estado_desde], references: [id])
+  estado_hacia EstadoOrden @relation("EstadoHacia", fields: [id_estado_hacia], references: [id])
+
+  @@unique([id_estado_desde, id_estado_hacia])
+  @@map("estado_transiciones")
+}
+
+model MetodoPago {
+  id                  Int      @id @default(autoincrement())
+  nombre              String   @unique @db.VarChar(100)
+  codigo              String   @unique @db.VarChar(50)
+  descripcion         String?  @db.Text
+  icono               String?  @db.VarChar(50)
+  requiere_referencia Boolean  @default(false)
+  es_sistema          Boolean  @default(false)
+  activo              Boolean  @default(true)
+  orden               Int      @default(0)
+  fecha_creacion      DateTime @default(now())
+
+  pagos        Pago[]
+  pagos_grupo  PagoGrupo[]
+  pagos_orden  PagoOrden[]  // pagos de nueva arquitectura
+
+  @@map("metodos_pago")
+}
+
+model Orden {
+  id              Int       @id @default(autoincrement())
+  numero_orden    String    @unique @db.VarChar(50)
+  tipo_orden      TipoOrden @default(local)
+  id_estado       Int
+  id_usuario      Int
+  id_cliente      Int?
+  id_restaurante  Int       // multi-tenant: toda orden debe pertenecer a una sede
+  id_orden_grupo  Int?      // presente cuando la orden es parte de un grupo multi-restaurante
+  sufijo_orden    String?   @db.VarChar(10) // ej: "-A", "-B" para identificar la sede en el grupo
+
+  // ── Nueva arquitectura multi-restaurante ─────────────────────────────────
+  // id_grupo: tenant raíz — permite órdenes globales sin id_restaurante fijo
+  id_grupo         Int?             // GrupoNegocio (required en nueva arquitectura)
+  estado_global    EstadoOrdenGlobal @default(RECIBIDA) // derivado por saga de OrdenSede
+
+  direccion_entrega   String?  @db.VarChar(255)
+  telefono_contacto   String?  @db.VarChar(20)
+  nombre_contacto     String?  @db.VarChar(100)
+  notas_entrega       String?  @db.Text
+  costo_domicilio     Decimal? @db.Decimal(10, 2)
+  plataforma_delivery String?  @db.VarChar(50)
+
+  subtotal  Decimal @default(0) @db.Decimal(12, 2)
+  descuento Decimal @default(0) @db.Decimal(12, 2)
+  impuestos Decimal @default(0) @db.Decimal(12, 2)
+  propina   Decimal @default(0) @db.Decimal(12, 2)
+  total     Decimal @default(0) @db.Decimal(12, 2)
+
+  observaciones      String?   @db.Text
+  fecha_apertura     DateTime  @default(now())
+  fecha_confirmacion DateTime?
+  fecha_entrega      DateTime?
+  fecha_cancelacion  DateTime?
+  motivo_cancelacion String?   @db.Text
+
+  estado       EstadoOrden   @relation(fields: [id_estado], references: [id])
+  usuario      Usuario       @relation(fields: [id_usuario], references: [id])
+  cliente      Cliente?      @relation(fields: [id_cliente], references: [id])
+  restaurante  Restaurante   @relation(fields: [id_restaurante], references: [id])
+  orden_grupo  OrdenGrupo?   @relation(fields: [id_orden_grupo], references: [id])
+  grupo        GrupoNegocio? @relation(fields: [id_grupo], references: [id])
+  detalles     OrdenDetalle[]
+  factura      Factura?
+  pagos        Pago[]
+  puntos       ClientePunto[]
+  // Nueva arquitectura
+  sedes        OrdenSede[]
+  pagos_orden  PagoOrden[]
+  eventos      OrdenEvento[]
+
+  @@index([numero_orden])
+  @@index([id_estado])
+  @@index([tipo_orden])
+  @@index([id_cliente])
+  @@index([id_restaurante])
+  @@index([id_orden_grupo])
+  @@index([fecha_apertura])
+  @@map("ordenes")
+}
+
+model OrdenDetalle {
+  id              Int      @id @default(autoincrement())
+  id_orden        Int
+  id_producto     Int
+  id_variante     Int?
+  cantidad        Decimal  @db.Decimal(10, 3)
+  precio_unitario Decimal  @db.Decimal(12, 2)
+  subtotal        Decimal  @db.Decimal(12, 2)
+  descuento       Decimal  @default(0) @db.Decimal(12, 2)
+  total           Decimal  @db.Decimal(12, 2)
+  notas           String?  @db.VarChar(255)
+  fecha_creacion  DateTime @default(now())
+
+  orden    Orden             @relation(fields: [id_orden], references: [id], onDelete: Cascade)
+  producto Producto          @relation(fields: [id_producto], references: [id])
+  variante ProductoVariante? @relation(fields: [id_variante], references: [id])
+
+  @@index([id_variante])
+  @@map("orden_detalles")
+}
+
+model Factura {
+  id             Int           @id @default(autoincrement())
+  id_orden       Int           @unique
+  numero_factura String        @unique @db.VarChar(50)
+  estado_factura EstadoFactura @default(pendiente)
+  subtotal       Decimal       @db.Decimal(12, 2)
+  impuestos      Decimal       @db.Decimal(12, 2)
+  total          Decimal       @db.Decimal(12, 2)
+  fecha_emision  DateTime      @default(now())
+  fecha_pago     DateTime?
+
+  // ── Nueva arquitectura: soporte global y por sede ────────────────────────
+  tipo_factura   TipoFactura   @default(GLOBAL)  // GLOBAL (cliente) | SEDE (interna)
+  id_sede        Int?          @unique            // si aplica, apunta a OrdenSede
+  datos_cliente  Json?                            // snapshot del cliente al emitir
+
+  orden          Orden         @relation(fields: [id_orden], references: [id])
+  sede           OrdenSede?    @relation(fields: [id_sede],  references: [id])
+
+  @@index([numero_factura])
+  @@index([estado_factura])
+  @@map("facturas")
+}
+
+model Pago {
+  id             Int      @id @default(autoincrement())
+  id_orden       Int
+  id_metodo_pago Int
+  monto          Decimal  @db.Decimal(12, 2)
+  referencia     String?  @db.VarChar(100)
+  notas          String?  @db.Text
+  fecha_pago     DateTime @default(now())
+
+  orden       Orden      @relation(fields: [id_orden], references: [id])
+  metodo_pago MetodoPago @relation(fields: [id_metodo_pago], references: [id])
+
+  @@index([id_orden])
+  @@index([fecha_pago])
+  @@map("pagos")
+}
+
+// ============================================================================
+// MÓDULO: PRODUCCIÓN
+// ============================================================================
+
+model Lote {
+  id                      Int        @id @default(autoincrement())
+  numero_lote             String     @unique @db.VarChar(50)
+  id_producto             Int
+  id_usuario_responsable  Int?
+  id_restaurante          Int        // NOT NULL — lote siempre asociado a una sede
+  cantidad_producida      Decimal    @db.Decimal(12, 3)
+  merma_cantidad          Decimal    @default(0) @db.Decimal(12, 3)
+  merma_porcentaje        Decimal    @default(0) @db.Decimal(5, 2)
+  fecha_produccion        DateTime   @default(now())
+  fecha_vencimiento       DateTime?
+  vida_util_dias          Int?
+  estado_lote             EstadoLote @default(activo)
+  costo_produccion        Decimal?   @db.Decimal(12, 2)
+  observaciones           String?    @db.Text
+
+  producto      Producto    @relation(fields: [id_producto],    references: [id])
+  responsable   Usuario?    @relation("LoteResponsable", fields: [id_usuario_responsable], references: [id])
+  restaurante   Restaurante @relation(fields: [id_restaurante], references: [id])
+
+  @@index([numero_lote])
+  @@index([id_producto])
+  @@index([fecha_vencimiento])
+  @@index([id_usuario_responsable])
+  @@index([id_restaurante])
+  @@map("lotes")
+}
+
+// ============================================================================
+// MÓDULO: PROVEEDORES
+// ============================================================================
+
+model Proveedor {
+  id                      Int           @id @default(autoincrement())
+  razon_social            String        @db.VarChar(200)
+  nit                     String?       @unique @db.VarChar(50)
+  contacto_nombre         String?       @db.VarChar(150)
+  contacto_telefono       String?       @db.VarChar(20)
+  contacto_whatsapp       String?       @db.VarChar(20)
+  contacto_email          String?       @db.VarChar(150)
+  sitio_web               String?       @db.VarChar(255)
+  direccion               String?       @db.VarChar(255)
+  ciudad                  String?       @db.VarChar(100)
+  calificacion            Decimal?      @db.Decimal(3, 2)
+  tiempo_entrega_promedio Int?
+  estado                  EstadoGeneral @default(activo)
+  fecha_creacion          DateTime      @default(now())
+  fecha_modificacion      DateTime      @updatedAt
+
+  // Scoping por grupo: proveedor pertenece a un grupo de negocio
+  id_grupo        Int?
+
+  productos       ProveedorProducto[]
+  listas_compras  ListaCompras[]
+  grupo           GrupoNegocio?       @relation(fields: [id_grupo], references: [id])
+
+  @@index([id_grupo])
+  @@map("proveedores")
+}
+
+model ProveedorProducto {
+  id                     Int           @id @default(autoincrement())
+  id_proveedor           Int
+  id_producto            Int
+  precio_unitario        Decimal       @db.Decimal(12, 2)
+  tiempo_entrega         Int?
+  cantidad_minima        Decimal?      @db.Decimal(12, 3)
+  es_proveedor_preferido Boolean       @default(false)
+  calidad_calificacion   Decimal?      @db.Decimal(3, 2)
+  fecha_ultima_entrega   DateTime?
+  estado                 EstadoGeneral @default(activo)
+  fecha_creacion         DateTime      @default(now())
+  fecha_modificacion     DateTime      @updatedAt
+
+  proveedor Proveedor @relation(fields: [id_proveedor], references: [id])
+  producto  Producto  @relation(fields: [id_producto], references: [id])
+
+  @@unique([id_proveedor, id_producto])
+  @@map("proveedor_productos")
+}
+
+// ============================================================================
+// MÓDULO: LISTA DE COMPRAS
+// ============================================================================
+
+model ListaCompras {
+  id                    Int                @id @default(autoincrement())
+  numero_lista          String             @unique @db.VarChar(50)
+  estado                EstadoListaCompras @default(generada)
+  id_usuario_generado   Int
+  id_proveedor_asignado Int?
+  id_restaurante        Int        // NOT NULL — lista siempre asociada a una sede
+  fecha_generacion      DateTime           @default(now())
+  fecha_envio           DateTime?
+  fecha_recepcion       DateTime?
+  notas                 String?            @db.Text
+  total_estimado        Decimal?           @db.Decimal(12, 2)
+
+  usuario_generado   Usuario     @relation(fields: [id_usuario_generado],   references: [id])
+  proveedor_asignado Proveedor?  @relation(fields: [id_proveedor_asignado], references: [id])
+  restaurante        Restaurante @relation(fields: [id_restaurante],        references: [id])
+  items              ListaComprasItem[]
+
+  @@index([estado])
+  @@index([fecha_generacion])
+  @@index([id_proveedor_asignado])
+  @@index([id_restaurante])
+  @@map("listas_compras")
+}
+
+model ListaComprasItem {
+  id                    Int      @id @default(autoincrement())
+  id_lista              Int
+  id_producto           Int
+  id_proveedor_sugerido Int?
+  cantidad_sugerida     Decimal  @db.Decimal(12, 3)
+  precio_estimado       Decimal? @db.Decimal(12, 2)
+  cantidad_recibida     Decimal? @db.Decimal(12, 3)
+  observaciones         String?  @db.VarChar(500)
+
+  lista    ListaCompras @relation(fields: [id_lista], references: [id], onDelete: Cascade)
+  producto Producto     @relation(fields: [id_producto], references: [id])
+
+  @@index([id_lista])
+  @@index([id_producto])
+  @@map("listas_compras_items")
+}
+
+// ============================================================================
+// MÓDULO: REPORTES
+// ============================================================================
+
+// Reemplazar el modelo CierreCaja existente por estos dos:
+
+model TurnoCaja {
+  id              Int      @id @default(autoincrement())
+  nombre          String   @db.VarChar(100)
+  hora_apertura   String   @db.VarChar(5)
+  hora_cierre     String   @db.VarChar(5)
+  dias_semana     Json
+  activo          Boolean  @default(true)
+  fecha_creacion  DateTime @default(now())
+
+  // Scoping por restaurante: cada sede tiene sus propios turnos
+  id_restaurante  Int?
+
+  cierres         CierreCaja[]
+  restaurante     Restaurante? @relation(fields: [id_restaurante], references: [id])
+
+  @@index([id_restaurante])
+  @@map("turnos_caja")
+}
+
+model CierreCaja {
+  id              Int      @id @default(autoincrement())
+  id_usuario      Int
+  id_turno        Int?
+  id_restaurante  Int          // NOT NULL — cierre siempre asociado a una sede
+  numero_cierre   String   @unique @db.VarChar(50)
+  fecha_apertura  DateTime
+  fecha_cierre    DateTime @default(now())
+  monto_inicial   Decimal  @db.Decimal(12, 2)
+  monto_final     Decimal  @db.Decimal(12, 2)
+
+  totales_por_metodo Json?
+
+  total_ventas    Decimal  @db.Decimal(12, 2)
+  total_efectivo  Decimal  @db.Decimal(12, 2)
+  diferencia      Decimal  @default(0) @db.Decimal(12, 2)
+  justificacion   String?  @db.Text
+  estado          EstadoCierre @default(pendiente)
+  observaciones   String?  @db.Text
+
+  usuario      Usuario     @relation(fields: [id_usuario],    references: [id])
+  turno        TurnoCaja?  @relation(fields: [id_turno],      references: [id])
+  restaurante  Restaurante @relation(fields: [id_restaurante], references: [id])
+
+  @@index([fecha_cierre])
+  @@index([id_restaurante])
+  @@map("cierres_caja")
+}
+
+// ============================================================================
+// MÓDULO: CLIENTES
+// Agregar estos modelos al schema.prisma existente
+// ============================================================================
+
+// ── 1. Modelo principal ───────────────────────────────────────────────────────
+
+model Cliente {
+  id                 Int           @id @default(autoincrement())
+  uuid               String        @unique @default(uuid()) @db.Uuid
+
+  // Datos personales
+  nombre_completo    String        @db.VarChar(200)
+  email              String?       @unique @db.VarChar(150)
+  telefono           String?       @db.VarChar(20)
+  telefono_alterno   String?       @db.VarChar(20)
+
+  // Identificación (opcional — útil para facturación electrónica)
+  tipo_documento     TipoDocumento @default(cc)
+  numero_documento   String?       @unique @db.VarChar(50)
+
+  // Dirección
+  direccion          String?       @db.VarChar(255)
+  ciudad             String?       @db.VarChar(100)
+  barrio             String?       @db.VarChar(100)
+
+  // Clasificación
+  tipo_cliente       TipoCliente   @default(regular)
+  estado             EstadoGeneral @default(activo)
+
+  // Programa de fidelización
+  puntos_acumulados  Int           @default(0)
+  total_gastado      Decimal       @default(0) @db.Decimal(14, 2)
+  total_ordenes      Int           @default(0)
+
+  // Preferencias y notas internas
+  notas              String?       @db.Text           // notas del staff ("alérgico al maní")
+  preferencias       Json?                            // { "mesa_preferida": "ventana", "sin_picante": true }
+  canal_adquisicion  String?       @db.VarChar(50)    // "instagram", "referido", "walk-in"
+
+  // Fechas
+  fecha_nacimiento   DateTime?     @db.Date
+  fecha_creacion     DateTime      @default(now())
+  fecha_modificacion DateTime      @updatedAt
+  ultima_visita      DateTime?
+
+  // Scoping por grupo: clientes compartidos dentro del mismo negocio
+  // (restaurants compartidos ven el mismo cliente; tenants aislados no)
+  id_grupo           Int?
+
+  // Relaciones
+  ordenes            Orden[]
+  direcciones        ClienteDireccion[]
+  puntos             ClientePunto[]
+  grupo              GrupoNegocio?     @relation(fields: [id_grupo], references: [id])
+
+  @@index([email])
+  @@index([telefono])
+  @@index([numero_documento])
+  @@index([tipo_cliente])
+  @@index([ultima_visita])
+  @@map("clientes")
+}
+
+// ── 2. Direcciones múltiples ──────────────────────────────────────────────────
+// Un cliente puede tener varias direcciones de entrega guardadas
+// (casa, trabajo, etc.) para agilizar pedidos a domicilio
+
+model ClienteDireccion {
+  id           Int      @id @default(autoincrement())
+  id_cliente   Int
+  alias        String   @db.VarChar(50)   // "Casa", "Trabajo", "Gym"
+  direccion    String   @db.VarChar(255)
+  ciudad       String?  @db.VarChar(100)
+  barrio       String?  @db.VarChar(100)
+  referencia   String?  @db.VarChar(255)  // "Casa azul con reja negra"
+  es_principal Boolean  @default(false)
+  activa       Boolean  @default(true)
+
+  cliente      Cliente  @relation(fields: [id_cliente], references: [id], onDelete: Cascade)
+
+  @@index([id_cliente])
+  @@map("cliente_direcciones")
+}
+
+// ── 3. Historial de puntos ────────────────────────────────────────────────────
+// Cada transacción de puntos queda registrada (ganados o canjeados)
+
+model ClientePunto {
+  id           Int           @id @default(autoincrement())
+  id_cliente   Int
+  id_orden     Int?          // la orden que generó o consumió los puntos
+  tipo         TipoPunto                              // ganado | canjeado | ajuste | vencimiento
+  puntos       Int                                    // positivo = ganado, negativo = canjeado
+  descripcion  String        @db.VarChar(255)
+  saldo_antes  Int
+  saldo_despues Int
+  fecha        DateTime      @default(now())
+
+  cliente      Cliente       @relation(fields: [id_cliente], references: [id], onDelete: Cascade)
+  orden        Orden?        @relation(fields: [id_orden], references: [id])
+
+  @@index([id_cliente])
+  @@index([id_orden])
+  @@index([fecha])
+  @@map("cliente_puntos")
+}
+
+
+
+
+// ── ConfiguracionRestaurante — settings específicos por sede ──────────────────
+// Separado de Configuracion global. Permite que cada restaurante tenga
+// su propio IVA, formato de recibo, moneda de display, etc.
+
+model ConfiguracionRestaurante {
+  id              Int        @id @default(autoincrement())
+  id_restaurante  Int
+  clave           String     @db.VarChar(100)
+  valor           String     @db.Text
+  tipo_dato       TipoDato   @default(string)
+  descripcion     String?    @db.Text
+  fecha_modificacion DateTime @updatedAt
+
+  restaurante     Restaurante @relation(fields: [id_restaurante], references: [id], onDelete: Cascade)
+
+  @@unique([id_restaurante, clave])
+  @@index([id_restaurante])
+  @@map("configuracion_restaurante")
+}
+
+// ============================================================================
+// MÓDULO: FEATURE FLAGS
+// ============================================================================
+
+model FeatureFlag {
+  id          Int      @id @default(autoincrement())
+  nombre      String   @unique @db.VarChar(100)
+  descripcion String?  @db.Text
+  habilitado  Boolean  @default(false)
+  scope       String   @default("global") @db.VarChar(20)
+  metadata    Json?
+  fecha_creacion    DateTime @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  asignaciones FeatureFlagAsignacion[]
+
+  @@map("feature_flags")
+}
+
+model FeatureFlagAsignacion {
+  id              Int     @id @default(autoincrement())
+  id_feature_flag Int
+  contexto        String  @db.VarChar(100)
+  habilitado      Boolean @default(true)
+
+  feature_flag FeatureFlag @relation(fields: [id_feature_flag], references: [id], onDelete: Cascade)
+
+  @@unique([id_feature_flag, contexto])
+  @@map("feature_flag_asignaciones")
+}
+
+// ============================================================================
+// MÓDULO: CONFIGURACIÓN UI
+// ============================================================================
+
+model UiConfiguracion {
+  id         Int      @id @default(autoincrement())
+  scope      String   @db.VarChar(50)
+  clave      String   @db.VarChar(100)
+  valor      Json
+  contexto   String?  @db.VarChar(100)
+  version    Int      @default(1)
+  fecha_creacion    DateTime @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  @@unique([scope, clave, contexto])
+  @@map("ui_configuraciones")
+}
+
+// ============================================================================
+// MÓDULO: PLANTILLAS DE IMPRESIÓN
+// ============================================================================
+
+model PlantillaImpresion {
+  id              Int           @id @default(autoincrement())
+  nombre          String        @db.VarChar(100)
+  tipo            String        @db.VarChar(50)
+  es_default      Boolean       @default(false)
+  plantilla       Json
+  estado          EstadoGeneral @default(activo)
+  fecha_creacion  DateTime      @default(now())
+  fecha_modificacion DateTime   @updatedAt
+
+  // Scoping: null/null = plantilla global del sistema
+  // id_grupo solo = plantilla para todos los restaurantes del grupo
+  // id_restaurante = plantilla específica de una sede (mayor precedencia)
+  id_restaurante  Int?
+  id_grupo        Int?
+
+  restaurante     Restaurante?  @relation(fields: [id_restaurante], references: [id])
+  grupo           GrupoNegocio? @relation(fields: [id_grupo],       references: [id])
+
+  @@index([id_restaurante])
+  @@index([id_grupo])
+  @@map("plantillas_impresion")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum TipoDocumento {
+  cc          // Cédula de ciudadanía
+  ce          // Cédula de extranjería
+  nit         // NIT (para empresas que ordenan)
+  pasaporte
+  sin_documento
+}
+
+enum TipoCliente {
+  regular
+  frecuente    // >= 5 órdenes o >= $200.000 gastados
+  vip          // >= 20 órdenes o >= $1.000.000 gastados
+  corporativo  // empresas con facturación NIT
+  delivery     // solo pide a domicilio
+}
+
+enum TipoPunto {
+  ganado       // compra generó puntos
+  canjeado     // usó puntos como descuento
+  ajuste       // corrección manual por staff
+  vencimiento  // puntos que expiraron
+  bienvenida   // puntos de registro inicial
+}
+
+
+
+enum EstadoGeneral {
+  activo
+  inactivo
+  eliminado
+}
+
+// Agregar este enum al bloque de enums:
+enum EstadoCierre {
+  pendiente     // Programado, aún no ejecutado
+  en_proceso    // Hora llegó, esperando confirmación del cajero
+  completado    // Cajero confirmó montos
+  con_diferencia // Completado pero con diferencia justificada
+}
+
+enum TipoDato {
+  string
+  number
+  boolean
+  json
+}
+
+enum TipoMateria {
+  prima
+  procesada
+}
+
+enum UnidadMedida {
+  unidad
+  gramo
+  kilogramo
+  litro
+  mililitro
+  porcion
+  taza
+  cucharada
+  rama
+  pizca
+  porcion_aprox
+}
+
+enum TipoMovimiento {
+  entrada
+  salida
+  ajuste
+  merma
+  produccion
+  venta
+  devolucion
+}
+
+enum TipoFormulaIngrediente {
+  proporcional  // ingrediente × factor = otro (ej: arroz × 2 = agua)
+  porcentaje    // ingrediente × (factor/100) (ej: piña × 10% = azúcar)
+  fijo          // cantidad fija independiente de la producción
+  aproximado    // magnitud aproximada (no hay fórmula exacta)
+}
+
+enum EstadoListaCompras {
+  generada
+  enviada
+  recibida
+  parcial
+  cancelada
+}
+
+enum EstadoLote {
+  activo
+  vencido
+  agotado
+  en_produccion
+}
+
+enum TipoOrden {
+  local
+  domicilio
+}
+
+enum EstadoFactura {
+  pendiente
+  pagada
+  anulada
+}
+
+// ── Nueva arquitectura de órdenes ─────────────────────────────────────────────
+
+enum EstadoOrdenGlobal {
+  BORRADOR       // construyendo la orden, no confirmada aún
+  RECIBIDA       // confirmada, al menos una sede en PENDIENTE
+  EN_PROCESO     // al menos una sede en EN_PREPARACION
+  LISTA          // todas las sedes en LISTA — lista para cobrar y entregar
+  ENTREGADA      // pagada y entregada — estado final
+  CANCELADA      // cancelada — estado final
+}
+
+enum EstadoOrdenSede {
+  PENDIENTE       // en cola, aún no inicia
+  EN_PREPARACION  // cocina activa
+  LISTA           // esta sede terminó su parte
+  ENTREGADA       // confirmación post-entrega (opcional)
+  CANCELADA
+}
+
+enum EstadoPagoOrden {
+  pendiente
+  confirmado
+  rechazado
+  revertido
+}
+
+enum TipoFactura {
+  GLOBAL   // factura del cliente (siempre existe)
+  SEDE     // factura interna por restaurante (feature-flagged)
+}
+
+// ============================================================================
+// NUEVA ARQUITECTURA DE ÓRDENES — Multi-restaurante sin OrdenGrupo
+// Orden (aggregate root global) → OrdenSede (por restaurante) → OrdenSedeItem
+// ============================================================================
+
+// ── OrdenSede — unidad operacional por restaurante ────────────────────────────
+// Una Orden siempre tiene al menos una OrdenSede.
+// Para multi-restaurante: una OrdenSede por restaurante participante.
+// Cada sede tiene su propio estado (PENDIENTE → EN_PREPARACION → LISTA → ENTREGADA).
+// El estado_global de la Orden es derivado por la saga de delivery.
+
+model OrdenSede {
+  id Int @id @default(autoincrement())
+
+  // ── Pertenencia ────────────────────────────────────────────────────────────
+  id_orden       Int
+  orden          Orden       @relation(fields: [id_orden], references: [id], onDelete: Cascade)
+  id_restaurante Int
+  restaurante    Restaurante @relation(fields: [id_restaurante], references: [id])
+
+  // ── Identificación display ─────────────────────────────────────────────────
+  // Solo para UI/impresión. Identidad real = id_orden + id_restaurante.
+  sufijo         String?     @db.VarChar(5)  // -A, -B, -C …
+
+  // ── Estado independiente por sede ──────────────────────────────────────────
+  estado         EstadoOrdenSede @default(PENDIENTE)
+
+  // ── Financiero de esta sede ────────────────────────────────────────────────
+  subtotal       Decimal     @default(0) @db.Decimal(12, 2)
+  descuento      Decimal     @default(0) @db.Decimal(12, 2)
+  impuestos      Decimal     @default(0) @db.Decimal(12, 2)
+  total          Decimal     @default(0) @db.Decimal(12, 2)
+
+  // ── Trazabilidad de cocina ─────────────────────────────────────────────────
+  fecha_inicio_prep  DateTime?
+  fecha_lista        DateTime?
+  fecha_cancelacion  DateTime?
+  motivo_cancelacion String?   @db.VarChar(300)
+
+  // ── Asignación (KDS / cocina digital) ─────────────────────────────────────
+  id_cocinero    Int?
+
+  // ── Relaciones ─────────────────────────────────────────────────────────────
+  items          OrdenSedeItem[]
+  factura        Factura?         // factura interna por sede (feature-flagged)
+
+  @@unique([id_orden, id_restaurante])
+  @@index([id_orden])
+  @@index([id_restaurante])
+  @@index([estado])
+  @@map("orden_sedes")
+}
+
+// ── OrdenSedeItem — línea de producto por sede ────────────────────────────────
+model OrdenSedeItem {
+  id Int @id @default(autoincrement())
+
+  id_sede  Int
+  sede     OrdenSede        @relation(fields: [id_sede], references: [id], onDelete: Cascade)
+
+  id_producto Int
+  producto    Producto         @relation(fields: [id_producto], references: [id])
+  id_variante Int?
+  variante    ProductoVariante? @relation(fields: [id_variante], references: [id])
+
+  cantidad        Decimal  @db.Decimal(10, 3)
+  precio_unitario Decimal  @db.Decimal(12, 2)
+  descuento       Decimal  @default(0) @db.Decimal(12, 2)
+  subtotal        Decimal  @db.Decimal(12, 2)
+  total           Decimal  @db.Decimal(12, 2)
+  notas           String?  @db.VarChar(500)
+  fecha_creacion  DateTime @default(now())
+
+  @@index([id_sede])
+  @@index([id_producto])
+  @@map("orden_sede_items")
+}
+
+// ── PagoOrden — pago único contra la Orden global ────────────────────────────
+// Un pago siempre es contra la Orden completa, no contra una sede individual.
+// Permite múltiples métodos de pago (efectivo + tarjeta + billetera).
+model PagoOrden {
+  id Int @id @default(autoincrement())
+
+  id_orden       Int
+  orden          Orden      @relation(fields: [id_orden], references: [id])
+  id_metodo_pago Int
+  metodo_pago    MetodoPago @relation(fields: [id_metodo_pago], references: [id])
+
+  monto          Decimal    @db.Decimal(12, 2)
+  referencia     String?    @db.VarChar(100)
+  notas          String?    @db.VarChar(300)
+  estado         EstadoPagoOrden @default(pendiente)
+  fecha_pago     DateTime   @default(now())
+
+  @@index([id_orden])
+  @@map("pagos_orden")
+}
+
+// ── OrdenEvento — event store por orden ───────────────────────────────────────
+// Registra cada evento del ciclo de vida de la orden.
+// Permite auditoría completa, replay y base para event sourcing futuro.
+model OrdenEvento {
+  id         BigInt   @id @default(autoincrement())
+  id_orden   Int
+  orden      Orden    @relation(fields: [id_orden], references: [id], onDelete: Cascade)
+
+  tipo_evento String  @db.VarChar(80)
+  // Valores: ORDEN_CREADA | SEDE_EN_PREPARACION | SEDE_LISTA | ORDEN_LISTA |
+  //          ORDEN_PAGADA | ORDEN_ENTREGADA | ORDEN_CANCELADA | SEDE_CANCELADA
+
+  payload     Json    // snapshot completo del estado en ese momento
+  id_usuario  Int?
+  creado_en   DateTime @default(now())
+
+  @@index([id_orden])
+  @@index([tipo_evento])
+  @@index([creado_en])
+  @@map("orden_eventos")
+}
+
+// ── Enums para modelo híbrido de restaurantes (Alta Prioridad) ────────────────
+
+enum TipoTenant {
+  compartido  // comparte usuarios y catálogo dentro del mismo grupo
+  aislado     // tenant independiente, no comparte nada
+}
+
+enum PlanSaaS {
+  starter      // 1-3 restaurantes
+  professional // hasta 10, multi-restaurante completo
+  enterprise   // ilimitado, multi-DB ready
+}
+
+enum RolGrupo {
+  owner    // propietario del grupo (facturación, settings)
+  admin    // administra restaurantes del grupo
+  operador // opera en restaurantes asignados
+  auditor  // solo lectura consolidada
+}
+
+// ── OrdenGrupo — orden que agrupa pedidos de múltiples restaurantes ────────────
+// Permite que un cliente haga un único pedido que se distribuye a varias sedes.
+// Cada sede procesa sus items de forma independiente (una Orden por restaurante).
+
+model OrdenGrupo {
+  id            Int      @id @default(autoincrement())
+  numero_grupo  String   @unique @db.VarChar(50)
+  id_grupo      Int      // GrupoNegocio al que pertenece
+  id_usuario    Int      // usuario que creó el grupo de órdenes
+
+  // Totales consolidados de todas las órdenes del grupo
+  subtotal      Decimal  @default(0) @db.Decimal(12, 2)
+  descuento     Decimal  @default(0) @db.Decimal(12, 2)
+  impuestos     Decimal  @default(0) @db.Decimal(12, 2)
+  total         Decimal  @default(0) @db.Decimal(12, 2)
+
+  estado        String   @default("abierto") @db.VarChar(30) // abierto | pagado | cancelado
+  notas         String?  @db.Text
+  fecha_creacion DateTime @default(now())
+  fecha_cierre  DateTime?
+
+  grupo   GrupoNegocio @relation(fields: [id_grupo],   references: [id])
+  usuario Usuario      @relation(fields: [id_usuario], references: [id])
+  ordenes Orden[]
+  pagos   PagoGrupo[]
+
+  @@index([id_grupo])
+  @@index([id_usuario])
+  @@index([fecha_creacion])
+  @@map("ordenes_grupo")
+}
+
+// ── PagoGrupo — pago que cubre una OrdenGrupo completa ───────────────────────
+model PagoGrupo {
+  id              Int      @id @default(autoincrement())
+  id_orden_grupo  Int
+  id_metodo_pago  Int
+  monto           Decimal  @db.Decimal(12, 2)
+  referencia      String?  @db.VarChar(100)
+  fecha_pago      DateTime @default(now())
+
+  orden_grupo OrdenGrupo @relation(fields: [id_orden_grupo], references: [id], onDelete: Cascade)
+  metodo_pago MetodoPago @relation(fields: [id_metodo_pago], references: [id])
+
+  @@index([id_orden_grupo])
+  @@map("pagos_grupo")
+}
