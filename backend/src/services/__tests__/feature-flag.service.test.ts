@@ -268,6 +268,19 @@ describe('featureFlagService — resolución de dos niveles', () => {
     expect(await featureFlagService.isEnabled('variantes_productos', 'restaurante_99', 'grupo_10')).toBe(true);
   });
 
+  it('asignación de restaurante en FALSE corta la cadena aunque el flag global sea true', async () => {
+    // Caso crítico de tri-estado: la asignación explícita-false DEBE ganar sobre global-true.
+    // Si resolveAsignacion colapsara "asignado-false" con "sin-asignación", este test fallaría.
+    (featureFlagRepository.findByNombre as any).mockResolvedValue(mkFlag({
+      scope: 'contexto',
+      habilitado: true,   // global = true
+      asignaciones: [
+        { contexto: 'restaurante_1', habilitado: false },   // sede apaga el flag
+      ],
+    }));
+    expect(await featureFlagService.isEnabled('variantes_productos', 'restaurante_1', 'grupo_10')).toBe(false);
+  });
+
   it('sin ninguna asignación → cae al valor global del flag (false para scope=contexto)', async () => {
     (featureFlagRepository.findByNombre as any).mockResolvedValue(mkFlag({
       scope: 'contexto',

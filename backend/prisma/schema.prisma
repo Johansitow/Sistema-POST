@@ -1055,6 +1055,7 @@ model ConfiguracionRestaurante {
   valor           String     @db.Text
   tipo_dato       TipoDato   @default(string)
   descripcion     String?    @db.Text
+  es_editable     Boolean    @default(true)
   fecha_modificacion DateTime @updatedAt
 
   restaurante     Restaurante @relation(fields: [id_restaurante], references: [id], onDelete: Cascade)
