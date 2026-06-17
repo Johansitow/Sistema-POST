@@ -240,6 +240,44 @@ describe('featureFlagService.eliminar', () => {
   });
 });
 
+// ── resolución de dos niveles (restaurante → grupo → global) ──────────────────
+
+describe('featureFlagService — resolución de dos niveles', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('asignación de restaurante presente → gana restaurante', async () => {
+    (featureFlagRepository.findByNombre as any).mockResolvedValue(mkFlag({
+      scope: 'contexto',
+      habilitado: true,
+      asignaciones: [
+        { contexto: 'restaurante_1', habilitado: true },
+        { contexto: 'grupo_10',      habilitado: false },
+      ],
+    }));
+    expect(await featureFlagService.isEnabled('variantes_productos', 'restaurante_1', 'grupo_10')).toBe(true);
+  });
+
+  it('sin asignación de restaurante, con asignación de grupo → gana grupo', async () => {
+    (featureFlagRepository.findByNombre as any).mockResolvedValue(mkFlag({
+      scope: 'contexto',
+      habilitado: true,
+      asignaciones: [
+        { contexto: 'grupo_10', habilitado: true },
+      ],
+    }));
+    expect(await featureFlagService.isEnabled('variantes_productos', 'restaurante_99', 'grupo_10')).toBe(true);
+  });
+
+  it('sin ninguna asignación → cae al valor global del flag (false para scope=contexto)', async () => {
+    (featureFlagRepository.findByNombre as any).mockResolvedValue(mkFlag({
+      scope: 'contexto',
+      habilitado: true,
+      asignaciones: [],
+    }));
+    expect(await featureFlagService.isEnabled('variantes_productos', 'restaurante_99', 'grupo_10')).toBe(false);
+  });
+});
+
 // ── setAsignacion ─────────────────────────────────────────────────────────────
 
 describe('featureFlagService.setAsignacion', () => {

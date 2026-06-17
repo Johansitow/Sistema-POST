@@ -10,6 +10,8 @@
 
 import prisma from '../config/database';
 import { configuracionRepository } from '../repositories/configuracion.repository';
+import { configuracionRestauranteRepository } from '../repositories/configuracion-restaurante.repository';
+import { configuracionGrupoRepository } from '../repositories/configuracion-grupo.repository';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../exceptions/HttpErrors';
 
 // Claves que NUNCA se pueden editar desde el frontend (solo via seed/migration)
@@ -39,6 +41,34 @@ export const configuracionService = {
     const config = await configuracionRepository.findByClave(clave);
     if (!config) throw new NotFoundError(`Configuración '${clave}'`);
     return configuracionRepository.parseValor(config) as T;
+  },
+
+  /**
+   * Resuelve una clave de configuración con precedencia sede → grupo → global.
+   *
+   * 1. Busca en ConfiguracionRestaurante (valor específico de la sede).
+   * 2. Si no existe, busca en ConfiguracionGrupo (default del grupo).
+   * 3. Si no existe, busca en Configuracion (valor global del sistema).
+   * 4. Si no existe en ninguna capa → null.
+   *
+   * Usado por el wizard de onboarding y cualquier servicio que necesite
+   * respetar la jerarquía de configuración multi-tenant.
+   */
+  async resolverParaRestaurante(
+    clave: string,
+    restauranteId: number,
+    grupoId: number,
+  ): Promise<{ valor: string; origen: 'sede' | 'grupo' | 'global' } | null> {
+    const deSede = await configuracionRestauranteRepository.findByClave(restauranteId, clave);
+    if (deSede) return { valor: deSede.valor, origen: 'sede' };
+
+    const deGrupo = await configuracionGrupoRepository.findByClave(grupoId, clave);
+    if (deGrupo) return { valor: deGrupo.valor, origen: 'grupo' };
+
+    const global = await configuracionRepository.findByClave(clave);
+    if (global) return { valor: global.valor, origen: 'global' };
+
+    return null;
   },
 
   // ── ESCRITURA (solo superadmin / config.sistema) ──────────────────────────

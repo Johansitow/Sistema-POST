@@ -94,6 +94,7 @@ model GrupoNegocio {
   clientes              Cliente[]
   plantillas            PlantillaImpresion[]
   auditorias            Auditoria[]          @relation("AuditoriaGrupo")
+  configuraciones_grupo ConfiguracionGrupo[]
 
   @@map("grupo_negocio")
 }
@@ -1061,6 +1062,27 @@ model ConfiguracionRestaurante {
   @@unique([id_restaurante, clave])
   @@index([id_restaurante])
   @@map("configuracion_restaurante")
+}
+
+// ── ConfiguracionGrupo — settings KV a nivel de grupo empresarial ─────────────
+// Espejo de ConfiguracionRestaurante pero con id_grupo.
+// Precedencia de lectura: sede (ConfiguracionRestaurante) > grupo (aquí) > global (Configuracion).
+
+model ConfiguracionGrupo {
+  id                 Int          @id @default(autoincrement())
+  id_grupo           Int
+  clave              String       @db.VarChar(100)
+  valor              String       @db.Text
+  tipo_dato          TipoDato     @default(string)
+  descripcion        String?      @db.Text
+  es_editable        Boolean      @default(true)
+  fecha_modificacion DateTime     @updatedAt
+
+  grupo              GrupoNegocio @relation(fields: [id_grupo], references: [id], onDelete: Cascade)
+
+  @@unique([id_grupo, clave])
+  @@index([id_grupo])
+  @@map("configuracion_grupo")
 }
 
 // ============================================================================

@@ -6,6 +6,7 @@ import { Request, Response } from 'express';
 import { featureFlagService } from '../services/feature-flag.service';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
+import { buildContexto } from '../lib/flagContexto';
 import { z } from 'zod';
 
 const createFlagSchema = z.object({
@@ -29,10 +30,13 @@ export const getAll = asyncHandler(async (_req: Request, res: Response) => {
   res.json({ success: true, data: flags });
 });
 
-/** GET /feature-flags/client — Flags para el frontend (todos los usuarios) */
+/** GET /feature-flags/client — Flags para el frontend (todos los usuarios).
+ *  El grupo se deriva del token/sesión via tenantContextOptional; el cliente
+ *  nunca elige su propio grupo (previene lectura de flags de otro tenant). */
 export const getClientFlags = asyncHandler(async (req: Request, res: Response) => {
-  const contexto = req.query.contexto as string | undefined;
-  const flags = await featureFlagService.getClientFlags(contexto);
+  const restauranteCtx = req.restauranteId ? buildContexto('restaurante', req.restauranteId) : undefined;
+  const grupoCtx       = req.grupoId       ? buildContexto('grupo',       req.grupoId)       : undefined;
+  const flags = await featureFlagService.getClientFlags(restauranteCtx, grupoCtx);
   res.json({ success: true, data: flags });
 });
 

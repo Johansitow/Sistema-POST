@@ -9,6 +9,7 @@ import {
 } from '../controller/feature-flags.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requireSuperAdmin } from '../middlewares/auth.middleware';
+import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 
 const router = Router();
 
@@ -167,8 +168,8 @@ const router = Router();
  *       404: { description: No encontrada }
  */
 
-// Endpoint público para el frontend (requiere auth básico)
-router.get('/client', authenticate, getClientFlags);
+// Endpoint público para el frontend (requiere auth; tenant opcional para resolver grupo)
+router.get('/client', authenticate, tenantContextOptional, getClientFlags);
 
 // Endpoints de gestión (solo superadmin)
 router.use(authenticate, requireSuperAdmin);

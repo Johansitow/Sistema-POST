@@ -16,6 +16,7 @@ import { featureFlagRepository } from '../repositories/feature-flag.repository';
 import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import { socketGateway } from '../config/socket.gateway';
+import { resolveAsignacion } from '../lib/flagContexto';
 
 const KEY_ALL  = 'ff:all';
 const keyOne   = (nombre: string) => `ff:${nombre}`;
@@ -33,31 +34,38 @@ export const featureFlagService = {
 
   /**
    * Verifica si un feature flag está habilitado.
-   * @param nombre  Nombre del flag (ej: 'variantes_productos')
-   * @param contexto Contexto opcional para asignaciones específicas (ej: 'restaurante_2')
+   *
+   * Resolución para scope=contexto:
+   *   1. Asignación de restaurante (más específica) → gana si existe
+   *   2. Asignación de grupo (default de grupo) → gana si no hay de restaurante
+   *   3. false → sin asignación explícita
+   *
+   * @param nombre           Nombre del flag (ej: 'modulo.recetas')
+   * @param restauranteCtx   Contexto de sede, ej: buildContexto('restaurante', id)
+   * @param grupoCtx         Contexto de grupo, ej: buildContexto('grupo', id)
    */
-  async isEnabled(nombre: string, contexto?: string): Promise<boolean> {
-    const cacheKey = contexto ? `${keyOne(nombre)}:${contexto}` : keyOne(nombre);
+  async isEnabled(nombre: string, restauranteCtx?: string, grupoCtx?: string): Promise<boolean> {
+    const cacheKey = restauranteCtx
+      ? `${keyOne(nombre)}:${restauranteCtx}:${grupoCtx ?? ''}`
+      : keyOne(nombre);
 
     return cacheGetOrSet(cacheKey, CACHE_TTL.SHORT, async () => {
       const flag = await featureFlagRepository.findByNombre(nombre);
       if (!flag || !flag.habilitado) return false;
       if (flag.scope === 'global') return true;
-
-      if (contexto) {
-        const asignacion = flag.asignaciones.find(a => a.contexto === contexto);
-        return asignacion?.habilitado ?? false;
-      }
-      return flag.habilitado;
+      return resolveAsignacion(flag.asignaciones, restauranteCtx, grupoCtx);
     });
   },
 
   /**
-   * Retorna todos los flags como objeto clave-valor para enviar al cliente.
-   * @param contexto Contexto para resolver asignaciones (ej: ID de restaurante)
+   * Retorna todos los flags como mapa nombre→boolean para el cliente.
+   * El grupo se deriva en el backend (req.grupoId via tenantContextOptional);
+   * nunca se acepta como parámetro del cliente por seguridad multi-tenant.
+   *
+   * @param restauranteCtx   buildContexto('restaurante', req.restauranteId)
+   * @param grupoCtx         buildContexto('grupo', req.grupoId)
    */
-  async getClientFlags(contexto?: string): Promise<Record<string, boolean>> {
-    // Usa listar() para aprovechar el caché (KEY_ALL) en lugar de ir directo a DB
+  async getClientFlags(restauranteCtx?: string, grupoCtx?: string): Promise<Record<string, boolean>> {
     const flags = await this.listar();
     const result: Record<string, boolean> = {};
 
@@ -70,12 +78,7 @@ export const featureFlagService = {
         result[flag.nombre] = true;
         continue;
       }
-      if (contexto) {
-        const asignacion = flag.asignaciones.find(a => a.contexto === contexto);
-        result[flag.nombre] = asignacion?.habilitado ?? false;
-      } else {
-        result[flag.nombre] = flag.habilitado;
-      }
+      result[flag.nombre] = resolveAsignacion(flag.asignaciones, restauranteCtx, grupoCtx);
     }
     return result;
   },
