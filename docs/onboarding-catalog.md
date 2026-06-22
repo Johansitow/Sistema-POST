@@ -70,10 +70,16 @@ sola sede (siempre hay exactamente un `OrdenSede` por `Orden`; la saga
 
 | Opción | Escribe |
 |---|---|
-| Solo delivery | `ordenes.modelo_servicio=delivery` · `modulo.mesas=off` · `ordenes.propina=off` · `modulo.clientes=on` |
+| Solo delivery | `ordenes.modelo_servicio=delivery` · `modulo.mesas=off` · `ordenes.propina=off` |
 | Solo mostrador | `ordenes.modelo_servicio=mostrador` · `modulo.mesas=off` · `ordenes.propina=off` |
 | Mesas / salón *(módulo parcial)* | `ordenes.modelo_servicio=mesas` · `modulo.mesas=on` · `ordenes.propina=on` |
 | Mixto *(módulo parcial)* | `ordenes.modelo_servicio=mixto` · `modulo.mesas=on` · `ordenes.propina=on` |
+
+> **Delivery y clientes:** delivery NO fuerza `modulo.clientes=on`. El modelo `Orden`
+> tiene campos propios para la entrega (`direccion_entrega`, `telefono_contacto`,
+> `nombre_contacto`, `notas_entrega`) con `id_cliente Int?` opcional — exactamente
+> como `mesa` vive en la orden sin módulo de salón detrás. Una dark kitchen puede
+> operar delivery sin base de clientes. **El Eje 6 es el único dueño de `modulo.clientes`.**
 
 > ⚠️ **`modulo.mesas` es parcial:** hoy solo existe el campo `mesa` en la orden
 > (`CreateOrdenCommand`), **no** un gestor de salón (sin plano, sin estado de mesa, sin
@@ -107,11 +113,32 @@ sola sede (siempre hay exactamente un `OrdenSede` por `Orden`; la saga
 | Factura formal | `facturacion.tipo=formal` · `modulo.facturas=on` |
 | Ambos | `facturacion.tipo=ambos` · `modulo.facturas=on` |
 | **Moneda** (sí se pregunta) | `general.moneda=<COP/USD/…>` (default por país, confirmado con un tap) |
-| **IVA** (NO se pregunta) | `facturacion.iva=<default del país/arquetipo>` — ajuste fino va a configuración posterior |
 
-> Decisión: la **moneda** es fundacional → se pregunta en el wizard. El **IVA** tiene
-> matices (tasas múltiples, exenciones) que un onboarding no debe simplificar mal → se
-> siembra un default y se refina luego en el módulo de configuración.
+#### Sub-eje 4B — Impuesto `(S, adaptativo)` — *pregunta condicional*
+> "¿Operas bajo contrato de franquicia, concesión o regalía?"
+
+| Respuesta | Escribe |
+|---|---|
+| No (default) | `facturacion.impuesto_tipo=impoconsumo` · `facturacion.impuesto_tarifa=8` |
+| Sí | `facturacion.impuesto_tipo=iva` · `facturacion.impuesto_tarifa=19` |
+
+> **Por qué dos claves en lugar de `facturacion.iva`:** el sistema necesita saber *qué*
+> impuesto cobra, no solo el porcentaje. El ticket impreso debe discriminar "INC 8%"
+> de "IVA 19%" (obligación legal en Colombia). Con una sola clave numérica no sería
+> posible.
+>
+> **Contexto fiscal (referencia, no asesoría):** en Colombia los restaurantes están
+> excluidos de IVA y gravados con impoconsumo 8% (ET art. 512-1 / 512-9). Las
+> franquicias, concesiones y negocios bajo regalía sí causan IVA 19%. El usuario
+> confirmará el régimen con su contador; el wizard solo fija el default del sistema.
+>
+> **Carácter opcional:** si el usuario no responde este sub-eje, el resolver **no
+> emite nada** — las claves caen al default global sembrado en el seed
+> (`impoconsumo / 8`) por la resolución sede→grupo→global. La tarifa es editable
+> posteriormente (un restaurante no responsable del INC puede pasarla a exento).
+>
+> **Dueño único:** este sub-eje es el único que escribe `facturacion.impuesto_tipo`
+> y `facturacion.impuesto_tarifa`. Ningún otro eje debe tocar estas claves.
 
 ### Eje 5 — Caja `(S)`
 > "¿Maneja turnos y cierres de caja?"
@@ -129,6 +156,11 @@ sola sede (siempre hay exactamente un `OrdenSede` por `Orden`; la saga
 | Ventas anónimas | `modulo.clientes=off` · `modulo.fidelizacion=off` |
 | Registro de clientes | `modulo.clientes=on` · `modulo.fidelizacion=off` |
 | Clientes + puntos | `modulo.clientes=on` · `modulo.fidelizacion=on` (activa `LoyaltyPlugin`) |
+
+> **Eje 6 es el único dueño de `modulo.clientes` y `modulo.fidelizacion`.**
+> Ningún otro eje escribe estas claves. El resolver debe fallar fuerte si detecta
+> que dos ejes distintos escriben valores distintos a la misma clave sin una regla
+> explícita en este catálogo — no resolver colisiones por orden de iteración.
 
 ### Eje 7 — Estructura multi-sede `(G)`
 > "¿Es una sola sede o un grupo con varias?"
@@ -155,14 +187,14 @@ dejándolos como "ajustes finos" opcionales.
 Cada arquetipo es una fila de respuestas predefinidas. El usuario elige uno y puede
 ajustar cualquier eje después.
 
-| Arquetipo | Servicio | Inventario | Recetas | Facturación | Caja | Clientes | Multi-sede |
-|---|---|---|---|---|---|---|---|
-| Dark kitchen | delivery | simple | simples | ticket | no | registro | no |
-| Con mesas | mesas *(parcial)* | avanzado | fases | ambos | sí | registro | no |
-| Comida rápida | mostrador | simple | simples | ticket | sí | anónimo | no |
-| Cafetería / panadería | mostrador | simple | no usa | ticket | sí | anónimo | no |
-| Bar | mixto *(parcial)* | avanzado | simples | ambos | sí | anónimo | no |
-| Franquicia | mixto *(parcial)* | avanzado | fases | ambos | sí | puntos | sí |
+| Arquetipo | Servicio | Inventario | Recetas | Facturación | Caja | Clientes | Multi-sede | Franquicia |
+|---|---|---|---|---|---|---|---|---|
+| Dark kitchen | delivery | simple | simples | ticket | no | registro | no | no |
+| Con mesas | mesas *(parcial)* | avanzado | fases | ambos | sí | registro | no | no |
+| Comida rápida | mostrador | simple | simples | ticket | sí | anónimo | no | no |
+| Cafetería / panadería | mostrador | simple | no usa | ticket | sí | anónimo | no | no |
+| Bar | mixto *(parcial)* | avanzado | simples | ambos | sí | anónimo | no | no |
+| Franquicia | mixto *(parcial)* | avanzado | fases | ambos | sí | puntos | sí | **sí** |
 
 ---
 
@@ -193,8 +225,15 @@ ajustar cualquier eje después.
 
 ## 8. Pendientes antes de cerrar
 
-- [ ] Confirmar si `ConfiguracionRestaurante` admite scope de grupo (ejes `(G)`).
-- [ ] Definir defaults de `facturacion.iva` y `general.moneda` por país/arquetipo.
+- [x] Confirmar si `ConfiguracionRestaurante` admite scope de grupo → resuelto: se creó
+  `ConfiguracionGrupo` como espejo con `id_grupo`. Las tres capas están alineadas.
+- [x] Conflicto `modulo.clientes` entre Eje 1 y Eje 6 → resuelto: `id_cliente` es
+  opcional en `Orden`; `direccion_entrega` vive directo en la orden. Eje 6 es el único
+  dueño. Delivery+anónimo es una combinación válida (dark kitchen sin base de clientes).
+- [x] Definir defaults de impuesto por país/arquetipo → resuelto: `facturacion.iva`
+  reemplazada por `facturacion.impuesto_tipo` (impoconsumo|iva) y
+  `facturacion.impuesto_tarifa` (8|19). Default global: impoconsumo 8%. Franquicias:
+  iva 19%. El sub-eje 4B es opcional; si no se responde cae al seed global.
 - [ ] Confirmar nombres finales de claves al sembrar el seed.
 
 ---

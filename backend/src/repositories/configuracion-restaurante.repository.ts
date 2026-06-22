@@ -4,7 +4,7 @@
  * Gestiona la tabla `configuracion_restaurante` — clave/valor por restaurante.
  * Permite que cada tenant tenga su propia configuración sin conflictos con otros.
  *
- * Ejemplos de claves: 'puntos_por_unidad', 'iva_porcentaje', 'moneda_display'
+ * Ejemplos de claves: 'puntos_por_unidad', 'iva_porcentaje', 'general.moneda'
  */
 
 import prisma from '../config/database';

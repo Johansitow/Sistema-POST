@@ -138,7 +138,12 @@ async function main() {
   ]);
   console.log('✅ Permisos de producción, caja, compras y clientes agregados');
 
-  const todosLosPermisos = [...permisos, ...permisosNuevos];
+  const permisosOnboarding = await Promise.all([
+    prisma.permiso.create({ data: { nombre: 'Aplicar onboarding', codigo: 'onboarding.aplicar', modulo: 'admin', descripcion: 'Ejecutar el wizard de configuración inicial de una sede' } }),
+  ]);
+  console.log('✅ Permiso onboarding.aplicar creado');
+
+  const todosLosPermisos = [...permisos, ...permisosNuevos, ...permisosOnboarding];
 
   // Admin recibe TODOS los permisos
   await Promise.all(
@@ -271,13 +276,13 @@ async function main() {
     // Sede principal
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'puntos_por_unidad',    valor: '1000'  } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'iva_porcentaje',       valor: '19'    } }),
-    prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'moneda_display',       valor: 'COP'   } }),
+    prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'general.moneda',       valor: 'COP'   } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'puntos_bienvenida',    valor: '50'    } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restPrincipal.id, clave: 'costo_domicilio',      valor: '5000'  } }),
     // Sucursal norte
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'puntos_por_unidad',    valor: '1000'  } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'iva_porcentaje',       valor: '19'    } }),
-    prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'moneda_display',       valor: 'COP'   } }),
+    prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'general.moneda',       valor: 'COP'   } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'puntos_bienvenida',    valor: '50'    } }),
     prisma.configuracionRestaurante.create({ data: { id_restaurante: restSucursal.id,  clave: 'costo_domicilio',      valor: '5000'  } }),
   ]);
@@ -292,7 +297,7 @@ async function main() {
     prisma.configuracion.create({ data: { clave: 'nombre_negocio',    valor: 'Cocina Oculta', tipo_dato: 'string',  categoria: 'general',     descripcion: 'Nombre del negocio' } }),
     prisma.configuracion.create({ data: { clave: 'nit_negocio',       valor: '900123456-1',   tipo_dato: 'string',  categoria: 'general',     descripcion: 'NIT del negocio' } }),
     prisma.configuracion.create({ data: { clave: 'porcentaje_iva',    valor: '19',            tipo_dato: 'number',  categoria: 'facturacion', descripcion: 'Porcentaje de IVA' } }),
-    prisma.configuracion.create({ data: { clave: 'moneda',            valor: 'COP',           tipo_dato: 'string',  categoria: 'general',     descripcion: 'Moneda del sistema' } }),
+    prisma.configuracion.create({ data: { clave: 'general.moneda',    valor: 'COP',           tipo_dato: 'string',  categoria: 'general',     descripcion: 'Moneda del sistema (default global; sedes usan ConfiguracionRestaurante)' } }),
     prisma.configuracion.create({ data: { clave: 'prefijo_orden',     valor: 'ORD',           tipo_dato: 'string',  categoria: 'ventas',      descripcion: 'Prefijo para número de órdenes' } }),
     prisma.configuracion.create({ data: { clave: 'alerta_stock_activa', valor: 'true',        tipo_dato: 'boolean', categoria: 'inventario',  descripcion: 'Activar alertas de stock mínimo' } }),
     // Nuevas
@@ -308,8 +313,13 @@ async function main() {
     prisma.configuracion.create({ data: { clave: 'STOCK_AJUSTE_AUTO',     valor: 'true', tipo_dato: 'boolean', categoria: 'inventario', descripcion: 'Ajustar automáticamente stock mínimo/máximo según tendencias de ventas' } }),
     prisma.configuracion.create({ data: { clave: 'LISTA_COMPRAS_LEAD_DAYS', valor: '3', tipo_dato: 'number',  categoria: 'inventario', descripcion: 'Días de lead time del proveedor para calcular stock mínimo (días de anticipación)' } }),
     prisma.configuracion.create({ data: { clave: 'costo_domicilio_defecto', valor: '5000', tipo_dato: 'number', categoria: 'ventas', descripcion: 'Costo de domicilio por defecto al crear una orden' } }),
+    // Defaults globales del wizard de onboarding (fallback cuando no hay override de sede/grupo)
+    prisma.configuracion.create({ data: { clave: 'ordenes.modelo_servicio',      valor: 'mostrador',    tipo_dato: 'string',  categoria: 'onboarding', descripcion: 'Modelo de servicio por defecto' } }),
+    prisma.configuracion.create({ data: { clave: 'facturacion.tipo',             valor: 'ticket',       tipo_dato: 'string',  categoria: 'onboarding', descripcion: 'Tipo de documento de cobro por defecto' } }),
+    prisma.configuracion.create({ data: { clave: 'facturacion.impuesto_tipo',    valor: 'impoconsumo',  tipo_dato: 'string',  categoria: 'onboarding', descripcion: 'Tipo de impuesto (impoconsumo 8% para restaurantes; iva 19% para franquicias — ET art. 512-1)' } }),
+    prisma.configuracion.create({ data: { clave: 'facturacion.impuesto_tarifa',  valor: '8',            tipo_dato: 'number',  categoria: 'onboarding', descripcion: 'Tarifa del impuesto en % (editable después del onboarding)' } }),
   ]);
-  console.log('✅ Configuración creada (originales + nuevas)');
+  console.log('✅ Configuración creada (originales + nuevas + defaults wizard)');
 
   // ============================================================
   // TURNOS DE CAJA
@@ -542,6 +552,22 @@ async function main() {
     { nombre: 'plantillas_impresion',  descripcion: 'Plantillas configurables para tickets y comandas',      habilitado: true  },
     { nombre: 'cierre_caja_avanzado',  descripcion: 'Cierres de caja con turnos y conciliación',            habilitado: true  },
     { nombre: 'reportes_avanzados',    descripcion: 'Reportes de rentabilidad, merma y tendencias',          habilitado: false },
+    // Wizard de onboarding: marcador de completitud (scope=contexto → por restaurante)
+    { nombre: 'onboarding_completado',         descripcion: 'El restaurante completó el wizard de configuración inicial', habilitado: false, scope: 'contexto' },
+    // Flags escritos por el wizard (scope=contexto, todos inician en off; el apply los activa por sede/grupo)
+    { nombre: 'modulo.mesas',                  descripcion: 'Campo mesa habilitado en órdenes (módulo parcial: sin gestor de salón)', habilitado: false, scope: 'contexto' },
+    { nombre: 'ordenes.propina',               descripcion: 'Campo propina habilitado en creación de órdenes',                       habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.inventario',             descripcion: 'Módulo de control de inventario',                                       habilitado: false, scope: 'contexto' },
+    { nombre: 'inventario.lotes',              descripcion: 'Inventario con lotes y control de vencimiento',                         habilitado: false, scope: 'contexto' },
+    { nombre: 'inventario.descuento_auto',     descripcion: 'Descuento automático en stock al registrar ventas',                     habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.recetas',                descripcion: 'Módulo de recetas y costos de producción (definición a nivel grupo)',   habilitado: false, scope: 'contexto' },
+    { nombre: 'recetas.fases',                 descripcion: 'Fases de producción en recetas — KDS por estaciones',                  habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.facturas',               descripcion: 'Módulo de facturación formal',                                         habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.caja',                   descripcion: 'Módulo de turnos y cierres de caja',                                   habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.clientes',               descripcion: 'Módulo de registro y gestión de clientes (Eje 6, dueño único)',         habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.fidelizacion',           descripcion: 'Sistema de puntos y fidelización — activa LoyaltyPlugin',              habilitado: false, scope: 'contexto' },
+    { nombre: 'estructura.multisede',          descripcion: 'Grupo con múltiples sedes activas',                                    habilitado: false, scope: 'contexto' },
+    { nombre: 'modulo.reportes_consolidados',  descripcion: 'Reportes consolidados entre sedes del grupo',                          habilitado: false, scope: 'contexto' },
   ];
   for (const flag of defaultFlags) {
     await prisma.featureFlag.create({ data: flag });
