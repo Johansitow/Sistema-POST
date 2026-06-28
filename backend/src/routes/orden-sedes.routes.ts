@@ -13,6 +13,7 @@ import { asyncHandler } from '../middlewares/error.middleware';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/permission.middleware';
 import { tenantContext } from '../middlewares/tenantContext.middleware';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { ordenSedeService } from '../services/orden-sede.service';
 import {
   agregarItemSedeSchema,
@@ -76,11 +77,14 @@ router.get(
  */
 router.patch(
   '/:id/avanzar',
+  tenantContext,
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const sede = await ordenSedeService.avanzarEstado(
       Number(req.params.id),
-      (req as any).user?.id
+      buildTenantCtx(req),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req as any).user?.id,
     );
     res.json({ success: true, data: sede, message: 'Estado de sede actualizado' });
   })
@@ -99,7 +103,7 @@ router.post(
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const data = agregarItemSedeSchema.parse(req.body);
-    const item = await ordenSedeService.agregarItem(Number(req.params.id), data);
+    const item = await ordenSedeService.agregarItem(Number(req.params.id), data, buildTenantCtx(req));
     res.status(201).json({ success: true, data: item, message: 'Producto agregado a la sede' });
   })
 );
@@ -110,10 +114,11 @@ router.post(
  */
 router.put(
   '/items/:itemId',
+  tenantContext,
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const data = actualizarItemSedeSchema.parse(req.body);
-    const item = await ordenSedeService.actualizarItem(Number(req.params.itemId), data);
+    const item = await ordenSedeService.actualizarItem(Number(req.params.itemId), data, buildTenantCtx(req));
     res.json({ success: true, data: item, message: 'Item actualizado' });
   })
 );
@@ -124,9 +129,10 @@ router.put(
  */
 router.delete(
   '/items/:itemId',
+  tenantContext,
   requirePermission('ordenes.cancelar'),
   asyncHandler(async (req, res) => {
-    await ordenSedeService.eliminarItem(Number(req.params.itemId));
+    await ordenSedeService.eliminarItem(Number(req.params.itemId), buildTenantCtx(req));
     res.status(204).send();
   })
 );
@@ -140,13 +146,16 @@ router.delete(
  */
 router.post(
   '/:id/cancelar',
+  tenantContext,
   requirePermission('ordenes.cancelar'),
   asyncHandler(async (req, res) => {
     const { motivo } = cancelarSedeSchema.parse(req.body);
     await ordenSedeService.cancelar(
       Number(req.params.id),
       motivo,
-      (req as any).user?.id
+      buildTenantCtx(req),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (req as any).user?.id,
     );
     res.json({ success: true, message: 'Sede cancelada' });
   })

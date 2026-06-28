@@ -24,6 +24,7 @@ import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { recetaService }        from './receta.service';
 import { eventBus }             from '../events/eventBus';
 import { EVENTS }               from '../events/events';
+import type { TenantCtx }       from '../lib/tenantCtx';
 
 const TRANSICIONES: Record<EstadoOrdenSede, EstadoOrdenSede[]> = {
   PENDIENTE:      [EstadoOrdenSede.EN_PREPARACION, EstadoOrdenSede.CANCELADA],
@@ -86,8 +87,8 @@ export const ordenSedeService = {
    * están listas y, si es así, transiciona la Orden global a LISTA.
    * Emite SEDE_EN_PREPARACION o SEDE_LISTA según el caso.
    */
-  async avanzarEstado(id_sede: number, id_usuario?: number) {
-    const sede = await this.obtenerPorId(id_sede);
+  async avanzarEstado(id_sede: number, ctx: TenantCtx, id_usuario?: number) {
+    const sede = await ordenSedeRepository.findByIdScoped(id_sede, ctx);
 
     const siguienteEstado = TRANSICIONES[sede.estado][0];
     if (!siguienteEstado || siguienteEstado === EstadoOrdenSede.CANCELADA) {
@@ -98,7 +99,12 @@ export const ordenSedeService = {
 
     validarTransicion(sede.estado, siguienteEstado);
 
-    const extraData: any = {};
+    const extraData: Partial<{
+      fecha_inicio_prep:  Date;
+      fecha_lista:        Date;
+      fecha_cancelacion:  Date;
+      motivo_cancelacion: string;
+    }> = {};
     if (siguienteEstado === EstadoOrdenSede.EN_PREPARACION) {
       extraData.fecha_inicio_prep = new Date();
     }
@@ -114,7 +120,7 @@ export const ordenSedeService = {
       tipo_evento: siguienteEstado === EstadoOrdenSede.EN_PREPARACION
         ? 'SEDE_EN_PREPARACION'
         : 'SEDE_LISTA',
-      payload: { id_sede, id_restaurante: sede.id_restaurante, sufijo: (sede as any).sufijo },
+      payload: { id_sede, id_restaurante: sede.id_restaurante, sufijo: (sede as Record<string, unknown>).sufijo },
       id_usuario,
     });
 
@@ -124,7 +130,7 @@ export const ordenSedeService = {
         idOrden:       sede.id_orden,
         idSede:        id_sede,
         idRestaurante: sede.id_restaurante,
-        sufijo:        (sede as any).sufijo,
+        sufijo:        (sede as Record<string, unknown>).sufijo,
       });
 
       // Si la Orden global estaba en RECIBIDA → pasar a EN_PROCESO
@@ -178,8 +184,8 @@ export const ordenSedeService = {
     precio_unitario: number;
     descuento?:      number;
     notas?:          string;
-  }) {
-    const sede = await this.obtenerPorId(id_sede);
+  }, ctx: TenantCtx) {
+    const sede = await ordenSedeRepository.findByIdScoped(id_sede, ctx);
 
     if (sede.estado === EstadoOrdenSede.LISTA || sede.estado === EstadoOrdenSede.ENTREGADA) {
       throw new BadRequestError('No se puede modificar una sede ya terminada');
@@ -243,7 +249,10 @@ export const ordenSedeService = {
             data: { stock_actual: toDecimal(Number(stockReg.stock_actual) - data.cantidad) },
           });
         } else {
-          await tx.producto.update({ where: { id: data.id_producto }, data: { stock_actual: toDecimal(Number(producto.stock_actual) - data.cantidad) } });
+          await tx.producto.update({
+            where: { id: data.id_producto },
+            data: { stock_actual: toDecimal(Number(producto.stock_actual) - data.cantidad) },
+          });
         }
       }
 
@@ -252,20 +261,24 @@ export const ordenSedeService = {
       const sedeActualizada = await tx.ordenSede.findUnique({ where: { id: id_sede } });
       if (sedeActualizada) {
         const todasSedes = await tx.ordenSede.findMany({ where: { id_orden: sede.id_orden } });
-        const subtotalTotal = todasSedes.reduce((a: Decimal, s: any) => a.plus(s.subtotal), new Decimal(0));
+        const subtotalTotal = todasSedes.reduce((a: Decimal, s: { subtotal: Decimal }) => a.plus(s.subtotal), new Decimal(0));
         const impTotal = tasaIva !== null ? subtotalTotal.times(tasaIva / 100) : new Decimal(0);
-        await tx.orden.update({ where: { id: sede.id_orden }, data: { subtotal: subtotalTotal, impuestos: impTotal, total: subtotalTotal.plus(impTotal) } });
+        await tx.orden.update({
+          where: { id: sede.id_orden },
+          data: { subtotal: subtotalTotal, impuestos: impTotal, total: subtotalTotal.plus(impTotal) },
+        });
       }
 
       return item;
     });
   },
 
-  async actualizarItem(id_item: number, data: { cantidad?: number; notas?: string }) {
+  async actualizarItem(id_item: number, data: { cantidad?: number; notas?: string }, ctx: TenantCtx) {
     const item = await ordenSedeRepository.findItemById(id_item);
     if (!item) throw new NotFoundError('Item de sede');
 
-    const sede = await this.obtenerPorId(item.id_sede);
+    // Valida que la sede padre pertenece al tenant del ctx
+    const sede = await ordenSedeRepository.findByIdScoped(item.id_sede, ctx);
     if (sede.estado === EstadoOrdenSede.LISTA || sede.estado === EstadoOrdenSede.ENTREGADA || sede.estado === EstadoOrdenSede.CANCELADA) {
       throw new BadRequestError('No se puede modificar este item');
     }
@@ -273,7 +286,12 @@ export const ordenSedeService = {
     const tasaIva = await getTasaIva();
 
     return prisma.$transaction(async (tx) => {
-      const updateData: any = {};
+      const updateData: Partial<{
+        cantidad: Decimal;
+        subtotal: Decimal;
+        total:    Decimal;
+        notas:    string;
+      }> = {};
       if (data.cantidad != null) {
         updateData.cantidad = toDecimal(data.cantidad);
         updateData.subtotal = item.precio_unitario.times(data.cantidad);
@@ -287,11 +305,12 @@ export const ordenSedeService = {
     });
   },
 
-  async eliminarItem(id_item: number) {
+  async eliminarItem(id_item: number, ctx: TenantCtx) {
     const item = await ordenSedeRepository.findItemById(id_item);
     if (!item) throw new NotFoundError('Item de sede');
 
-    const sede = await this.obtenerPorId(item.id_sede);
+    // Valida que la sede padre pertenece al tenant del ctx
+    const sede = await ordenSedeRepository.findByIdScoped(item.id_sede, ctx);
     if (sede.estado !== EstadoOrdenSede.PENDIENTE && sede.estado !== EstadoOrdenSede.EN_PREPARACION) {
       throw new BadRequestError('No se puede eliminar items de una sede en este estado');
     }
@@ -327,8 +346,8 @@ export const ordenSedeService = {
    * Cancela solo esta sede (feature-flagged: 'orden.cancelacion_parcial').
    * Si es la única sede activa de la Orden → cancela la Orden completa.
    */
-  async cancelar(id_sede: number, motivo: string, id_usuario?: number) {
-    const sede = await this.obtenerPorId(id_sede);
+  async cancelar(id_sede: number, motivo: string, ctx: TenantCtx, id_usuario?: number) {
+    const sede = await ordenSedeRepository.findByIdScoped(id_sede, ctx);
 
     if (sede.estado === EstadoOrdenSede.ENTREGADA) {
       throw new BadRequestError('No se puede cancelar una sede ya entregada');
