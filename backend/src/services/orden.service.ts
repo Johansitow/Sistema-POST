@@ -30,6 +30,7 @@ import { facturaService }       from './factura.service';
 import { recetaService }        from './receta.service';
 import { eventBus }             from '../events/eventBus';
 import { EVENTS }               from '../events/events';
+import type { TenantCtx }       from '../lib/tenantCtx';
 
 const SUFIJOS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
@@ -350,12 +351,13 @@ export const ordenService = {
   async pagar(
     id: number,
     pagos: Array<{ id_metodo_pago: number; monto: number; referencia?: string; notas?: string }>,
+    ctx: TenantCtx,
     id_usuario?: number
   ) {
-    const orden = await this.obtenerPorId(id);
+    const orden = await ordenRepository.findByIdScoped(id, ctx);
 
     if (!orden.sedes || orden.sedes.length === 0) {
-      // Fallback al flujo legado si la orden no tiene sedes
+      // Fallback al flujo legado si la orden no tiene sedes (ya validado por findByIdScoped)
       return this.actualizarEstadoLegado(id, pagos);
     }
 
@@ -462,8 +464,8 @@ export const ordenService = {
   },
 
   // ── CANCELAR — nueva arquitectura ─────────────────────────────────────────
-  async cancelar(id: number, motivo?: string, id_usuario?: number) {
-    const orden = await this.obtenerPorId(id);
+  async cancelar(id: number, ctx: TenantCtx, motivo?: string, id_usuario?: number) {
+    const orden = await ordenRepository.findByIdScoped(id, ctx);
 
     if (orden.estado_global === EstadoOrdenGlobal.ENTREGADA) {
       throw new BadRequestError('No se puede cancelar una orden ya entregada');
@@ -527,8 +529,9 @@ export const ordenService = {
   },
 
   // ── ACTUALIZAR datos generales ─────────────────────────────────────────────
-  async actualizar(id: number, data: any) {
-    await this.obtenerPorId(id);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async actualizar(id: number, data: any, ctx: TenantCtx) {
+    await ordenRepository.findByIdScoped(id, ctx);
     const updateData: any = { ...data };
     if (data.costo_domicilio != null) updateData.costo_domicilio = toDecimal(data.costo_domicilio);
     if (data.descuento       != null) updateData.descuento       = toDecimal(data.descuento);
@@ -596,9 +599,10 @@ export const ordenService = {
   async actualizarEstado(
     id: number,
     id_estado_nuevo: number,
+    ctx: TenantCtx,
     pagos?: Array<{ id_metodo_pago: number; monto: number; referencia?: string; notas?: string }>
   ) {
-    const orden = await this.obtenerPorId(id);
+    const orden = await ordenRepository.findByIdScoped(id, ctx);
 
     await estadoRepository.findTransicion(orden.id_estado, id_estado_nuevo).then(t => {
       if (!t) throw new BadRequestError('Transición no permitida desde el estado actual');
@@ -608,9 +612,9 @@ export const ordenService = {
     if (!estadoNuevo) throw new NotFoundError('Estado de orden');
 
     if (estadoNuevo.codigo === 'ENTREGADA') {
-      // Si tiene sedes nuevas, redirigir a pagar()
+      // Si tiene sedes nuevas, redirigir a pagar() (orden ya validada por findByIdScoped)
       if (orden.sedes && orden.sedes.length > 0) {
-        return this.pagar(id, pagos ?? []);
+        return this.pagar(id, pagos ?? [], ctx);
       }
       await recetaService.verificarStockParaOrden(id);
     }
@@ -664,8 +668,9 @@ export const ordenService = {
   },
 
   /** Legado: agregar detalle a orden sin sedes */
-  async agregarDetalle(ordenId: number, data: any) {
-    await this.obtenerPorId(ordenId);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  async agregarDetalle(ordenId: number, data: any, ctx: TenantCtx) {
+    await ordenRepository.findByIdScoped(ordenId, ctx);
     await recetaService.verificarDisponibilidadParaDetalles([{ id_producto: data.id_producto, cantidad: data.cantidad }]);
     return prisma.$transaction(async (tx) => {
       const prod = await tx.producto.findUnique({ where: { id: data.id_producto } });
@@ -688,7 +693,12 @@ export const ordenService = {
     });
   },
 
-  async actualizarDetalle(detalleId: number, data: { cantidad?: number; notas?: string }) {
+  async actualizarDetalle(detalleId: number, data: { cantidad?: number; notas?: string }, ctx: TenantCtx) {
+    // Validate tenant via parent order
+    const detalleRaw = await ordenRepository.findDetalleById(detalleId);
+    if (!detalleRaw) throw new NotFoundError('Detalle');
+    await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+
     if (data.cantidad != null) {
       const detalleActual = await prisma.ordenDetalle.findUnique({ where: { id: detalleId } });
       if (detalleActual) {
@@ -720,7 +730,12 @@ export const ordenService = {
     });
   },
 
-  async eliminarDetalle(detalleId: number) {
+  async eliminarDetalle(detalleId: number, ctx: TenantCtx) {
+    // Validate tenant via parent order
+    const detalleRaw = await ordenRepository.findDetalleById(detalleId);
+    if (!detalleRaw) throw new NotFoundError('Detalle');
+    await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+
     return prisma.$transaction(async (tx) => {
       const detalle = await tx.ordenDetalle.findUnique({ where: { id: detalleId } });
       if (!detalle) throw new NotFoundError('Detalle');

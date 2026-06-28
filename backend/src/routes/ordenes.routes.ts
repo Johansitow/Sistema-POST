@@ -24,6 +24,7 @@ import { requirePermission } from '../middlewares/permission.middleware';
 import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
 import { asyncHandler } from '../middlewares/error.middleware';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 import { socketGateway } from '../config/socket.gateway';
 import { commandBus } from '../application/commands/CommandBus';
@@ -32,6 +33,7 @@ import { GetOrdenesQuery }    from '../application/queries/orden/GetOrdenesQuery
 import { CreateOrdenCommand } from '../application/commands/orden/CreateOrdenCommand';
 import { CancelOrdenCommand } from '../application/commands/orden/CancelOrdenCommand';
 import { ordenService }       from '../services/orden.service';
+import { ordenRepository }    from '../repositories/orden.repository';
 import { TipoOrden, EstadoOrdenGlobal } from '@prisma/client';
 import {
   createOrdenSchema,
@@ -156,10 +158,11 @@ router.post('/',
  * Permite múltiples métodos de pago.
  */
 router.post('/:id/pagar',
+  tenantContext,
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const { pagos } = pagarOrdenGlobalSchema.parse(req.body);
-    const orden = await ordenService.pagar(Number(req.params.id), pagos, (req as any).user?.id);
+    const orden = await ordenService.pagar(Number(req.params.id), pagos, buildTenantCtx(req), (req as any).user?.id);
 
     registrarAuditoria({
       id_usuario:           (req as any).user?.id,
@@ -189,7 +192,7 @@ router.post('/:id/cancelar',
   requirePermission('ordenes.cancelar'),
   asyncHandler(async (req, res) => {
     const { motivo } = cancelarOrdenSchema.parse(req.body);
-    await ordenService.cancelar(Number(req.params.id), motivo, (req as any).user?.id);
+    await ordenService.cancelar(Number(req.params.id), buildTenantCtx(req), motivo, (req as any).user?.id);
 
     registrarAuditoria({
       id_usuario:           (req as any).user?.id,
@@ -215,7 +218,7 @@ router.put('/:id',
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const data = updateOrdenSchema.parse(req.body);
-    const orden = await ordenService.actualizar(Number(req.params.id), data);
+    const orden = await ordenService.actualizar(Number(req.params.id), data, buildTenantCtx(req));
     res.json({ success: true, data: orden, message: 'Orden actualizada' });
   })
 );
@@ -223,10 +226,11 @@ router.put('/:id',
 // ── Legado: cambiar estado por id_estado ─────────────────────────────────────
 
 router.patch('/:id/estado',
+  tenantContext,
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const { id_estado, pagos } = updateEstadoSchema.parse(req.body);
-    const orden = await ordenService.actualizarEstado(Number(req.params.id), id_estado, pagos);
+    const orden = await ordenService.actualizarEstado(Number(req.params.id), id_estado, buildTenantCtx(req), pagos);
 
     registrarAuditoria({
       id_usuario:           (req as any).user?.id,
@@ -252,6 +256,8 @@ router.delete('/:id',
   requirePermission('ordenes.cancelar'),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
+    // Pre-dispatch guard: validate tenant before CQRS — command handler has no ctx
+    await ordenRepository.findByIdScoped(id, buildTenantCtx(req));
     await commandBus.dispatch(new CancelOrdenCommand(id, (req as any).user?.id));
 
     registrarAuditoria({
@@ -277,24 +283,26 @@ router.post('/:id/detalles',
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const data = addDetalleSchema.parse(req.body);
-    const detalle = await ordenService.agregarDetalle(Number(req.params.id), data);
+    const detalle = await ordenService.agregarDetalle(Number(req.params.id), data, buildTenantCtx(req));
     res.status(201).json({ success: true, data: detalle, message: 'Producto agregado a la orden' });
   })
 );
 
 router.put('/:id/detalles/:detalleId',
+  tenantContext,
   requirePermission('ordenes.crear'),
   asyncHandler(async (req, res) => {
     const data = updateDetalleSchema.parse(req.body);
-    const detalle = await ordenService.actualizarDetalle(Number(req.params.detalleId), data);
+    const detalle = await ordenService.actualizarDetalle(Number(req.params.detalleId), data, buildTenantCtx(req));
     res.json({ success: true, data: detalle, message: 'Detalle actualizado' });
   })
 );
 
 router.delete('/detalles/:detalleId',
+  tenantContext,
   requirePermission('ordenes.cancelar'),
   asyncHandler(async (req, res) => {
-    await ordenService.eliminarDetalle(Number(req.params.detalleId));
+    await ordenService.eliminarDetalle(Number(req.params.detalleId), buildTenantCtx(req));
     res.status(204).send();
   })
 );

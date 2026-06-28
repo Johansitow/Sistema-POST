@@ -10,6 +10,7 @@
 import { Request, Response } from 'express';
 import { TipoOrden } from '@prisma/client';
 import { ordenService } from '../services/orden.service';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { createOrdenSchema, updateOrdenSchema, updateEstadoSchema, addDetalleSchema, updateDetalleSchema } from '../dto/ordenes.dto';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
@@ -70,13 +71,13 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
   const data = updateOrdenSchema.parse(req.body);
-  const orden = await ordenService.actualizar(Number(req.params.id), data);
+  const orden = await ordenService.actualizar(Number(req.params.id), data, buildTenantCtx(req));
   res.json({ success: true, data: orden, message: 'Orden actualizada correctamente' });
 });
 
 export const updateEstado = asyncHandler(async (req: Request, res: Response) => {
   const { id_estado, pagos } = updateEstadoSchema.parse(req.body);
-  const orden = await ordenService.actualizarEstado(Number(req.params.id), id_estado, pagos) as any;
+  const orden = await ordenService.actualizarEstado(Number(req.params.id), id_estado, buildTenantCtx(req), pagos) as any;
 
   registrarAuditoria({
     id_usuario:            (req as any).user?.id,
@@ -115,18 +116,18 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
 
 export const addDetalle = asyncHandler(async (req: Request, res: Response) => {
   const data = addDetalleSchema.parse(req.body);
-  const detalle = await ordenService.agregarDetalle(Number(req.params.id), data);
+  const detalle = await ordenService.agregarDetalle(Number(req.params.id), data, buildTenantCtx(req));
   res.status(201).json({ success: true, data: detalle, message: 'Producto agregado a la orden' });
 });
 
 export const updateDetalle = asyncHandler(async (req: Request, res: Response) => {
   const data = updateDetalleSchema.parse(req.body);
-  const detalle = await ordenService.actualizarDetalle(Number(req.params.detalleId), data);
+  const detalle = await ordenService.actualizarDetalle(Number(req.params.detalleId), data, buildTenantCtx(req));
   res.json({ success: true, data: detalle, message: 'Detalle actualizado' });
 });
 
 export const removeDetalle = asyncHandler(async (req: Request, res: Response) => {
-  await ordenService.eliminarDetalle(Number(req.params.detalleId));
+  await ordenService.eliminarDetalle(Number(req.params.detalleId), buildTenantCtx(req));
   res.status(204).send();
 });
 

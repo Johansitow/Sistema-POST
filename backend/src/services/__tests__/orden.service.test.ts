@@ -7,10 +7,15 @@
  *   - agregarDetalle: llama verificarDisponibilidadParaDetalles
  *   - actualizarDetalle: llama verificarDisponibilidadParaDetalles solo cuando la cantidad sube
  *   - eliminar: productos con receta no recuperan stock; productos sin receta sí
+ *   - pagar, cancelar, actualizar, actualizarEstado (tenant guard — Oleada 2b)
+ *   - actualizarDetalle, eliminarDetalle (tenant guard vía orden padre — Oleada 2b)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Decimal } from '@prisma/client/runtime/library';
+import { EstadoOrdenGlobal } from '@prisma/client';
+import type { TenantCtx } from '../../lib/tenantCtx';
+import { ForbiddenError, NotFoundError } from '../../exceptions/HttpErrors';
 
 // ── Mocks: se definen con vi.hoisted para que estén disponibles dentro de vi.mock ──
 
@@ -29,14 +34,16 @@ const { mockTx } = vi.hoisted(() => {
 
 vi.mock('../../repositories/orden.repository', () => ({
   ordenRepository: {
-    findAll:       vi.fn(),
-    findById:      vi.fn(),
-    findUltima:    vi.fn(),
-    update:        vi.fn(),
-    count:         vi.fn(),
-    groupByEstado: vi.fn(),
-    groupByTipo:   vi.fn(),
-    aggregate:     vi.fn(),
+    findAll:          vi.fn(),
+    findById:         vi.fn(),
+    findByIdScoped:   vi.fn(),
+    findUltima:       vi.fn(),
+    findDetalleById:  vi.fn(),
+    update:           vi.fn(),
+    count:            vi.fn(),
+    groupByEstado:    vi.fn(),
+    groupByTipo:      vi.fn(),
+    aggregate:        vi.fn(),
   },
 }));
 
@@ -88,7 +95,13 @@ import { configuracionRepository } from '../../repositories/configuracion.reposi
 import { recetaService } from '../receta.service';
 import { facturaService } from '../factura.service';
 import prisma from '../../config/database';
-import { BadRequestError, NotFoundError } from '../../exceptions/HttpErrors';
+import { BadRequestError } from '../../exceptions/HttpErrors';
+
+// ── Contextos de tenant ───────────────────────────────────────────────────────
+
+const CTX_RESTAURANTE_1: TenantCtx = { restauranteId: 1, grupoId: 10, esSuperAdmin: false };
+const CTX_SIN_TENANT:    TenantCtx = { esSuperAdmin: false };
+const CTX_SUPERADMIN:    TenantCtx = { esSuperAdmin: true };
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -223,43 +236,43 @@ describe('ordenService.actualizarEstado', () => {
   });
 
   it('lanza BadRequestError si la transición de estado no está permitida', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue(null); // transición no existe
 
-    await expect(ordenService.actualizarEstado(1, 5)).rejects.toThrow(BadRequestError);
+    await expect(ordenService.actualizarEstado(1, 5, CTX_SUPERADMIN)).rejects.toThrow(BadRequestError);
   });
 
   it('lanza NotFoundError si el estado destino no existe en BD', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue(null); // estado no encontrado
 
-    await expect(ordenService.actualizarEstado(1, 99)).rejects.toThrow(NotFoundError);
+    await expect(ordenService.actualizarEstado(1, 99, CTX_SUPERADMIN)).rejects.toThrow(NotFoundError);
   });
 
   it('lanza BadRequestError al pasar a ENTREGADA sin proveer pagos', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValue(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA', nombre: 'Entregada' });
     (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
 
-    await expect(ordenService.actualizarEstado(1, 4, [])).rejects.toThrow(BadRequestError);
-    await expect(ordenService.actualizarEstado(1, 4, undefined)).rejects.toThrow(BadRequestError);
+    await expect(ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [])).rejects.toThrow(BadRequestError);
+    await expect(ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, undefined)).rejects.toThrow(BadRequestError);
   });
 
   it('lanza BadRequestError si el total pagado es menor al total de la orden', async () => {
-    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('25000') });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce({ ...mockOrdenBase, total: new Decimal('25000') });
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
     (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
 
     await expect(
-      ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }])
+      ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [{ id_metodo_pago: 1, monto: 10000 }])
     ).rejects.toThrow(BadRequestError);
   });
 
   it('llama verificarStockParaOrden antes de abrir la transacción al pasar a ENTREGADA', async () => {
-    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('10000') });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce({ ...mockOrdenBase, total: new Decimal('10000') });
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
     (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
@@ -270,7 +283,7 @@ describe('ordenService.actualizarEstado', () => {
     mockTx.factura.update.mockResolvedValue({});
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
 
-    await ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }]);
+    await ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [{ id_metodo_pago: 1, monto: 10000 }]);
 
     expect(recetaService.verificarStockParaOrden).toHaveBeenCalledWith(1);
     // Se verifica ANTES de la tx → si falla, no hay rollback innecesario
@@ -280,45 +293,45 @@ describe('ordenService.actualizarEstado', () => {
   });
 
   it('NO llama verificarStockParaOrden para estados distintos a ENTREGADA', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
     mockTx.factura.findUnique.mockResolvedValue(null);
     (facturaService.generarDesdeOrden as any).mockResolvedValue({});
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
 
-    await ordenService.actualizarEstado(1, 3);
+    await ordenService.actualizarEstado(1, 3, CTX_SUPERADMIN);
 
     expect(recetaService.verificarStockParaOrden).not.toHaveBeenCalled();
   });
 
   it('genera factura automáticamente al pasar a EN_PREPARACION (si no existe)', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
     mockTx.factura.findUnique.mockResolvedValue(null); // no existe factura
     (facturaService.generarDesdeOrden as any).mockResolvedValue({});
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
 
-    await ordenService.actualizarEstado(1, 3);
+    await ordenService.actualizarEstado(1, 3, CTX_SUPERADMIN);
 
     expect(facturaService.generarDesdeOrden).toHaveBeenCalledWith(1, mockTx);
   });
 
   it('NO genera factura si ya existe al pasar a EN_PREPARACION', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 3, codigo: 'EN_PREPARACION' });
     mockTx.factura.findUnique.mockResolvedValue({ id: 5 }); // ya existe
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 3 });
 
-    await ordenService.actualizarEstado(1, 3);
+    await ordenService.actualizarEstado(1, 3, CTX_SUPERADMIN);
 
     expect(facturaService.generarDesdeOrden).not.toHaveBeenCalled();
   });
 
   it('al pasar a ENTREGADA llama descontarIngredientesOrden dentro de la transacción', async () => {
-    (ordenRepository.findById as any).mockResolvedValue({ ...mockOrdenBase, total: new Decimal('10000') });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce({ ...mockOrdenBase, total: new Decimal('10000') });
     (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
     (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
     (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
@@ -329,7 +342,7 @@ describe('ordenService.actualizarEstado', () => {
     mockTx.factura.update.mockResolvedValue({});
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
 
-    await ordenService.actualizarEstado(1, 4, [{ id_metodo_pago: 1, monto: 10000 }]);
+    await ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [{ id_metodo_pago: 1, monto: 10000 }]);
 
     expect(recetaService.descontarIngredientesOrden).toHaveBeenCalledWith(1, mockTx);
   });
@@ -341,7 +354,7 @@ describe('ordenService.agregarDetalle', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('llama verificarDisponibilidadParaDetalles antes de abrir la transacción', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
 
     mockTx.producto.findUnique.mockResolvedValue({ id: 7, nombre: 'Jugo', stock_actual: new Decimal('5'), unidad_medida: 'unidad' });
@@ -351,7 +364,7 @@ describe('ordenService.agregarDetalle', () => {
     mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
     mockTx.orden.update.mockResolvedValue({});
 
-    await ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 });
+    await ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 }, CTX_SUPERADMIN);
 
     expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
       { id_producto: 7, cantidad: 2 },
@@ -359,13 +372,13 @@ describe('ordenService.agregarDetalle', () => {
   });
 
   it('no agrega el detalle si verificarDisponibilidadParaDetalles lanza error', async () => {
-    (ordenRepository.findById as any).mockResolvedValue(mockOrdenBase);
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (recetaService.verificarDisponibilidadParaDetalles as any).mockRejectedValue(
       new BadRequestError('Ingredientes insuficientes')
     );
 
     await expect(
-      ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 })
+      ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 }, CTX_SUPERADMIN)
     ).rejects.toThrow(BadRequestError);
 
     expect(mockTx.ordenDetalle.create).not.toHaveBeenCalled();
@@ -378,6 +391,10 @@ describe('ordenService.actualizarDetalle', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('llama verificarDisponibilidadParaDetalles cuando la cantidad aumenta', async () => {
+    // Guard: findDetalleById → findByIdScoped
+    (ordenRepository.findDetalleById as any).mockResolvedValueOnce({ id: 10, id_orden: 1, id_producto: 5, cantidad: new Decimal(2) });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
+    // Pre-check cantidad (dentro del if)
     (prisma.ordenDetalle.findUnique as any).mockResolvedValue({
       id: 10, id_producto: 5, cantidad: new Decimal(2),
     });
@@ -394,7 +411,7 @@ describe('ordenService.actualizarDetalle', () => {
     mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
     mockTx.orden.update.mockResolvedValue({});
 
-    await ordenService.actualizarDetalle(10, { cantidad: 5 }); // 5 > 2 → verifica dif = 3
+    await ordenService.actualizarDetalle(10, { cantidad: 5 }, CTX_SUPERADMIN); // 5 > 2 → verifica dif = 3
 
     expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
       { id_producto: 5, cantidad: 3 }, // diferencia = 5 - 2 = 3
@@ -402,6 +419,9 @@ describe('ordenService.actualizarDetalle', () => {
   });
 
   it('NO llama verificarDisponibilidadParaDetalles cuando la cantidad baja', async () => {
+    // Guard: findDetalleById → findByIdScoped
+    (ordenRepository.findDetalleById as any).mockResolvedValueOnce({ id: 10, id_orden: 1, id_producto: 5, cantidad: new Decimal(5) });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
     (prisma.ordenDetalle.findUnique as any).mockResolvedValue({
       id: 10, id_producto: 5, cantidad: new Decimal(5),
     });
@@ -418,7 +438,7 @@ describe('ordenService.actualizarDetalle', () => {
     mockTx.orden.findUnique.mockResolvedValue(mockOrdenBase);
     mockTx.orden.update.mockResolvedValue({});
 
-    await ordenService.actualizarDetalle(10, { cantidad: 2 }); // 2 < 5 → no verifica
+    await ordenService.actualizarDetalle(10, { cantidad: 2 }, CTX_SUPERADMIN); // 2 < 5 → no verifica
 
     expect(recetaService.verificarDisponibilidadParaDetalles).not.toHaveBeenCalled();
   });
@@ -466,5 +486,160 @@ describe('ordenService.eliminar', () => {
 
     await expect(ordenService.eliminar(999)).rejects.toThrow(NotFoundError);
     expect(mockTx.orden.delete).not.toHaveBeenCalled();
+  });
+});
+
+// ── pagar — tenant guard (Oleada 2b) ─────────────────────────────────────────
+
+describe('ordenService.pagar — tenant guard', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    setupIva(false);
+  });
+
+  it('lanza ForbiddenError cuando ctx no tiene tenant', async () => {
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new ForbiddenError('Se requiere contexto de restaurante para esta operación'));
+
+    await expect(ordenService.pagar(100, [], CTX_SIN_TENANT))
+      .rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('lanza NotFoundError cuando la orden pertenece a otro restaurante (IDOR)', async () => {
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new NotFoundError('Registro 100 no encontrado'));
+
+    await expect(ordenService.pagar(100, [], CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('superadmin puede pagar una orden de cualquier restaurante', async () => {
+    const sedes = [{ id: 5, id_restaurante: 99, items: [] }];
+    const orden = { ...mockOrdenBase, id_restaurante: 99, estado_global: EstadoOrdenGlobal.LISTA, sedes, total: new Decimal('10000') };
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(orden);
+    (prisma.$transaction as any).mockResolvedValueOnce({ ...orden, sedes });
+
+    await expect(ordenService.pagar(100, [{ id_metodo_pago: 1, monto: 10000 }], CTX_SUPERADMIN))
+      .resolves.toBeDefined();
+  });
+
+  it('caso feliz: cajero del restaurante 1 paga su orden', async () => {
+    const sedes = [{ id: 5, id_restaurante: 1, items: [] }];
+    const orden = { ...mockOrdenBase, id_restaurante: 1, estado_global: EstadoOrdenGlobal.LISTA, sedes, total: new Decimal('10000') };
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(orden);
+    (prisma.$transaction as any).mockResolvedValueOnce({ ...orden, sedes });
+
+    await expect(ordenService.pagar(100, [{ id_metodo_pago: 1, monto: 10000 }], CTX_RESTAURANTE_1))
+      .resolves.toBeDefined();
+    expect(ordenRepository.findByIdScoped).toHaveBeenCalledWith(100, CTX_RESTAURANTE_1);
+  });
+});
+
+// ── cancelar — tenant guard (Oleada 2b) ──────────────────────────────────────
+
+describe('ordenService.cancelar — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza ForbiddenError cuando ctx no tiene tenant', async () => {
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new ForbiddenError('Se requiere contexto de restaurante para esta operación'));
+
+    await expect(ordenService.cancelar(100, CTX_SIN_TENANT))
+      .rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('lanza NotFoundError cuando la orden pertenece a otro restaurante (IDOR)', async () => {
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new NotFoundError('Registro 100 no encontrado'));
+
+    await expect(ordenService.cancelar(100, CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('superadmin puede cancelar una orden de cualquier restaurante', async () => {
+    const orden = { ...mockOrdenBase, id_restaurante: 99, estado_global: EstadoOrdenGlobal.EN_PROCESO, sedes: [{ id: 5, items: [] }] };
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(orden);
+    (prisma.$transaction as any).mockResolvedValueOnce(undefined);
+
+    await expect(ordenService.cancelar(100, CTX_SUPERADMIN, 'motivo'))
+      .resolves.toBeUndefined();
+  });
+
+  it('caso feliz: cajero del restaurante 1 cancela su orden', async () => {
+    const orden = { ...mockOrdenBase, id_restaurante: 1, estado_global: EstadoOrdenGlobal.EN_PROCESO, sedes: [{ id: 5, items: [] }] };
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(orden);
+    (prisma.$transaction as any).mockResolvedValueOnce(undefined);
+
+    await expect(ordenService.cancelar(100, CTX_RESTAURANTE_1, 'cliente canceló'))
+      .resolves.toBeUndefined();
+    expect(ordenRepository.findByIdScoped).toHaveBeenCalledWith(100, CTX_RESTAURANTE_1);
+  });
+});
+
+// ── actualizarDetalle — tenant guard vía orden padre (Oleada 2b) ──────────────
+
+describe('ordenService.actualizarDetalle — tenant guard vía orden padre', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza NotFoundError cuando el detalle no existe', async () => {
+    (ordenRepository.findDetalleById as any).mockResolvedValueOnce(null);
+
+    await expect(ordenService.actualizarDetalle(50, { notas: 'test' }, CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('lanza NotFoundError cuando la orden padre es de otro restaurante (IDOR)', async () => {
+    (ordenRepository.findDetalleById as any)
+      .mockResolvedValueOnce({ id: 50, id_orden: 100, id_producto: 7 });
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new NotFoundError('Registro 100 no encontrado'));
+
+    await expect(ordenService.actualizarDetalle(50, { notas: 'test' }, CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('caso feliz: actualiza notas sin cambiar cantidad', async () => {
+    (ordenRepository.findDetalleById as any)
+      .mockResolvedValueOnce({ id: 50, id_orden: 100, id_producto: 7 });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
+    (prisma.$transaction as any).mockResolvedValueOnce({ id: 50, notas: 'sin cebolla' });
+
+    const result = await ordenService.actualizarDetalle(50, { notas: 'sin cebolla' }, CTX_RESTAURANTE_1);
+    expect(result).toBeDefined();
+    expect(ordenRepository.findByIdScoped).toHaveBeenCalledWith(100, CTX_RESTAURANTE_1);
+  });
+});
+
+// ── eliminarDetalle — tenant guard vía orden padre (Oleada 2b) ────────────────
+
+describe('ordenService.eliminarDetalle — tenant guard vía orden padre', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza NotFoundError cuando el detalle no existe', async () => {
+    (ordenRepository.findDetalleById as any).mockResolvedValueOnce(null);
+
+    await expect(ordenService.eliminarDetalle(50, CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('lanza NotFoundError cuando la orden padre es de otro restaurante (IDOR)', async () => {
+    (ordenRepository.findDetalleById as any)
+      .mockResolvedValueOnce({ id: 50, id_orden: 100, id_producto: 7 });
+    (ordenRepository.findByIdScoped as any)
+      .mockRejectedValueOnce(new NotFoundError('Registro 100 no encontrado'));
+
+    await expect(ordenService.eliminarDetalle(50, CTX_RESTAURANTE_1))
+      .rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('caso feliz: dueño legítimo elimina su detalle', async () => {
+    (ordenRepository.findDetalleById as any)
+      .mockResolvedValueOnce({ id: 50, id_orden: 100, id_producto: 7 });
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce(mockOrdenBase);
+    (prisma.$transaction as any).mockResolvedValueOnce(undefined);
+
+    await expect(ordenService.eliminarDetalle(50, CTX_RESTAURANTE_1))
+      .resolves.toBeUndefined();
+    expect(ordenRepository.findByIdScoped).toHaveBeenCalledWith(100, CTX_RESTAURANTE_1);
   });
 });

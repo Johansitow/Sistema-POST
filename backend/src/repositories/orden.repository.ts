@@ -1,13 +1,21 @@
 /**
- * OrdenRepository - queries Prisma para órdenes
+ * OrdenRepository — extiende TenantRepository para aislamiento de tenant.
  *
- * Soporta tanto el modelo legado (Orden + OrdenDetalle) como el nuevo
- * (Orden + OrdenSede + OrdenSedeItem + PagoOrden).
+ * findByIdScoped(id, ctx): lookup guardado — NotFoundError si la orden no
+ * existe O es de otro restaurante. ForbiddenError si ctx no tiene tenant.
+ * Superadmin: accede sin restricción.
+ *
+ * findDetalleById(id): lookup raw de detalle (sin filtro de tenant — el tenant
+ * se valida vía la orden padre, igual que ítems/fases en oleadas anteriores).
+ *
+ * API pública idéntica a la versión anterior (retrocompatible).
  */
 
 import { TipoOrden, EstadoOrdenGlobal } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../config/database';
+import { TenantRepository } from './base/TenantRepository';
+import type { TenantCtx } from '../lib/tenantCtx';
 import { PaginationParams, getSkip } from '../lib/pagination';
 
 // Include legado (mantener para backwards compat)
@@ -39,8 +47,12 @@ const includeSedes = {
   cliente: { select: { id: true, nombre_completo: true, email: true, telefono: true } },
 };
 
-export const ordenRepository = {
-  findAll: (
+class OrdenRepositoryImpl extends TenantRepository {
+  constructor() {
+    super(prisma);
+  }
+
+  findAll(
     pagination: PaginationParams,
     filters: {
       tipo_orden?:      TipoOrden;
@@ -51,7 +63,8 @@ export const ordenRepository = {
       id_restaurante?:  number;
       id_grupo?:        number;
     }
-  ) => {
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {};
     if (filters.tipo_orden)     where.tipo_orden     = filters.tipo_orden;
     if (filters.id_estado)      where.id_estado      = filters.id_estado;
@@ -74,115 +87,178 @@ export const ordenRepository = {
       }),
       prisma.orden.count({ where }),
     ]);
-  },
+  }
 
-  findById: (id: number) =>
-    prisma.orden.findUnique({
+  findById(id: number) {
+    return prisma.orden.findUnique({
       where: { id },
       include: { ...includeCompleto, ...includeSedes, factura: true, eventos: { orderBy: { creado_en: 'asc' } } },
-    }),
+    });
+  }
 
-  findUltima: () =>
-    prisma.orden.findFirst({ orderBy: { numero_orden: 'desc' } }),
+  /**
+   * Lookup guardado: verifica que la orden pertenece al tenant del ctx.
+   * NotFoundError si no existe o es de otro restaurante.
+   * ForbiddenError si ctx no tiene restauranteId y no es superadmin.
+   */
+  findByIdScoped(id: number, ctx: TenantCtx) {
+    return this._scopedLookup(
+      (i) => prisma.orden.findUnique({
+        where: { id: i },
+        include: { ...includeCompleto, ...includeSedes, factura: true, eventos: { orderBy: { creado_en: 'asc' } } },
+      }),
+      id,
+      ctx,
+      'id_restaurante',
+    );
+  }
 
-  // ── Nueva arquitectura ────────────────────────────────────────────────────
+  findUltima() {
+    return prisma.orden.findFirst({ orderBy: { numero_orden: 'desc' } });
+  }
 
-  updateEstadoGlobal: (id: number, estado_global: EstadoOrdenGlobal, extraData?: Partial<{
+  // ── Nueva arquitectura ──────────────────────────────────────────────────────
+
+  updateEstadoGlobal(id: number, estado_global: EstadoOrdenGlobal, extraData?: Partial<{
     fecha_confirmacion: Date;
     fecha_entrega:      Date;
     fecha_cancelacion:  Date;
-  }>) =>
-    prisma.orden.update({
+  }>) {
+    return prisma.orden.update({
       where: { id },
       data: { estado_global, ...extraData },
       include: { ...includeBasico, ...includeSedes },
-    }),
+    });
+  }
 
-  updateTotalesGlobal: (id: number, data: {
+  updateTotalesGlobal(id: number, data: {
     subtotal:  Decimal;
     descuento: Decimal;
     impuestos: Decimal;
     propina:   Decimal;
     total:     Decimal;
-  }) => prisma.orden.update({ where: { id }, data }),
+  }) {
+    return prisma.orden.update({ where: { id }, data });
+  }
 
-  registrarEvento: (data: {
-    id_orden:   number;
+  registrarEvento(data: {
+    id_orden:    number;
     tipo_evento: string;
-    payload:    object;
+    payload:     object;
     id_usuario?: number;
-  }) => prisma.ordenEvento.create({ data }),
+  }) {
+    return prisma.ordenEvento.create({ data });
+  }
 
-  create: (data: any) =>
-    prisma.orden.create({ data, include: includeBasico }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  create(data: any) {
+    return prisma.orden.create({ data, include: includeBasico });
+  }
 
-  update: (id: number, data: any) =>
-    prisma.orden.update({ where: { id }, data, include: includeBasico }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  update(id: number, data: any) {
+    return prisma.orden.update({ where: { id }, data, include: includeBasico });
+  }
 
-  updateEstado: (id: number, id_estado: number) =>
-    prisma.orden.update({ where: { id }, data: { id_estado }, include: includeBasico }),
+  updateEstado(id: number, id_estado: number) {
+    return prisma.orden.update({ where: { id }, data: { id_estado }, include: includeBasico });
+  }
 
-  updateTotales: (id: number, data: { subtotal: Decimal; impuestos: Decimal; total: Decimal }) =>
-    prisma.orden.update({ where: { id }, data }),
+  updateTotales(id: number, data: { subtotal: Decimal; impuestos: Decimal; total: Decimal }) {
+    return prisma.orden.update({ where: { id }, data });
+  }
 
-  delete: (id: number) =>
-    prisma.orden.delete({ where: { id } }),
+  delete(id: number) {
+    return prisma.orden.delete({ where: { id } });
+  }
 
-  // Detalles
-  findDetalleById: (id: number) =>
-    prisma.ordenDetalle.findUnique({ where: { id }, include: { producto: true } }),
+  // ── Detalles (legado) ───────────────────────────────────────────────────────
 
-  findDetallesByOrden: (id_orden: number) =>
-    prisma.ordenDetalle.findMany({ where: { id_orden } }),
+  /** Lookup raw de detalle (tenant validado vía orden padre). */
+  findDetalleById(id: number) {
+    return prisma.ordenDetalle.findUnique({ where: { id }, include: { producto: true } });
+  }
 
-  createDetalle: (data: any) =>
-    prisma.ordenDetalle.create({ data, include: { producto: true } }),
+  findDetallesByOrden(id_orden: number) {
+    return prisma.ordenDetalle.findMany({ where: { id_orden } });
+  }
 
-  updateDetalle: (id: number, data: any) =>
-    prisma.ordenDetalle.update({ where: { id }, data, include: { producto: true } }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  createDetalle(data: any) {
+    return prisma.ordenDetalle.create({ data, include: { producto: true } });
+  }
 
-  deleteDetalle: (id: number) =>
-    prisma.ordenDetalle.delete({ where: { id } }),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  updateDetalle(id: number, data: any) {
+    return prisma.ordenDetalle.update({ where: { id }, data, include: { producto: true } });
+  }
 
-  deleteDetallesByOrden: (id_orden: number) =>
-    prisma.ordenDetalle.deleteMany({ where: { id_orden } }),
+  deleteDetalle(id: number) {
+    return prisma.ordenDetalle.delete({ where: { id } });
+  }
 
-  // Estadísticas
-  count: (where: any)     => prisma.orden.count({ where }),
-  aggregate: (where: any) => prisma.orden.aggregate({
-    where,
-    _sum: { total: true },
-    _avg: { total: true },
-  }),
-  groupByEstado: (where: any) =>
-    prisma.orden.groupBy({ by: ['id_estado'],   where, _count: true }),
-  groupByTipo: (where: any) =>
-    prisma.orden.groupBy({ by: ['tipo_orden'],  where, _count: true }),
-  groupByFecha: (where: any) =>
-    prisma.orden.groupBy({
+  deleteDetallesByOrden(id_orden: number) {
+    return prisma.ordenDetalle.deleteMany({ where: { id_orden } });
+  }
+
+  // ── Estadísticas ────────────────────────────────────────────────────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  count(where: any) {
+    return prisma.orden.count({ where });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  aggregate(where: any) {
+    return prisma.orden.aggregate({
+      where,
+      _sum: { total: true },
+      _avg: { total: true },
+    });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  groupByEstado(where: any) {
+    return prisma.orden.groupBy({ by: ['id_estado'],  where, _count: true });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  groupByTipo(where: any) {
+    return prisma.orden.groupBy({ by: ['tipo_orden'], where, _count: true });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  groupByFecha(where: any) {
+    return prisma.orden.groupBy({
       by: ['fecha_apertura', 'tipo_orden'],
       where,
       _sum: { total: true },
       _count: true,
       orderBy: { fecha_apertura: 'asc' },
-    }),
+    });
+  }
 
-  // Dashboard
-  countHoy: (gte: Date, lt: Date, id_restaurante?: number) =>
-    prisma.orden.count({ where: {
+  // ── Dashboard ───────────────────────────────────────────────────────────────
+
+  countHoy(gte: Date, lt: Date, id_restaurante?: number) {
+    return prisma.orden.count({ where: {
       fecha_apertura: { gte, lt },
       ...(id_restaurante ? { id_restaurante } : {}),
-    } }),
-  aggregateVentasHoy: (id_estado: number, gte: Date, lt: Date, id_restaurante?: number) =>
-    prisma.orden.aggregate({
+    } });
+  }
+
+  aggregateVentasHoy(id_estado: number, gte: Date, lt: Date, id_restaurante?: number) {
+    return prisma.orden.aggregate({
       where: {
         id_estado, fecha_apertura: { gte, lt },
         ...(id_restaurante ? { id_restaurante } : {}),
       },
       _sum: { total: true },
-    }),
-  groupByFechaSemana: (id_estado: number, gte: Date, id_restaurante?: number) =>
-    prisma.orden.groupBy({
+    });
+  }
+
+  groupByFechaSemana(id_estado: number, gte: Date, id_restaurante?: number) {
+    return prisma.orden.groupBy({
       by: ['fecha_apertura'],
       where: {
         id_estado, fecha_apertura: { gte },
@@ -190,13 +266,18 @@ export const ordenRepository = {
       },
       _sum: { total: true },
       orderBy: { fecha_apertura: 'asc' },
-    }),
-  topProductos: (id_estado: number, take: number, id_restaurante?: number) =>
-    prisma.ordenDetalle.groupBy({
+    });
+  }
+
+  topProductos(id_estado: number, take: number, id_restaurante?: number) {
+    return prisma.ordenDetalle.groupBy({
       by: ['id_producto'],
       where: { orden: { id_estado, ...(id_restaurante ? { id_restaurante } : {}) } },
       _sum: { cantidad: true, subtotal: true },
       orderBy: { _sum: { cantidad: 'desc' } },
       take,
-    }),
-};
+    });
+  }
+}
+
+export const ordenRepository = new OrdenRepositoryImpl();
