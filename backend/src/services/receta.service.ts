@@ -6,8 +6,10 @@ import prisma from '../config/database';
 import { recetaRepository } from '../repositories/receta.repository';
 import { alertaService }    from './alerta.service';
 import { NotFoundError, BadRequestError, ConflictError } from '../exceptions/HttpErrors';
+import { assertRestauranteId } from '../lib/tenantQuery';
 import { getPaginationParams, getSkip, buildPaginatedResult } from '../lib/pagination';
 import { toDecimal } from '../lib/decimal';
+import type { TenantCtx } from '../lib/tenantCtx';
 
 const MARGEN_DEFAULT = 0.40;
 
@@ -93,6 +95,8 @@ export const recetaService = {
       duracion_minutos?: number; merma_esperada_porcentaje?: number;
     }[];
   }) {
+    assertRestauranteId(data.id_restaurante);
+
     const producto = await prisma.producto.findUnique({ where: { id: data.id_producto_final } });
     if (!producto) throw new NotFoundError('Producto final');
 
@@ -105,13 +109,13 @@ export const recetaService = {
     return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
   },
 
-  async actualizar(id: number, data: any) {
-    await this.obtenerPorId(id);
+  async actualizar(id: number, data: any, ctx: TenantCtx) {
+    await recetaRepository.findByIdScoped(id, ctx);
     return recetaRepository.update(id, data);
   },
 
-  async actualizarIngredientes(id: number, ingredientes: any[]) {
-    await this.obtenerPorId(id);
+  async actualizarIngredientes(id: number, ingredientes: any[], ctx: TenantCtx) {
+    await recetaRepository.findByIdScoped(id, ctx);
     await this._verificarIngredientes(ingredientes);
     const receta = await recetaRepository.reemplazarIngredientes(id, ingredientes);
     return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
@@ -119,16 +123,16 @@ export const recetaService = {
 
   // ─── Fases ───────────────────────────────────────────────────────────────────
 
-  async listarFases(id_receta: number) {
-    await this.obtenerPorId(id_receta);
+  async listarFases(id_receta: number, ctx: TenantCtx) {
+    await recetaRepository.findByIdScoped(id_receta, ctx);
     return recetaRepository.findFasesByReceta(id_receta);
   },
 
   async crearFase(id_receta: number, data: {
     numero_fase: number; nombre: string; descripcion: string;
     duracion_minutos?: number; merma_esperada_porcentaje?: number;
-  }) {
-    await this.obtenerPorId(id_receta);
+  }, ctx: TenantCtx) {
+    await recetaRepository.findByIdScoped(id_receta, ctx);
     const faseExistente = await prisma.recetaFase.findUnique({
       where: { id_receta_numero_fase: { id_receta, numero_fase: data.numero_fase } },
     });
@@ -141,15 +145,19 @@ export const recetaService = {
   async actualizarFase(id: number, data: Partial<{
     numero_fase: number; nombre: string; descripcion: string;
     duracion_minutos: number; merma_esperada_porcentaje: number;
-  }>) {
-    const fase = await prisma.recetaFase.findUnique({ where: { id } });
+  }>, ctx: TenantCtx) {
+    const fase = await recetaRepository.findFaseById(id);
     if (!fase || fase.estado === 'eliminado') throw new NotFoundError('Fase de receta');
+    // Valida que la receta padre pertenece al tenant del ctx
+    await recetaRepository.findByIdScoped(fase.id_receta, ctx);
     return recetaRepository.updateFase(id, data);
   },
 
-  async eliminarFase(id: number) {
-    const fase = await prisma.recetaFase.findUnique({ where: { id } });
+  async eliminarFase(id: number, ctx: TenantCtx) {
+    const fase = await recetaRepository.findFaseById(id);
     if (!fase || fase.estado === 'eliminado') throw new NotFoundError('Fase de receta');
+    // Valida que la receta padre pertenece al tenant del ctx
+    await recetaRepository.findByIdScoped(fase.id_receta, ctx);
     return recetaRepository.deleteFase(id);
   },
 

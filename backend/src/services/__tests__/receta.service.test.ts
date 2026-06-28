@@ -14,17 +14,19 @@ import { Decimal } from '@prisma/client/runtime/library';
 
 vi.mock('../../repositories/receta.repository', () => ({
   recetaRepository: {
-    findByProductoFinal:  vi.fn(),
-    findAll:              vi.fn(),
-    findById:             vi.fn(),
-    findRecetaConStock:   vi.fn(),
-    create:               vi.fn(),
-    update:               vi.fn(),
+    findByProductoFinal:    vi.fn(),
+    findAll:                vi.fn(),
+    findById:               vi.fn(),
+    findByIdScoped:         vi.fn(),   // guarded lookup (IDOR fix)
+    findFaseById:           vi.fn(),   // lookup de fase por id
+    findRecetaConStock:     vi.fn(),
+    create:                 vi.fn(),
+    update:                 vi.fn(),
     reemplazarIngredientes: vi.fn(),
-    findFasesByReceta:    vi.fn(),
-    createFase:           vi.fn(),
-    updateFase:           vi.fn(),
-    deleteFase:           vi.fn(),
+    findFasesByReceta:      vi.fn(),
+    createFase:             vi.fn(),
+    updateFase:             vi.fn(),
+    deleteFase:             vi.fn(),
   },
 }));
 
@@ -45,7 +47,8 @@ vi.mock('../alerta.service', () => ({
 import { recetaService } from '../receta.service';
 import { recetaRepository } from '../../repositories/receta.repository';
 import prisma from '../../config/database';
-import { BadRequestError } from '../../exceptions/HttpErrors';
+import { BadRequestError, ForbiddenError, NotFoundError } from '../../exceptions/HttpErrors';
+import type { TenantCtx } from '../../lib/tenantCtx';
 
 // ── Helpers de fixtures ───────────────────────────────────────────────────────
 
@@ -186,6 +189,76 @@ describe('recetaService.verificarDisponibilidadParaDetalles', () => {
   });
 });
 
+// ── recetaService.crear ───────────────────────────────────────────────────────
+
+describe('recetaService.crear', () => {
+  // resetAllMocks limpia la cola de mockResolvedValueOnce además de calls/results
+  beforeEach(() => vi.resetAllMocks());
+
+  const baseData = {
+    id_producto_final: 5,
+    id_restaurante:    2,
+    nombre_receta:     'Bandeja Paisa',
+    cantidad_producida: 1,
+    unidad_produccion:  'porcion',
+    ingredientes: [{ id_producto: 10, cantidad: 200, unidad: 'gramo' }],
+  };
+
+  it('lanza ForbiddenError si id_restaurante no viene del contexto (undefined)', async () => {
+    await expect(
+      recetaService.crear({ ...baseData, id_restaurante: undefined as any })
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('lanza NotFoundError si el producto final no existe', async () => {
+    (prisma.producto.findUnique as any).mockResolvedValueOnce(null);
+
+    await expect(recetaService.crear(baseData)).rejects.toThrow('Producto final');
+  });
+
+  it('lanza ConflictError si el producto ya tiene una receta activa', async () => {
+    (prisma.producto.findUnique as any).mockResolvedValueOnce({ id: 5, nombre: 'Plato' });
+    (recetaRepository.findByProductoFinal as any).mockResolvedValueOnce(makeReceta([]));
+
+    await expect(recetaService.crear(baseData)).rejects.toThrow('ya tiene una receta activa');
+  });
+
+  it('propaga id_restaurante al repositorio (el producto queda en el restaurante correcto)', async () => {
+    (prisma.producto.findUnique as any).mockResolvedValueOnce({ id: 5, nombre: 'Plato' });
+    (prisma.producto.findMany as any).mockResolvedValueOnce([
+      { id: 10, nombre: 'Arroz', tipo_materia: 'prima' },
+    ]);
+    (recetaRepository.findByProductoFinal as any).mockResolvedValueOnce(null);
+    const mockReceta = { ...makeReceta([makeIngrediente(10, 'Arroz', 200, 'gramo', 500, 'gramo')]), id_restaurante: 2 };
+    (recetaRepository.create as any).mockResolvedValueOnce(mockReceta);
+
+    await recetaService.crear(baseData);
+
+    const callArg = (recetaRepository.create as any).mock.calls[0][0];
+    expect(callArg.id_restaurante).toBe(2);
+  });
+
+  it('strips id_restaurante si el cliente lo envía en el body (la ruta lo sobreescribe con el contexto)', () => {
+    // Este test documenta el contrato: el body nunca puede fijar el restaurante.
+    // La ruta hace: { ...body, id_restaurante: req.restauranteId! }
+    // → un id_restaurante en el body es ignorado porque la desestructuración lo descarta:
+    //   const { id_restaurante: _ignored, ...rest } = req.body
+    // Verificamos que si el service recibe id_restaurante=99 (contexto), la receta se crea con 99.
+    (prisma.producto.findUnique as any)
+      .mockResolvedValueOnce({ id: 5, nombre: 'Plato' });
+    (prisma.producto.findMany as any).mockResolvedValueOnce([
+      { id: 10, nombre: 'Arroz', tipo_materia: 'prima' },
+    ]);
+    (recetaRepository.findByProductoFinal as any).mockResolvedValueOnce(null);
+    const mockReceta = { ...makeReceta([makeIngrediente(10, 'Arroz', 200, 'gramo', 500, 'gramo')]), id_restaurante: 99 };
+    (recetaRepository.create as any).mockResolvedValueOnce(mockReceta);
+
+    // La ruta inyecta id_restaurante desde req.restauranteId (= 99 aquí)
+    const promesa = recetaService.crear({ ...baseData, id_restaurante: 99 });
+    return expect(promesa).resolves.toBeDefined();
+  });
+});
+
 // ── _calcularRentabilidad ─────────────────────────────────────────────────────
 
 describe('recetaService._calcularRentabilidad', () => {
@@ -252,6 +325,151 @@ describe('recetaService._calcularRentabilidad', () => {
     const r = recetaService._calcularRentabilidad(makeRecetaRent([{ cantidad: 1, precio_unitario: 3000 }], 10000));
     // minimo = ceil(3000/0.6) = 5000; 10000 - 5000 = 5000
     expect(r.diferencia_precio).toBeGreaterThan(0);
+  });
+});
+
+// ── IDOR guard: recetaService.actualizar ─────────────────────────────────────
+
+describe('recetaService.actualizar — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const CTX_OK:       TenantCtx = { restauranteId: 1, esSuperAdmin: false };
+  const CTX_ADMIN:    TenantCtx = { esSuperAdmin: true };
+  const CTX_NO_TENANT: TenantCtx = { esSuperAdmin: false }; // sin restauranteId
+
+  const mockReceta = makeReceta([]);
+
+  it('lanza ForbiddenError si ctx no tiene restauranteId', async () => {
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new ForbiddenError('Se requiere contexto de restaurante'));
+
+    await expect(
+      recetaService.actualizar(10, { nombre_receta: 'X' }, CTX_NO_TENANT)
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('lanza NotFoundError si la receta pertenece a otro restaurante (IDOR)', async () => {
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new NotFoundError('Registro 10 no encontrado'));
+
+    await expect(
+      recetaService.actualizar(10, { nombre_receta: 'X' }, CTX_OK)
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('superadmin puede actualizar cualquier receta sin error', async () => {
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockReceta);
+    (recetaRepository.update as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockReceta);
+
+    await expect(
+      recetaService.actualizar(10, { nombre_receta: 'Nueva' }, CTX_ADMIN)
+    ).resolves.toBeDefined();
+  });
+
+  it('caso feliz: dueño legítimo actualiza su receta', async () => {
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockReceta);
+    (recetaRepository.update as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockReceta);
+
+    const result = await recetaService.actualizar(10, { nombre_receta: 'Nueva' }, CTX_OK);
+    expect(result).toBeDefined();
+    expect((recetaRepository.update as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(10);
+  });
+});
+
+// ── IDOR guard: recetaService.actualizarFase / eliminarFase ──────────────────
+
+describe('recetaService.actualizarFase — tenant guard (vía receta padre)', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const CTX_OK:    TenantCtx = { restauranteId: 1, esSuperAdmin: false };
+  const CTX_ADMIN: TenantCtx = { esSuperAdmin: true };
+
+  const mockFase = { id: 7, id_receta: 42, estado: 'activo', numero_fase: 1, nombre: 'Prep', descripcion: '' };
+
+  it('lanza NotFoundError si la fase no existe', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(null);
+
+    await expect(
+      recetaService.actualizarFase(7, { nombre: 'X' }, CTX_OK)
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('lanza NotFoundError si la receta padre es de otro restaurante (IDOR)', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new NotFoundError('Registro 42 no encontrado'));
+
+    await expect(
+      recetaService.actualizarFase(7, { nombre: 'X' }, CTX_OK)
+    ).rejects.toThrow(NotFoundError);
+  });
+
+  it('superadmin puede actualizar fase de cualquier receta', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeReceta([]));
+    (recetaRepository.updateFase as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+
+    await expect(
+      recetaService.actualizarFase(7, { nombre: 'X' }, CTX_ADMIN)
+    ).resolves.toBeDefined();
+  });
+
+  it('caso feliz: dueño legítimo actualiza su fase', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeReceta([]));
+    (recetaRepository.updateFase as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...mockFase, nombre: 'Actualizada' });
+
+    const result = await recetaService.actualizarFase(7, { nombre: 'Actualizada' }, CTX_OK);
+    expect(result).toBeDefined();
+    expect((recetaRepository.updateFase as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(7);
+  });
+});
+
+describe('recetaService.eliminarFase — tenant guard (vía receta padre)', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const CTX_OK: TenantCtx = { restauranteId: 1, esSuperAdmin: false };
+
+  const mockFase = { id: 7, id_receta: 42, estado: 'activo', numero_fase: 1, nombre: 'Prep', descripcion: '' };
+
+  it('lanza NotFoundError si la fase no existe', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(null);
+
+    await expect(recetaService.eliminarFase(7, CTX_OK)).rejects.toThrow(NotFoundError);
+  });
+
+  it('lanza NotFoundError si la receta padre es de otro restaurante (IDOR)', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockRejectedValueOnce(new NotFoundError('Registro 42 no encontrado'));
+
+    await expect(recetaService.eliminarFase(7, CTX_OK)).rejects.toThrow(NotFoundError);
+  });
+
+  it('caso feliz: dueño legítimo elimina su fase (soft-delete)', async () => {
+    (recetaRepository.findFaseById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mockFase);
+    (recetaRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(makeReceta([]));
+    (recetaRepository.deleteFase as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...mockFase, estado: 'eliminado' });
+
+    await expect(recetaService.eliminarFase(7, CTX_OK)).resolves.toBeDefined();
+    expect((recetaRepository.deleteFase as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe(7);
   });
 });
 

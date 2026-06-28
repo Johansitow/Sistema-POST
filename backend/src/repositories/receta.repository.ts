@@ -1,8 +1,16 @@
 /**
- * RecetaRepository
+ * RecetaRepository — extiende TenantRepository para aislamiento de tenant.
+ *
+ * findByIdScoped(id, ctx): lookup guardado — NotFoundError si la receta no
+ * existe O es de otro restaurante. ForbiddenError si ctx no tiene tenant.
+ * Superadmin: accede sin restricción.
+ *
+ * API pública idéntica a la versión anterior (retrocompatible).
  */
 
 import prisma from '../config/database';
+import { TenantRepository } from './base/TenantRepository';
+import type { TenantCtx } from '../lib/tenantCtx';
 
 const ingredienteSelect = {
   include: {
@@ -14,15 +22,27 @@ const ingredienteSelect = {
   orderBy: { orden: 'asc' as const },
 };
 
-export const recetaRepository = {
+// Include reutilizado en findById y findByIdScoped
+const recetaFullInclude = {
+  producto_final: true,
+  ingredientes:   ingredienteSelect,
+  fases:          { orderBy: { numero_fase: 'asc' as const }, where: { estado: 'activo' } },
+} as const;
 
-  findAll: (params: { skip: number; take: number; id_producto?: number; estado?: string }) =>
-    prisma.$transaction([
+class RecetaRepositoryImpl extends TenantRepository {
+  constructor() {
+    super(prisma);
+  }
+
+  // ── Consultas ─────────────────────────────────────────────────────────────
+
+  findAll(params: { skip: number; take: number; id_producto?: number; estado?: string }) {
+    return prisma.$transaction([
       prisma.receta.findMany({
         skip: params.skip, take: params.take,
         where: {
           ...(params.id_producto && { id_producto_final: params.id_producto }),
-          ...(params.estado      && { estado: params.estado as any }),
+          ...(params.estado      && { estado: params.estado as never }),
         },
         include: {
           producto_final: {
@@ -35,20 +55,33 @@ export const recetaRepository = {
         orderBy: { fecha_creacion: 'desc' },
       }),
       prisma.receta.count(),
-    ]),
+    ]);
+  }
 
-  findById: (id: number) =>
-    prisma.receta.findUnique({
+  /** Lookup sin filtro de tenant — solo para uso interno o lectura pública. */
+  findById(id: number) {
+    return prisma.receta.findUnique({
       where: { id },
-      include: {
-        producto_final: true,
-        ingredientes: ingredienteSelect,
-        fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
-      },
-    }),
+      include: recetaFullInclude,
+    });
+  }
 
-  findByProductoFinal: (id_producto: number) =>
-    prisma.receta.findFirst({
+  /**
+   * Lookup guardado: verifica que la receta pertenece al tenant del ctx.
+   * NotFoundError si no existe o es de otro restaurante.
+   * ForbiddenError si ctx no tiene restauranteId y no es superadmin.
+   */
+  findByIdScoped(id: number, ctx: TenantCtx) {
+    return this._scopedLookup(
+      (i) => prisma.receta.findUnique({ where: { id: i }, include: recetaFullInclude }),
+      id,
+      ctx,
+      'id_restaurante',
+    );
+  }
+
+  findByProductoFinal(id_producto: number) {
+    return prisma.receta.findFirst({
       where: { id_producto_final: id_producto, estado: 'activo' },
       include: {
         ingredientes: {
@@ -57,9 +90,12 @@ export const recetaRepository = {
         },
         fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
       },
-    }),
+    });
+  }
 
-  create: (data: {
+  // ── Mutaciones de receta ──────────────────────────────────────────────────
+
+  create(data: {
     id_producto_final:              number;
     id_restaurante:                 number;
     nombre_receta:                  string;
@@ -93,15 +129,15 @@ export const recetaRepository = {
       duracion_minutos?:          number;
       merma_esperada_porcentaje?: number;
     }[];
-  }) =>
-    prisma.receta.create({
+  }) {
+    return prisma.receta.create({
       data: {
-        id_producto_final:              data.id_producto_final,
-        id_restaurante:                 data.id_restaurante,
+        producto_final:                 { connect: { id: data.id_producto_final } },
+        restaurante:                    { connect: { id: data.id_restaurante } },
         nombre_receta:                  data.nombre_receta,
         descripcion:                    data.descripcion,
         cantidad_producida:             data.cantidad_producida,
-        unidad_produccion:              data.unidad_produccion as any,
+        unidad_produccion:              data.unidad_produccion as never,
         tiempo_preparacion:             data.tiempo_preparacion,
         instrucciones:                  data.instrucciones,
         instrucciones_almacenamiento:   data.instrucciones_almacenamiento,
@@ -113,12 +149,12 @@ export const recetaRepository = {
           create: data.ingredientes.map((ing, idx) => ({
             id_producto:          ing.id_producto,
             cantidad:             ing.cantidad,
-            unidad:               ing.unidad as any,
+            unidad:               ing.unidad as never,
             es_opcional:          ing.es_opcional ?? false,
             notas:                ing.notas,
             orden:                ing.orden ?? idx,
             numero_fase:          ing.numero_fase,
-            tipo_formula:         ing.tipo_formula as any,
+            tipo_formula:         ing.tipo_formula as never,
             factor_formula:       ing.factor_formula,
             id_ingrediente_base:  ing.id_ingrediente_base,
             formula_descripcion:  ing.formula_descripcion,
@@ -138,12 +174,13 @@ export const recetaRepository = {
       },
       include: {
         producto_final: true,
-        ingredientes: ingredienteSelect,
-        fases: { orderBy: { numero_fase: 'asc' } },
+        ingredientes:   ingredienteSelect,
+        fases:          { orderBy: { numero_fase: 'asc' } },
       },
-    }),
+    });
+  }
 
-  update: (id: number, data: Partial<{
+  update(id: number, data: Partial<{
     nombre_receta:                  string;
     descripcion:                    string;
     cantidad_producida:             number;
@@ -155,18 +192,19 @@ export const recetaRepository = {
     merma_esperada_porcentaje:      number;
     merma_maxima_porcentaje:        number;
     estado:                         string;
-  }>) =>
-    prisma.receta.update({
-      where: { id }, data: data as any,
+  }>) {
+    return prisma.receta.update({
+      where: { id }, data: data as never,
       include: {
         producto_final: true,
-        ingredientes: ingredienteSelect,
-        fases: { orderBy: { numero_fase: 'asc' } },
+        ingredientes:   ingredienteSelect,
+        fases:          { orderBy: { numero_fase: 'asc' } },
       },
-    }),
+    });
+  }
 
-  // Reemplaza ingredientes completamente
-  reemplazarIngredientes: (id_receta: number, ingredientes: {
+  /** Reemplaza ingredientes completamente dentro de una transacción. */
+  reemplazarIngredientes(id_receta: number, ingredientes: {
     id_producto:          number;
     cantidad:             number;
     unidad:               string;
@@ -178,20 +216,20 @@ export const recetaRepository = {
     factor_formula?:      number;
     id_ingrediente_base?: number;
     formula_descripcion?: string;
-  }[]) =>
-    prisma.$transaction(async (tx) => {
+  }[]) {
+    return prisma.$transaction(async (tx) => {
       await tx.recetaIngrediente.deleteMany({ where: { id_receta } });
       await tx.recetaIngrediente.createMany({
         data: ingredientes.map((ing, idx) => ({
           id_receta,
           id_producto:          ing.id_producto,
           cantidad:             ing.cantidad,
-          unidad:               ing.unidad as any,
+          unidad:               ing.unidad as never,
           es_opcional:          ing.es_opcional ?? false,
           notas:                ing.notas,
           orden:                ing.orden ?? idx,
           numero_fase:          ing.numero_fase,
-          tipo_formula:         ing.tipo_formula as any,
+          tipo_formula:         ing.tipo_formula as never,
           factor_formula:       ing.factor_formula,
           id_ingrediente_base:  ing.id_ingrediente_base,
           formula_descripcion:  ing.formula_descripcion,
@@ -201,45 +239,57 @@ export const recetaRepository = {
         where: { id: id_receta },
         include: {
           producto_final: true,
-          ingredientes: ingredienteSelect,
-          fases: { orderBy: { numero_fase: 'asc' } },
+          ingredientes:   ingredienteSelect,
+          fases:          { orderBy: { numero_fase: 'asc' } },
         },
       });
-    }),
+    });
+  }
 
-  // ─── Fases ───────────────────────────────────────────────────────────────────
+  // ── Fases ─────────────────────────────────────────────────────────────────
 
-  findFasesByReceta: (id_receta: number) =>
-    prisma.recetaFase.findMany({
+  findFasesByReceta(id_receta: number) {
+    return prisma.recetaFase.findMany({
       where:   { id_receta, estado: 'activo' },
       orderBy: { numero_fase: 'asc' },
-    }),
+    });
+  }
 
-  createFase: (data: {
+  /** Lookup de fase por id (sin filtro de tenant — el tenant se valida vía la receta padre). */
+  findFaseById(id: number) {
+    return prisma.recetaFase.findUnique({ where: { id } });
+  }
+
+  createFase(data: {
     id_receta:                  number;
     numero_fase:                number;
     nombre:                     string;
     descripcion:                string;
     duracion_minutos?:          number;
     merma_esperada_porcentaje?: number;
-  }) => prisma.recetaFase.create({ data }),
+  }) {
+    return prisma.recetaFase.create({ data });
+  }
 
-  updateFase: (id: number, data: Partial<{
+  updateFase(id: number, data: Partial<{
     numero_fase:                number;
     nombre:                     string;
     descripcion:                string;
     duracion_minutos:           number;
     merma_esperada_porcentaje:  number;
-    estado:           string;
-  }>) => prisma.recetaFase.update({ where: { id }, data: data as any }),
+    estado:                     string;
+  }>) {
+    return prisma.recetaFase.update({ where: { id }, data: data as never });
+  }
 
-  deleteFase: (id: number) =>
-    prisma.recetaFase.update({ where: { id }, data: { estado: 'eliminado' as any } }),
+  deleteFase(id: number) {
+    return prisma.recetaFase.update({ where: { id }, data: { estado: 'eliminado' as never } });
+  }
 
-  // ─── Disponibilidad ──────────────────────────────────────────────────────────
+  // ── Disponibilidad ────────────────────────────────────────────────────────
 
-  findRecetaConStock: (id_receta: number) =>
-    prisma.receta.findUnique({
+  findRecetaConStock(id_receta: number) {
+    return prisma.receta.findUnique({
       where: { id: id_receta },
       include: {
         producto_final: {
@@ -254,5 +304,8 @@ export const recetaRepository = {
           orderBy: { orden: 'asc' },
         },
       },
-    }),
-};
+    });
+  }
+}
+
+export const recetaRepository = new RecetaRepositoryImpl();

@@ -1,14 +1,20 @@
 /**
- * TenantRepository — clase base para repositorios con aislamiento de tenant.
+ * TenantRepository — clase base stateless para repositorios con aislamiento de tenant.
+ *
+ * El contexto de tenant NO va en el constructor; se pasa POR MÉTODO en cada
+ * operación que lo necesite. Esto permite reutilizar una única instancia del
+ * repositorio a lo largo de toda la aplicación (singleton-safe).
  *
  * Uso para NUEVOS repositorios (class-based):
  *
- *   class LoteRepo extends TenantRepository {
- *     findAll() {
- *       return this.prisma.lote.findMany({ where: this.scope() });
- *     }
- *     create(data: CreateLoteDto) {
- *       return this.prisma.lote.create({ data: this.scopeData(data) });
+ *   class MiRepo extends TenantRepository {
+ *     async findByIdScoped(id: number, ctx: TenantCtx) {
+ *       return this._scopedLookup(
+ *         (i) => prisma.miModelo.findUnique({ where: { id: i } }),
+ *         id,
+ *         ctx,
+ *         'id_restaurante',
+ *       );
  *     }
  *   }
  *
@@ -17,57 +23,56 @@
 
 import { PrismaClient } from '@prisma/client';
 import { ForbiddenError, NotFoundError } from '../../exceptions/HttpErrors';
+import type { TenantCtx } from '../../lib/tenantCtx';
 
 export abstract class TenantRepository {
-  constructor(
-    protected readonly prisma: PrismaClient,
-    protected readonly idRestaurante: number,
-    protected readonly idGrupo?: number
-  ) {}
+  constructor(protected readonly prisma: PrismaClient) {}
 
   /**
-   * scope() — retorna el filtro WHERE para queries de este tenant.
-   * Mezcla el id_restaurante obligatorio con cualquier filtro adicional.
+   * _scopedLookup — lookup guardado con verificación de tenant.
    *
-   * @example
-   *   prisma.lote.findMany({ where: this.scope({ estado_lote: 'activo' }) })
-   */
-  protected scope(extra: Record<string, unknown> = {}): Record<string, unknown> {
-    return { id_restaurante: this.idRestaurante, ...extra };
-  }
-
-  /**
-   * scopeData() — inyecta id_restaurante (y opcionalmente id_grupo) en los
-   * datos antes de un create/update. Previene omisión accidental del campo.
-   */
-  protected scopeData<T extends Record<string, unknown>>(data: T): T & { id_restaurante: number } {
-    return { ...data, id_restaurante: this.idRestaurante };
-  }
-
-  /**
-   * assertBelongsToTenant() — valida que un registro recuperado pertenece
-   * al tenant activo. Lanza ForbiddenError si hay mismatch (IDOR prevention).
+   * Reglas de autorización:
+   *   - superadmin            → fetch sin filtro, accede a cualquier tenant
+   *   - ctx sin tenant        → ForbiddenError (el middleware de tenant no resolvió)
+   *   - fila inexistente      → NotFoundError
+   *   - fila de otro tenant   → NotFoundError (mismo error: no revelamos existencia)
    *
-   * @example
-   *   const lote = await prisma.lote.findUnique({ where: { id } });
-   *   this.assertBelongsToTenant(lote, id);
-   *   return lote;
+   * @param finder    Función que busca la fila por id (sin filtro de tenant).
+   * @param id        PK del registro buscado.
+   * @param ctx       Contexto del usuario autenticado (viene de req).
+   * @param tenantKey Campo de la fila que contiene el id del tenant.
    */
-  protected assertBelongsToTenant<T extends { id_restaurante?: number | null }>(
-    record: T | null,
-    id: number
-  ): asserts record is T {
+  protected async _scopedLookup<T extends Record<string, unknown>>(
+    finder:    (id: number) => Promise<T | null>,
+    id:        number,
+    ctx:       TenantCtx,
+    tenantKey: 'id_restaurante' | 'id_grupo',
+  ): Promise<T> {
+    const tenantId = tenantKey === 'id_restaurante' ? ctx.restauranteId : ctx.grupoId;
+
+    if (!ctx.esSuperAdmin && (tenantId === undefined || tenantId === null)) {
+      throw new ForbiddenError('Se requiere contexto de restaurante para esta operación');
+    }
+
+    const record = await finder(id);
+
     if (!record) {
       throw new NotFoundError(`Registro ${id} no encontrado`);
     }
-    if (record.id_restaurante !== this.idRestaurante) {
-      // Log de intento de acceso cruzado — posible IDOR
-      console.warn(
-        `[TenantGuard] IDOR attempt: restaurante=${this.idRestaurante} intentó acceder ` +
-        `a registro con id_restaurante=${record.id_restaurante} (id=${id})`
-      );
-      throw new ForbiddenError('No tienes acceso a este recurso');
+
+    if (!ctx.esSuperAdmin) {
+      const recordTenantVal = (record as Record<string, unknown>)[tenantKey];
+      if (recordTenantVal !== tenantId) {
+        // Mismo error que "no encontrado": no revelamos si el id existe en otro tenant
+        console.warn(
+          `[TenantGuard] IDOR attempt: ${tenantKey}=${tenantId} tried to access ` +
+          `record with ${tenantKey}=${recordTenantVal} (id=${id})`,
+        );
+        throw new NotFoundError(`Registro ${id} no encontrado`);
+      }
     }
+
+    return record;
   }
 }
 
@@ -83,7 +88,7 @@ export abstract class TenantRepository {
  *
  *   // En el controller:
  *   const scope = tenantScope(req.restauranteId!);
- *   const lotes = await loteRepository.findAll(pagination, scope.filters());
+ *   const lotes = await loteRepository.findAll(pagination, scope.where());
  *
  *   // En el repository (nueva firma que acepta scope):
  *   findAll: (pagination, filters) => {
