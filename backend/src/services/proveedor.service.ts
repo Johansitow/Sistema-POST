@@ -5,6 +5,7 @@
 import { EstadoGeneral } from '@prisma/client';
 import { proveedorRepository } from '../repositories/proveedor.repository';
 import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
+import { assertGrupoCtx, type TenantCtx } from '../lib/tenantCtx';
 import { toDecimal } from '../lib/decimal';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 
@@ -31,7 +32,6 @@ export const proveedorService = {
 
   async crear(data: {
     razon_social:             string;
-    id_grupo:                 number;   // obligatorio — proveedor del grupo
     nit?:                     string;
     contacto_nombre?:         string;
     contacto_telefono?:       string;
@@ -42,12 +42,13 @@ export const proveedorService = {
     ciudad?:                  string;
     calificacion?:            number;
     tiempo_entrega_promedio?: number;
-  }) {
+  }, ctx: TenantCtx) {
+    assertGrupoCtx(ctx);
     if (data.nit) {
       const existe = await proveedorRepository.findByNit(data.nit);
       if (existe) throw new ConflictError('Ya existe un proveedor con ese NIT');
     }
-    return proveedorRepository.create(data);
+    return proveedorRepository.create({ ...data, id_grupo: ctx.grupoId! });
   },
 
   async actualizar(id: number, data: Partial<{
@@ -62,8 +63,8 @@ export const proveedorService = {
     ciudad:                   string;
     calificacion:             number;
     tiempo_entrega_promedio:  number;
-  }>) {
-    await this.obtenerPorId(id);
+  }>, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id, ctx);
     if (data.nit) {
       const existe = await proveedorRepository.findByNit(data.nit, id);
       if (existe) throw new ConflictError('Ya existe un proveedor con ese NIT');
@@ -71,15 +72,15 @@ export const proveedorService = {
     return proveedorRepository.update(id, data);
   },
 
-  async cambiarEstado(id: number, estado: EstadoGeneral) {
-    await this.obtenerPorId(id);
+  async cambiarEstado(id: number, estado: EstadoGeneral, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id, ctx);
     return proveedorRepository.update(id, { estado });
   },
 
   // ─── ProveedorProducto ───────────────────────────────────────────────────────
 
-  async listarProductos(id_proveedor: number) {
-    await this.obtenerPorId(id_proveedor);
+  async listarProductos(id_proveedor: number, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id_proveedor, ctx);
     return proveedorRepository.findProductosByProveedor(id_proveedor);
   },
 
@@ -90,8 +91,8 @@ export const proveedorService = {
     cantidad_minima?:        number;
     es_proveedor_preferido?: boolean;
     calidad_calificacion?:   number;
-  }) {
-    await this.obtenerPorId(id_proveedor);
+  }, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id_proveedor, ctx);
 
     const existe = await proveedorRepository.findRelacion(id_proveedor, data.id_producto);
     if (existe) throw new ConflictError('Ese producto ya está asociado a este proveedor');
@@ -106,7 +107,6 @@ export const proveedorService = {
       calidad_calificacion:   data.calidad_calificacion != null ? toDecimal(data.calidad_calificacion) : undefined,
     });
 
-    // Recalcular calificación automática
     await this._recalcularCalificacion(id_proveedor).catch(() => {});
 
     return relacion;
@@ -119,7 +119,9 @@ export const proveedorService = {
     es_proveedor_preferido:  boolean;
     calidad_calificacion:    number;
     fecha_ultima_entrega:    Date;
-  }>) {
+  }>, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id_proveedor, ctx);
+
     const existe = await proveedorRepository.findRelacion(id_proveedor, id_producto);
     if (!existe) throw new NotFoundError('Relación proveedor-producto');
 
@@ -132,13 +134,14 @@ export const proveedorService = {
       ...(data.fecha_ultima_entrega    != null && { fecha_ultima_entrega:   data.fecha_ultima_entrega }),
     });
 
-    // Recalcular calificación automática
     await this._recalcularCalificacion(id_proveedor).catch(() => {});
 
     return relacion;
   },
 
-  async desasociarProducto(id_proveedor: number, id_producto: number) {
+  async desasociarProducto(id_proveedor: number, id_producto: number, ctx: TenantCtx) {
+    await proveedorRepository.findByIdScoped(id_proveedor, ctx);
+
     const existe = await proveedorRepository.findRelacion(id_proveedor, id_producto);
     if (!existe) throw new NotFoundError('Relación proveedor-producto');
     return proveedorRepository.updateRelacion(id_proveedor, id_producto, {

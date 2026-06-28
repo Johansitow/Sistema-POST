@@ -4,6 +4,7 @@
 
 import { Request, Response } from 'express';
 import { proveedorService } from '../services/proveedor.service';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { EstadoGeneral } from '@prisma/client';
 
@@ -26,30 +27,30 @@ export const proveedorController = {
   }),
 
   create: asyncHandler(async (req: Request, res: Response) => {
-    const proveedor = await proveedorService.crear({ ...req.body, id_grupo: req.grupoId! });
+    const proveedor = await proveedorService.crear(req.body, buildTenantCtx(req));
     res.status(201).json({ success: true, data: proveedor, message: 'Proveedor creado correctamente' });
   }),
 
   update: asyncHandler(async (req: Request, res: Response) => {
-    const proveedor = await proveedorService.actualizar(Number(req.params.id), req.body);
+    const proveedor = await proveedorService.actualizar(Number(req.params.id), req.body, buildTenantCtx(req));
     res.json({ success: true, data: proveedor, message: 'Proveedor actualizado correctamente' });
   }),
 
   cambiarEstado: asyncHandler(async (req: Request, res: Response) => {
     const { estado } = req.body;
-    const proveedor = await proveedorService.cambiarEstado(Number(req.params.id), estado);
+    const proveedor = await proveedorService.cambiarEstado(Number(req.params.id), estado, buildTenantCtx(req));
     res.json({ success: true, data: proveedor, message: `Proveedor ${estado} correctamente` });
   }),
 
   // ─── Productos del proveedor ─────────────────────────────────────────────────
 
   getProductos: asyncHandler(async (req: Request, res: Response) => {
-    const productos = await proveedorService.listarProductos(Number(req.params.id));
+    const productos = await proveedorService.listarProductos(Number(req.params.id), buildTenantCtx(req));
     res.json({ success: true, data: productos });
   }),
 
   asociarProducto: asyncHandler(async (req: Request, res: Response) => {
-    const relacion = await proveedorService.asociarProducto(Number(req.params.id), req.body);
+    const relacion = await proveedorService.asociarProducto(Number(req.params.id), req.body, buildTenantCtx(req));
     res.status(201).json({ success: true, data: relacion, message: 'Producto asociado correctamente' });
   }),
 
@@ -57,7 +58,8 @@ export const proveedorController = {
     const relacion = await proveedorService.actualizarRelacion(
       Number(req.params.id),
       Number(req.params.productoId),
-      req.body
+      req.body,
+      buildTenantCtx(req),
     );
     res.json({ success: true, data: relacion, message: 'Relación actualizada correctamente' });
   }),
@@ -65,7 +67,8 @@ export const proveedorController = {
   desasociarProducto: asyncHandler(async (req: Request, res: Response) => {
     await proveedorService.desasociarProducto(
       Number(req.params.id),
-      Number(req.params.productoId)
+      Number(req.params.productoId),
+      buildTenantCtx(req),
     );
     res.json({ success: true, message: 'Producto desasociado correctamente' });
   }),
