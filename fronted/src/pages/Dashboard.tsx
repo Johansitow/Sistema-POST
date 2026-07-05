@@ -9,7 +9,6 @@ import {
   ShoppingCart,
   AlertTriangle,
   DollarSign,
-  TrendingUp,
   RefreshCw,
   Calendar,
   ArrowUpRight,
@@ -270,16 +269,11 @@ export const Dashboard: React.FC = () => {
                 <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 p-3 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
                   <ShoppingCart className="w-6 h-6 text-white" />
                 </div>
-                <div className="flex items-center gap-1 text-emerald-600 text-sm font-semibold">
-                  <TrendingUp className="w-4 h-4" />
-                  <span>12%</span>
-                </div>
               </div>
               <h3 className="text-sm font-medium text-slate-600 mb-1">Órdenes Hoy</h3>
               <p className="text-3xl font-bold text-slate-800">
                 {stats?.ordenesHoy?.toLocaleString() ?? 0}
               </p>
-              <div className="mt-4 text-xs text-slate-500">vs ayer</div>
             </div>
           </div>
 
@@ -317,16 +311,11 @@ export const Dashboard: React.FC = () => {
                 <div className="bg-gradient-to-br from-violet-500 to-violet-600 p-3 rounded-xl shadow-lg group-hover:scale-110 transition-transform duration-300">
                   <DollarSign className="w-6 h-6 text-white" />
                 </div>
-                <div className="flex items-center gap-1 text-violet-600 text-sm font-semibold">
-                  <TrendingUp className="w-4 h-4" />
-                  <span>8%</span>
-                </div>
               </div>
               <h3 className="text-sm font-medium text-slate-600 mb-1">Ventas Hoy</h3>
               <p className="text-2xl font-bold text-slate-800">
                 {formatCurrency(stats?.ventasHoy ?? 0)}
               </p>
-              <div className="mt-4 text-xs text-slate-500">vs ayer</div>
             </div>
           </div>
         </div>

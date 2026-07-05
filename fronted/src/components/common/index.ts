@@ -21,3 +21,4 @@ export { PageHeader     } from './PageHeader';
 export { StatusChip     } from './StatusChip';
 export { TableSkeleton, CardSkeleton, FormSkeleton, ListSkeleton } from './Skeletons';
 export { RequireRestaurante } from './RequireRestaurante';
+export { default as ModalHeader } from './ModalHeader';

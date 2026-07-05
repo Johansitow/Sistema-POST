@@ -17,6 +17,7 @@ import {
   Award, Crown, Building2, Bike, User, Plus, Minus, Package,
 } from 'lucide-react';
 import { clienteService } from '../services/cliente.service';
+import ModalHeader from '../components/common/ModalHeader';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, formatDateShort } from '../utils';
 import { LoadingScreen, EmptyState } from '../components/common';
@@ -176,22 +177,17 @@ const FormCliente: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-6 py-4 flex items-center justify-between shrink-0">
-          <div>
-            <p className="text-teal-200 text-xs">{isEdit ? 'Editar' : 'Nuevo cliente'}</p>
-            <h2 className="text-white font-bold text-lg">
-              {isEdit ? cliente!.nombre_completo : 'Registrar cliente'}
-            </h2>
-          </div>
-          <button onClick={onClose} className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        <ModalHeader
+          title={isEdit ? cliente!.nombre_completo : 'Registrar cliente'}
+          subtitle={isEdit ? 'Editar' : 'Nuevo cliente'}
+          onClose={onClose}
+          gradient="from-teal-600 to-emerald-600"
+        />
 
         {/* Body */}
         <div className="overflow-y-auto p-6 space-y-5">
@@ -402,7 +398,7 @@ const DetalleCliente: React.FC<{ cliente: Cliente; onClose: () => void; onEdit: 
 
   return (
     <>
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
 
@@ -623,7 +619,7 @@ const DetalleCliente: React.FC<{ cliente: Cliente; onClose: () => void; onEdit: 
 
     {/* ── Mini-modal detalle de orden ── */}
     {ordenDetalle && (
-      <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4">
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOrdenDetalle(null)} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
 

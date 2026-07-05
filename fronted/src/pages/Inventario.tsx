@@ -20,6 +20,7 @@ import {
   ArrowDownCircle, Hash, Users, Calculator, Layers, LayoutGrid,
   History, ChevronUp, AlertTriangle,
 } from 'lucide-react';
+import ModalHeader from '../components/common/ModalHeader';
 import { productosService, Producto, ProductoCreateDTO, ProductoUpdateDTO } from '../services/productos.service';
 import { categoriasService, Categoria } from '../services/categorias.service';
 import { inventarioService } from '../services/inventario.service';
@@ -149,18 +150,15 @@ const DisponibilidadModal: React.FC<DisponibilidadModalProps> = ({ producto, onC
   }, [producto.id]);
 
   return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-6 py-4 flex items-center justify-between">
-          <div>
-            <p className="text-teal-200 text-xs">Disponibilidad</p>
-            <h2 className="text-white font-bold">{producto.nombre}</h2>
-          </div>
-          <button onClick={onClose} className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+        <ModalHeader
+          title={producto.nombre}
+          subtitle="Disponibilidad"
+          onClose={onClose}
+          gradient="from-teal-600 to-emerald-600"
+        />
 
         <div className="p-6">
           {loading && (
@@ -418,7 +416,7 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
 
   if (loteCreado) {
     return (
-      <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
           <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -440,7 +438,7 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
   }
 
   return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -799,7 +797,7 @@ const PrecioVentaModal: React.FC<PrecioVentaModalProps> = ({ producto, onClose, 
   const tipoCfg = TIPO_PRODUCTO_CONFIG[tipoP];
 
   return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
 
@@ -1129,7 +1127,7 @@ const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categoria
   const tipoCfg = tipoProducto ? TIPO_PRODUCTO_CONFIG[tipoProducto] : null;
 
   return (
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 

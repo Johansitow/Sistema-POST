@@ -21,6 +21,7 @@ import {
   Trash2, PlusCircle, User, UserPlus, Printer,
 } from 'lucide-react';
 import { printComanda, printFactura, PrintOrden, type PrintTemplateConfig } from '../utils/print';
+import ModalHeader from '../components/common/ModalHeader';
 import { plantillasService } from '../services/plantillas.service';
 import { ordenesService, Orden, OrdenCreateDTO, OrdenCreateV2DTO, OrdenSede, EstadoOrdenGlobal, PagoInput } from '../services/ordenes.service';
 import { productosService, Producto } from '../services/productos.service';
@@ -160,22 +161,19 @@ const ModalPago: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
 
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-emerald-100 text-xs font-medium">Registrar Pago</p>
-              <h2 className="text-white font-bold text-lg">{orden.numero_orden}</h2>
-            </div>
-            <button onClick={onClose} className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors">
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-          <div className="mt-3 bg-white/20 rounded-xl p-3 flex items-center justify-between">
+        <ModalHeader
+          title={orden.numero_orden}
+          subtitle="Registrar Pago"
+          onClose={onClose}
+          gradient="from-emerald-600 to-teal-600"
+        />
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 pb-4">
+          <div className="mt-1 bg-white/20 rounded-xl p-3 flex items-center justify-between">
             <span className="text-emerald-100 text-sm">Total a cobrar</span>
             <span className="text-white font-bold text-xl">{formatCurrency(orden.total)}</span>
           </div>
@@ -403,7 +401,7 @@ const DetalleModal: React.FC<{
 
   return (
     <>
-      <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -1016,7 +1014,7 @@ const CrearOrdenModal: React.FC<{
 
   return (
     <>
-    <div className="fixed inset-0 z-[1400] flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
 
@@ -1476,7 +1474,7 @@ const CrearOrdenModal: React.FC<{
 
     {/* ── Picker de variantes ────────────────────────────────────────── */}
     {variantePicker && (
-      <div className="fixed inset-0 z-[1500] flex items-center justify-center p-4">
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm"
           onClick={() => setVariantePicker(null)} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
