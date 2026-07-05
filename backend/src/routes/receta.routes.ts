@@ -74,6 +74,15 @@ router.get('/:id/rentabilidad',
   }
 );
 
+router.get('/:id/rentabilidad/desglose',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await recetaService.obtenerDesgloseRentabilidad(Number(req.params.id));
+      res.json(successResponse(data));
+    } catch (e) { next(e); }
+  }
+);
+
 router.post('/', requirePermission('productos.crear'),
   async (req: Request, res: Response, next: NextFunction) => {
     try {

@@ -15,6 +15,8 @@ import {
 import { recetaService, type Receta, type Rentabilidad, type RecetaIngrediente } from '../services/servicios-operacion';
 import api from '../services/api';
 import { socket } from '../lib/socket';
+import { useFeatureFlag } from '../store/featureFlagStore';
+import TablaDesgloseRentabilidad, { type DesgloseRentabilidad } from '../components/recetas/TablaDesgloseRentabilidad';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -202,6 +204,16 @@ function TablaIngredientes({ ingredientes }: { ingredientes: RecetaIngrediente[]
 // ─── Detalle de receta ────────────────────────────────────────────────────────
 
 function DetalleReceta({ receta, onEdit }: { receta: Receta; onEdit: () => void }) {
+  const rentabilidadEnabled = useFeatureFlag('rentabilidad_recetas');
+  const [desglose, setDesglose] = useState<DesgloseRentabilidad | null>(null);
+
+  useEffect(() => {
+    if (!rentabilidadEnabled) return;
+    api.get(`/recetas/${receta.id}/rentabilidad/desglose`)
+      .then(r => setDesglose(r.data.data))
+      .catch(() => setDesglose(null));
+  }, [receta.id, rentabilidadEnabled]);
+
   const fases: any[] = (receta as any).fases?.filter((f: any) => f.estado !== 'eliminado') ?? [];
   const tieneFases = fases.length > 0;
 
@@ -287,8 +299,18 @@ function DetalleReceta({ receta, onEdit }: { receta: Receta; onEdit: () => void 
 
         <Divider sx={{ my: 2 }} />
 
-        {/* Rentabilidad */}
+        {/* Rentabilidad — siempre visible (resumen básico) */}
         <RentabilidadCard r={receta.rentabilidad} />
+
+        {/* Desglose de costos por proveedor — solo si flag activo */}
+        {rentabilidadEnabled && desglose && (
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: 'uppercase', letterSpacing: 1, display: 'block', mb: 1 }}>
+              Desglose de costos (precios de proveedor)
+            </Typography>
+            <TablaDesgloseRentabilidad desglose={desglose} />
+          </Box>
+        )}
 
         {/* Instrucciones generales (si existen y no hay fases que las contengan) */}
         {receta.instrucciones && !tieneFases && (

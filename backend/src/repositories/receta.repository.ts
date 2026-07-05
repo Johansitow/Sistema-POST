@@ -286,6 +286,35 @@ class RecetaRepositoryImpl extends TenantRepository {
     return prisma.recetaFase.update({ where: { id }, data: { estado: 'eliminado' as never } });
   }
 
+  // ── Rentabilidad con proveedores ──────────────────────────────────────────
+
+  /** Trae la receta con los proveedores activos de cada ingrediente (preferido primero). */
+  findByIdWithProveedores(id: number) {
+    return prisma.receta.findUnique({
+      where: { id },
+      include: {
+        producto_final: {
+          select: { id: true, nombre: true, precio_venta: true, precio_unitario: true },
+        },
+        ingredientes: {
+          include: {
+            producto: {
+              include: {
+                proveedor_productos: {
+                  where:   { estado: 'activo' as never },
+                  select:  { precio_unitario: true, es_proveedor_preferido: true },
+                  orderBy: { es_proveedor_preferido: 'desc' as never },
+                  take: 5,
+                },
+              },
+            },
+          },
+          orderBy: { orden: 'asc' },
+        },
+      },
+    });
+  }
+
   // ── Disponibilidad ────────────────────────────────────────────────────────
 
   findRecetaConStock(id_receta: number) {

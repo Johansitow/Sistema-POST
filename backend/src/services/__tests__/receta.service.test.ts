@@ -473,3 +473,115 @@ describe('recetaService.eliminarFase — tenant guard (vía receta padre)', () =
   });
 });
 
+
+// ── obtenerDesgloseRentabilidad ───────────────────────────────────────────────
+
+const makeIngConProveedor = (
+  nombre: string,
+  cantidad: number,
+  unidad: string,
+  precioProveedor: number | null,
+  preferido = true,
+) => ({
+  id_producto:  99,
+  cantidad:     new Decimal(cantidad),
+  unidad,
+  es_opcional:  false,
+  producto: {
+    id: 99, nombre,
+    precio_unitario: new Decimal(1000),
+    proveedor_productos: precioProveedor != null
+      ? [{ precio_unitario: new Decimal(precioProveedor), es_proveedor_preferido: preferido }]
+      : [],
+  },
+});
+
+const makeRecetaConProveedores = (
+  ingredientes: ReturnType<typeof makeIngConProveedor>[],
+  merma = 0,
+  precio_venta: number | null = 15000,
+) => ({
+  id: 1,
+  nombre_receta: 'Test Desglose',
+  cantidad_producida: new Decimal(1),
+  unidad_produccion: 'unidad',
+  merma_esperada_porcentaje: merma > 0 ? new Decimal(merma) : null,
+  ingredientes,
+  producto_final: {
+    id: 10, nombre: 'Plato',
+    precio_venta: precio_venta != null ? new Decimal(precio_venta) : null,
+    precio_unitario: new Decimal(10000),
+  },
+});
+
+describe('recetaService.obtenerDesgloseRentabilidad', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('calcula margen correctamente con todos los datos', async () => {
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Tomate', 100, 'gramo', 5000),
+    ], 0, 15000);
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.costo_total).toBe(500000);          // 100 × 5000
+    expect(result.costo_con_merma).toBe(500000);      // sin merma
+    expect(result.precio_venta).toBe(15000);
+    expect(result.margen_porcentaje).toBeLessThan(0); // precio < costo → margen negativo
+    expect(result.advertencias).toHaveLength(0);
+  });
+
+  it('retorna advertencia si falta proveedor en un ingrediente', async () => {
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Pollo', 200, 'gramo', null),
+    ]);
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.advertencias).toHaveLength(1);
+    expect(result.advertencias[0].ingrediente).toBe('Pollo');
+    expect(result.desglose[0].precio_unitario).toBeNull();
+    expect(result.desglose[0].subtotal).toBe(0);
+  });
+
+  it('aplica merma esperada al costo (formula / (1 - merma%))', async () => {
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Harina', 1, 'kilogramo', 10000),
+    ], 10);  // 10% merma
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.costo_total).toBe(10000);
+    // costo_con_merma = 10000 / (1 - 0.10) = 11111.11
+    expect(result.costo_con_merma).toBeCloseTo(11111.11, 0);
+    expect(result.merma_costo).toBeCloseTo(1111.11, 0);
+  });
+
+  it('retorna margen negativo si precio venta < costo con merma', async () => {
+    // costo = 15000, precio = 10000 → margen < 0
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Carne', 1, 'kilogramo', 15000),
+    ], 0, 10000);
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.margen_porcentaje).not.toBeNull();
+    expect(result.margen_porcentaje!).toBeLessThan(0);
+  });
+
+  it('retorna margen_porcentaje null si precio_venta es null', async () => {
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Arroz', 1, 'kilogramo', 3000),
+    ], 0, null);
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.precio_venta).toBeNull();
+    expect(result.margen_porcentaje).toBeNull();
+  });
+});

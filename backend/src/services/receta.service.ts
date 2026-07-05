@@ -212,6 +212,62 @@ export const recetaService = {
 
   // ─── Rentabilidad ────────────────────────────────────────────────────────────
 
+  /** Desglose detallado usando precios de ProveedorProducto (preferido o primero). */
+  async obtenerDesgloseRentabilidad(id: number) {
+    const receta = await recetaRepository.findByIdWithProveedores(id);
+    if (!receta) throw new NotFoundError('Receta');
+
+    const advertencias: { ingrediente: string; mensaje: string }[] = [];
+
+    const desglose = receta.ingredientes.map(ing => {
+      const proveedores = (ing.producto as any).proveedor_productos as
+        { precio_unitario: number; es_proveedor_preferido: boolean }[];
+      const proveedor    = proveedores.find(p => p.es_proveedor_preferido) ?? proveedores[0] ?? null;
+      const precio_unitario = proveedor ? Number(proveedor.precio_unitario) : null;
+
+      if (!proveedor) {
+        advertencias.push({
+          ingrediente: ing.producto.nombre,
+          mensaje:     'Sin proveedor asignado. Asigna un proveedor para un margen más exacto.',
+        });
+      }
+
+      return {
+        ingrediente:   ing.producto.nombre,
+        cantidad:      Number(ing.cantidad),
+        unidad:        ing.unidad as string,
+        precio_unitario,
+        subtotal:      Number(ing.cantidad) * (precio_unitario ?? 0),
+      };
+    });
+
+    const costo_total      = desglose.reduce((s, d) => s + d.subtotal, 0);
+    const merma_porcentaje = Number(receta.merma_esperada_porcentaje ?? 0);
+    const merma_factor     = merma_porcentaje / 100;
+    const costo_con_merma  = merma_factor > 0 ? costo_total / (1 - merma_factor) : costo_total;
+    const merma_costo      = costo_con_merma - costo_total;
+
+    const precio_venta    = receta.producto_final.precio_venta != null
+      ? Number(receta.producto_final.precio_venta)
+      : null;
+    const margen_porcentaje = precio_venta != null && precio_venta > 0
+      ? ((precio_venta - costo_con_merma) / precio_venta) * 100
+      : null;
+
+    return {
+      desglose,
+      costo_total:        Math.round(costo_total * 100) / 100,
+      merma_porcentaje,
+      merma_costo:        Math.round(merma_costo * 100) / 100,
+      costo_con_merma:    Math.round(costo_con_merma * 100) / 100,
+      precio_venta,
+      margen_porcentaje:  margen_porcentaje != null
+        ? Math.round(margen_porcentaje * 100) / 100
+        : null,
+      advertencias,
+    };
+  },
+
   _calcularRentabilidad(receta: {
     ingredientes: { cantidad: number; producto: { precio_unitario: number } }[];
     merma_esperada_porcentaje?: number | null;
