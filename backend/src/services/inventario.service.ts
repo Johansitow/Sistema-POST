@@ -259,6 +259,79 @@ export const inventarioService = {
     return loteRepository.update(id, data);
   },
 
+  async calcularRentabilidadLote(id: number, id_restaurante: number) {
+    const lote = await loteRepository.findByIdWithReceta(id);
+    if (!lote) throw new NotFoundError('Lote');
+    if (lote.restaurante.id !== id_restaurante) throw new NotFoundError('Lote');
+
+    // Merma real desde Movimiento (tipo='merma', id_lote)
+    const mermaAgg = await movimientoRepository.sumMermaByLote(id, id_restaurante);
+    const merma_real_cantidad = Number(mermaAgg._sum.cantidad ?? 0);
+    const cantidad_producida  = Number(lote.cantidad_producida);
+    const merma_real_porcentaje =
+      cantidad_producida > 0 ? (merma_real_cantidad / cantidad_producida) * 100 : 0;
+
+    // Costo de ingredientes desde la receta (igual que E4)
+    const receta = lote.producto.recetas_como_final[0] ?? null;
+    const advertencias: { ingrediente: string; mensaje: string }[] = [];
+    let costo_ingredientes = 0;
+
+    if (receta) {
+      for (const ing of receta.ingredientes) {
+        const proveedores = (ing.producto as any).proveedor_productos as {
+          precio_unitario: any; es_proveedor_preferido: boolean;
+        }[];
+        const prov = proveedores.find(p => p.es_proveedor_preferido) ?? proveedores[0] ?? null;
+        if (!prov) {
+          advertencias.push({
+            ingrediente: ing.producto.nombre,
+            mensaje: 'Sin proveedor asignado — costo de ingrediente omitido.',
+          });
+        }
+        costo_ingredientes += Number(ing.cantidad) * (prov ? Number(prov.precio_unitario) : 0);
+      }
+    }
+
+    // Costo ajustado por merma REAL (no estimada)
+    const merma_factor    = merma_real_porcentaje / 100;
+    const costo_con_merma = merma_factor > 0 && merma_factor < 1
+      ? costo_ingredientes / (1 - merma_factor)
+      : costo_ingredientes;
+    const perdida_merma   = costo_con_merma - costo_ingredientes;
+
+    // Ganancia neta = ingresos - costo total de producción
+    const precio_venta    = lote.producto.precio_venta != null
+      ? Number(lote.producto.precio_venta)
+      : null;
+    const cantidad_vendida = Number(lote.cantidad_producida) - merma_real_cantidad;
+    const ingresos        = precio_venta != null ? cantidad_vendida * precio_venta : null;
+    const ganancia_neta   = ingresos != null ? ingresos - costo_con_merma : null;
+    const margen_porcentaje = ingresos != null && ingresos > 0 && ganancia_neta != null
+      ? (ganancia_neta / ingresos) * 100
+      : null;
+
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+
+    return {
+      lote_id:               lote.id,
+      numero_lote:           lote.numero_lote,
+      producto:              lote.producto.nombre,
+      cantidad_producida,
+      merma_real_cantidad:   round2(merma_real_cantidad),
+      merma_real_porcentaje: round2(merma_real_porcentaje),
+      cantidad_vendida:      round2(cantidad_vendida),
+      costo_ingredientes:    round2(costo_ingredientes),
+      costo_con_merma:       round2(costo_con_merma),
+      perdida_merma:         round2(perdida_merma),
+      precio_venta,
+      ingresos:              ingresos != null ? round2(ingresos) : null,
+      ganancia_neta:         ganancia_neta != null ? round2(ganancia_neta) : null,
+      margen_porcentaje:     margen_porcentaje != null ? round2(margen_porcentaje) : null,
+      tiene_receta:          receta != null,
+      advertencias,
+    };
+  },
+
   async valorInventario(id_restaurante?: number) {
     if (id_restaurante !== undefined) {
       // Stock real por restaurante — fuente de verdad para inventario multi-tenant

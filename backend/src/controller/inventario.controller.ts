@@ -72,3 +72,9 @@ export const getLotes = asyncHandler(async (req: Request, res: Response) => {
   });
   res.json({ success: true, ...result });
 });
+
+export const getRentabilidadLote = asyncHandler(async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const data = await inventarioService.calcularRentabilidadLote(id, req.restauranteId!);
+  res.json({ success: true, data });
+});

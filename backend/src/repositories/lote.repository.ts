@@ -76,6 +76,39 @@ export const loteRepository = {
       },
     }),
 
+  findByIdWithReceta: (id: number) =>
+    prisma.lote.findUnique({
+      where: { id },
+      include: {
+        producto: {
+          include: {
+            recetas_como_final: {
+              where:   { estado: 'activo' as never },
+              take:    1,
+              include: {
+                ingredientes: {
+                  include: {
+                    producto: {
+                      include: {
+                        proveedor_productos: {
+                          where:   { estado: 'activo' as never },
+                          select:  { precio_unitario: true, es_proveedor_preferido: true },
+                          orderBy: { es_proveedor_preferido: 'desc' as never },
+                          take: 5,
+                        },
+                      },
+                    },
+                  },
+                  orderBy: { orden: 'asc' },
+                },
+              },
+            },
+          },
+        },
+        restaurante: { select: { id: true } },
+      },
+    }) as unknown as Promise<any>,
+
   update: (id: number, data: Partial<{
     estado_lote:       EstadoLote;
     fecha_vencimiento: Date;

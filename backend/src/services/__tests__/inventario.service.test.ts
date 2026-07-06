@@ -9,6 +9,7 @@ vi.mock('../../repositories/movimiento.repository', () => ({
     groupByTipo:           vi.fn(),
     count:                 vi.fn(),
     findDistinctProductos: vi.fn(),
+    sumMermaByLote:        vi.fn(),
   },
 }));
 
@@ -17,7 +18,13 @@ vi.mock('../../repositories/producto.repository', () => ({
 }));
 
 vi.mock('../../repositories/lote.repository', () => ({
-  loteRepository: { findProximosVencer: vi.fn(), findAll: vi.fn() },
+  loteRepository: {
+    findProximosVencer:   vi.fn(),
+    findAll:              vi.fn(),
+    findById:             vi.fn(),
+    findByIdWithReceta:   vi.fn(),
+    update:               vi.fn(),
+  },
 }));
 
 // Prisma: $transaction delega al callback usando un tx con product + productoStock + lote + movimiento
@@ -50,6 +57,9 @@ vi.mock('../../config/database', () => ({
 // ── Imports DESPUÉS de los mocks ───────────────────────────────────────────────
 
 import { inventarioService } from '../inventario.service';
+import { loteRepository } from '../../repositories/lote.repository';
+
+const loteRepo = loteRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
 import { movimientoRepository } from '../../repositories/movimiento.repository';
 
 const movRepo = movimientoRepository as ReturnType<typeof vi.fn> & typeof movimientoRepository;
@@ -180,5 +190,123 @@ describe('registrarMovimiento', () => {
 
     expect(result.movimiento).toBeTruthy();
     expect(mockTx.lote.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── calcularRentabilidadLote ──────────────────────────────────────────────────
+
+const movRepo2 = movimientoRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
+
+const makeLote = (overrides: Record<string, unknown> = {}) => ({
+  id:               1,
+  numero_lote:      'LOT-001',
+  id_restaurante:   10,
+  cantidad_producida: '100',
+  restaurante:      { id: 10 },
+  producto: {
+    nombre:       'Hamburguesa',
+    precio_venta: '12.00',
+    recetas_como_final: [{
+      ingredientes: [
+        {
+          cantidad: '0.2',
+          unidad:   'kilogramo',
+          producto: {
+            nombre: 'Carne',
+            proveedor_productos: [{ precio_unitario: '50', es_proveedor_preferido: true }],
+          },
+        },
+      ],
+    }],
+  },
+  ...overrides,
+});
+
+describe('calcularRentabilidadLote', () => {
+  it('calcula rentabilidad correcta con merma real', async () => {
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(makeLote());
+    // 10 unidades de merma de 100 producidas = 10%
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: '10' } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    // costo_ingredientes = 0.2 kg × $50 = $10
+    expect(r.costo_ingredientes).toBe(10);
+    // merma 10% → costo_con_merma = 10 / 0.9 ≈ 11.11
+    expect(r.costo_con_merma).toBeCloseTo(11.11, 1);
+    expect(r.merma_real_porcentaje).toBe(10);
+    // cantidad_vendida = 100 - 10 = 90; ingresos = 90 × 12 = 1080
+    expect(r.cantidad_vendida).toBe(90);
+    expect(r.ingresos).toBeCloseTo(1080, 0);
+    expect(r.ganancia_neta).toBeCloseTo(1068.89, 0);
+  });
+
+  it('asume merma 0% si no hay movimientos de merma', async () => {
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(makeLote());
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: null } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    expect(r.merma_real_cantidad).toBe(0);
+    expect(r.merma_real_porcentaje).toBe(0);
+    expect(r.costo_con_merma).toBe(r.costo_ingredientes);
+    expect(r.perdida_merma).toBe(0);
+  });
+
+  it('devuelve ganancia negativa si merma consume casi toda la producción', async () => {
+    // precio proveedor $100/kg → costo_ingredientes = 0.2 × 100 = $20
+    // 90% merma → costo_con_merma = 20 / 0.1 = $200
+    // ingresos = 10 vendidas × $12 = $120 → ganancia = -$80
+    const loteCaroBajo = makeLote({ cantidad_producida: '100' });
+    loteCaroBajo.producto.recetas_como_final[0].ingredientes[0]
+      .producto.proveedor_productos[0].precio_unitario = '100';
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(loteCaroBajo);
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: '90' } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    expect(r.ingresos).toBeCloseTo(120, 0);
+    expect(r.ganancia_neta!).toBeLessThan(0);
+    expect(r.margen_porcentaje!).toBeLessThan(0);
+  });
+
+  it('devuelve margen null si precio_venta es null', async () => {
+    const lote = makeLote();
+    lote.producto.precio_venta = null as unknown as string;
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(lote);
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: '5' } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    expect(r.precio_venta).toBeNull();
+    expect(r.margen_porcentaje).toBeNull();
+    expect(r.ganancia_neta).toBeNull();
+  });
+
+  it('agrega advertencia si un ingrediente no tiene proveedor', async () => {
+    const lote = makeLote();
+    lote.producto.recetas_como_final[0].ingredientes[0].producto.proveedor_productos = [];
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(lote);
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: null } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    expect(r.advertencias).toHaveLength(1);
+    expect(r.advertencias[0].ingrediente).toBe('Carne');
+    expect(r.costo_ingredientes).toBe(0);
+  });
+
+  it('lanza NotFoundError si el lote no existe', async () => {
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(null);
+
+    await expect(inventarioService.calcularRentabilidadLote(999, 10))
+      .rejects.toThrow('Lote');
+  });
+
+  it('lanza NotFoundError si el lote pertenece a otro restaurante', async () => {
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(makeLote({ restaurante: { id: 99 } }));
+
+    await expect(inventarioService.calcularRentabilidadLote(1, 10))
+      .rejects.toThrow('Lote');
   });
 });

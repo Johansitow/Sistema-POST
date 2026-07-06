@@ -73,4 +73,14 @@ export const movimientoRepository = {
       distinct: ['id_producto'],
       select:   { id_producto: true },
     }),
+
+  sumMermaByLote: (id_lote: number, id_restaurante: number) =>
+    prisma.movimiento.aggregate({
+      where: {
+        id_lote,
+        id_restaurante,
+        tipo_movimiento: TipoMovimiento.merma,
+      },
+      _sum: { cantidad: true },
+    }),
 };

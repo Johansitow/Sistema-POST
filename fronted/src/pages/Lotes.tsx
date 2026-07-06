@@ -6,12 +6,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   AlertCircle, RefreshCw, Search, Filter, ChevronDown,
   ChevronLeft, ChevronRight, Hash, Calendar, Users, DollarSign,
-  AlertTriangle, CheckCircle2, Archive, Layers, Clock,
+  AlertTriangle, CheckCircle2, Archive, Layers, Clock, BarChart2, X,
 } from 'lucide-react';
 import api from '../services/api';
 import { useRestauranteActivo } from '../store/restauranteStore';
 import { formatCurrency } from '../utils';
 import { LoadingScreen, EmptyState } from '../components/common';
+import LoteRentabilidad from '../components/lotes/LoteRentabilidad';
+import { Z_INDEX } from '../lib/zIndex';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -102,6 +104,7 @@ export const Lotes: React.FC = () => {
   const [search, setSearch]         = useState('');
   const [filterEstado, setFilterEstado] = useState<EstadoLote | ''>('');
   const [showFilters, setShowFilters]   = useState(false);
+  const [rentabilidadLote, setRentabilidadLote] = useState<Lote | null>(null);
 
   const LIMIT = 20;
 
@@ -256,7 +259,7 @@ export const Lotes: React.FC = () => {
               <table className="w-full">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-100">
-                    {['N° Lote', 'Producto', 'Cantidad', 'Producción', 'Vencimiento', 'Estado', 'Responsable', 'Costo'].map(h => (
+                    {['N° Lote', 'Producto', 'Cantidad', 'Producción', 'Vencimiento', 'Estado', 'Responsable', 'Costo', ''].map(h => (
                       <th key={h} className="px-5 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -362,6 +365,17 @@ export const Lotes: React.FC = () => {
                             <span className="text-xs text-slate-300">—</span>
                           )}
                         </td>
+
+                        {/* Rentabilidad */}
+                        <td className="px-5 py-4">
+                          <button
+                            onClick={() => setRentabilidadLote(lote)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100 transition-colors"
+                            title="Ver rentabilidad real"
+                          >
+                            <BarChart2 className="w-3.5 h-3.5" /> Rentabilidad
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -408,6 +422,39 @@ export const Lotes: React.FC = () => {
         <div className="fixed bottom-6 right-6 bg-white rounded-xl shadow-lg border border-slate-200 px-4 py-2.5 flex items-center gap-2 z-50">
           <RefreshCw className="w-4 h-4 text-indigo-500 animate-spin" />
           <span className="text-sm text-slate-600">Actualizando...</span>
+        </div>
+      )}
+
+      {/* Modal rentabilidad */}
+      {rentabilidadLote && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+          style={{ zIndex: Z_INDEX.MODAL_BASE }}
+          onClick={() => setRentabilidadLote(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-4 flex items-center justify-between rounded-t-2xl">
+              <div>
+                <p className="text-white/70 text-xs mb-0.5">{rentabilidadLote.numero_lote}</p>
+                <h2 className="text-white font-bold">{rentabilidadLote.producto.nombre} — Rentabilidad real</h2>
+              </div>
+              <button
+                onClick={() => setRentabilidadLote(null)}
+                className="text-white/80 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              <LoteRentabilidad loteId={rentabilidadLote.id} />
+            </div>
+          </div>
         </div>
       )}
     </div>
