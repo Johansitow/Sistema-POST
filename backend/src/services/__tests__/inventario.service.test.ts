@@ -213,6 +213,7 @@ const makeLote = (overrides: Record<string, unknown> = {}) => ({
           unidad:   'kilogramo',
           producto: {
             nombre: 'Carne',
+            unidad_medida: 'kilogramo',
             proveedor_productos: [{ precio_unitario: '50', es_proveedor_preferido: true }],
           },
         },
@@ -294,6 +295,24 @@ describe('calcularRentabilidadLote', () => {
     expect(r.advertencias).toHaveLength(1);
     expect(r.advertencias[0].ingrediente).toBe('Carne');
     expect(r.costo_ingredientes).toBe(0);
+  });
+
+  it('caso Lechuga: unidad de ingrediente (kilogramo) incompatible con la unidad del producto (unidad) → no calcula un costo falso', async () => {
+    const lote = makeLote();
+    lote.producto.recetas_como_final[0].ingredientes[0].producto = {
+      nombre: 'Lechuga',
+      unidad_medida: 'unidad',
+      proveedor_productos: [{ precio_unitario: '500', es_proveedor_preferido: true }],
+    } as never;
+    loteRepo.findByIdWithReceta.mockResolvedValueOnce(lote);
+    movRepo2.sumMermaByLote.mockResolvedValueOnce({ _sum: { cantidad: null } });
+
+    const r = await inventarioService.calcularRentabilidadLote(1, 10);
+
+    expect(r.costo_ingredientes).toBe(0);
+    expect(r.advertencias).toHaveLength(1);
+    expect(r.advertencias[0].ingrediente).toBe('Lechuga');
+    expect(r.advertencias[0].mensaje).toContain('incompatible');
   });
 
   it('lanza NotFoundError si el lote no existe', async () => {

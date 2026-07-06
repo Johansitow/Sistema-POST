@@ -263,14 +263,19 @@ describe('recetaService.crear', () => {
 
 describe('recetaService._calcularRentabilidad', () => {
   const makeRecetaRent = (
-    ingredientes: { cantidad: number; precio_unitario: number }[],
+    ingredientes: { cantidad: number; precio_unitario: number; unidad?: string; unidad_medida?: string; nombre?: string }[],
     precio_venta: number,
     merma = 0,
     cantidad_producida = 1,
   ) => ({
     ingredientes: ingredientes.map(i => ({
       cantidad: i.cantidad,
-      producto: { precio_unitario: i.precio_unitario },
+      unidad:   i.unidad ?? 'unidad',
+      producto: {
+        nombre:        i.nombre ?? 'Ingrediente',
+        precio_unitario: i.precio_unitario,
+        unidad_medida: i.unidad_medida ?? i.unidad ?? 'unidad',
+      },
     })),
     merma_esperada_porcentaje: merma > 0 ? merma : null,
     cantidad_producida,
@@ -325,6 +330,17 @@ describe('recetaService._calcularRentabilidad', () => {
     const r = recetaService._calcularRentabilidad(makeRecetaRent([{ cantidad: 1, precio_unitario: 3000 }], 10000));
     // minimo = ceil(3000/0.6) = 5000; 10000 - 5000 = 5000
     expect(r.diferencia_precio).toBeGreaterThan(0);
+  });
+
+  it('caso Lechuga: unidad de ingrediente (kilogramo) incompatible con la unidad del producto (unidad) → no calcula un costo falso, agrega advertencia', () => {
+    const r = recetaService._calcularRentabilidad(makeRecetaRent([
+      { cantidad: 1, precio_unitario: 500, unidad: 'kilogramo', unidad_medida: 'unidad', nombre: 'Lechuga' },
+    ], 5000));
+
+    expect(r.costo_ingredientes).toBe(0); // el ingrediente incompatible no suma costo
+    expect(r.advertencias).toHaveLength(1);
+    expect(r.advertencias[0].ingrediente).toBe('Lechuga');
+    expect(r.advertencias[0].mensaje).toContain('incompatible');
   });
 });
 
@@ -482,6 +498,7 @@ const makeIngConProveedor = (
   unidad: string,
   precioProveedor: number | null,
   preferido = true,
+  unidad_medida: string = unidad,
 ) => ({
   id_producto:  99,
   cantidad:     new Decimal(cantidad),
@@ -490,6 +507,7 @@ const makeIngConProveedor = (
   producto: {
     id: 99, nombre,
     precio_unitario: new Decimal(1000),
+    unidad_medida,
     proveedor_productos: precioProveedor != null
       ? [{ precio_unitario: new Decimal(precioProveedor), es_proveedor_preferido: preferido }]
       : [],
@@ -583,5 +601,21 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
 
     expect(result.precio_venta).toBeNull();
     expect(result.margen_porcentaje).toBeNull();
+  });
+
+  it('caso Lechuga: unidad de ingrediente (kilogramo) incompatible con la unidad del producto (unidad) → subtotal en 0 y advertencia, no un costo falso', async () => {
+    const receta = makeRecetaConProveedores([
+      makeIngConProveedor('Lechuga', 1, 'kilogramo', 500, true, 'unidad'),
+    ], 0, 15000);
+    (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
+
+    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+
+    expect(result.desglose[0].unidad_incompatible).toBe(true);
+    expect(result.desglose[0].subtotal).toBe(0);
+    expect(result.costo_total).toBe(0);
+    expect(result.advertencias).toHaveLength(1);
+    expect(result.advertencias[0].ingrediente).toBe('Lechuga');
+    expect(result.advertencias[0].mensaje).toContain('incompatible');
   });
 });

@@ -1226,11 +1226,6 @@ enum UnidadMedida {
   litro
   mililitro
   porcion
-  taza
-  cucharada
-  rama
-  pizca
-  porcion_aprox
 }
 
 enum TipoMovimiento {

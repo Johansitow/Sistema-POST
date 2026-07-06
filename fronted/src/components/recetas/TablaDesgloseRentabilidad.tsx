@@ -17,6 +17,7 @@ export interface DesgloseIngrediente {
   unidad:         string;
   precio_unitario: number | null;
   subtotal:       number;
+  unidad_incompatible?: boolean;
 }
 
 export interface DesgloseRentabilidad {
@@ -34,8 +35,7 @@ const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-CO')}`;
 
 const UNIDAD_LABEL: Record<string, string> = {
   kilogramo: 'kg', gramo: 'g', litro: 'L', mililitro: 'mL',
-  unidad: 'und', porcion: 'porción', taza: 'taza', cucharada: 'cda',
-  rama: 'rama', pizca: 'pizca', porcion_aprox: 'porción aprox.',
+  unidad: 'und', porcion: 'porción',
 };
 const fmtU = (u: string) => UNIDAD_LABEL[u] ?? u;
 
@@ -89,9 +89,19 @@ export default function TablaDesgloseRentabilidad({ desglose }: Props) {
                   </Typography>
                 </TableCell>
                 <TableCell align="right">
-                  <Typography variant="body2" fontWeight={700}>
-                    {item.precio_unitario != null ? fmt(item.subtotal) : '—'}
-                  </Typography>
+                  {item.unidad_incompatible ? (
+                    <Chip
+                      icon={<Warning fontSize="small" />}
+                      label="Unidad incompatible"
+                      size="small"
+                      color="warning"
+                      variant="outlined"
+                    />
+                  ) : (
+                    <Typography variant="body2" fontWeight={700}>
+                      {item.precio_unitario != null ? fmt(item.subtotal) : '—'}
+                    </Typography>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

@@ -20,13 +20,12 @@ import TablaDesgloseRentabilidad, { type DesgloseRentabilidad } from '../compone
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const UNIDADES = ['kilogramo', 'gramo', 'litro', 'mililitro', 'unidad', 'porcion', 'taza', 'cucharada', 'rama', 'pizca', 'porcion_aprox'];
+const UNIDADES = ['kilogramo', 'gramo', 'litro', 'mililitro', 'unidad', 'porcion'];
 
 /** Abreviaturas legibles para mostrar en la UI */
 const UNIDAD_LABEL: Record<string, string> = {
   kilogramo: 'kg', gramo: 'g', litro: 'L', mililitro: 'mL',
-  unidad: 'und', porcion: 'porción', taza: 'taza', cucharada: 'cda',
-  rama: 'rama', pizca: 'pizca', porcion_aprox: 'porción aprox.',
+  unidad: 'und', porcion: 'porción',
 };
 const fmtU = (u: string) => UNIDAD_LABEL[u] ?? u;
 

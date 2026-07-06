@@ -18,6 +18,7 @@ import { productoRepository } from '../repositories/producto.repository';
 import { loteRepository } from '../repositories/lote.repository';
 import { NotFoundError, BadRequestError } from '../exceptions/HttpErrors';
 import { toDecimal } from '../lib/decimal';
+import { costoConvertido } from '../lib/unidadesMedida';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { generarNumeroLote } from '../lib/numero-generator';
 
@@ -287,8 +288,20 @@ export const inventarioService = {
             ingrediente: ing.producto.nombre,
             mensaje: 'Sin proveedor asignado — costo de ingrediente omitido.',
           });
+          continue;
         }
-        costo_ingredientes += Number(ing.cantidad) * (prov ? Number(prov.precio_unitario) : 0);
+
+        const { costo, incompatible } = costoConvertido(
+          Number(ing.cantidad), ing.unidad, ing.producto.unidad_medida, Number(prov.precio_unitario),
+        );
+        if (incompatible) {
+          advertencias.push({
+            ingrediente: ing.producto.nombre,
+            mensaje: `Unidad del ingrediente (${ing.unidad}) incompatible con la unidad del producto (${ing.producto.unidad_medida}). Costo no calculado.`,
+          });
+          continue;
+        }
+        costo_ingredientes += costo ?? 0;
       }
     }
 

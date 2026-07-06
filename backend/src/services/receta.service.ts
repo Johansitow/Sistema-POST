@@ -9,38 +9,10 @@ import { NotFoundError, BadRequestError, ConflictError } from '../exceptions/Htt
 import { assertRestauranteId } from '../lib/tenantQuery';
 import { getPaginationParams, getSkip, buildPaginatedResult } from '../lib/pagination';
 import { toDecimal } from '../lib/decimal';
+import { tieneStock, convertUnits, costoConvertido } from '../lib/unidadesMedida';
 import type { TenantCtx } from '../lib/tenantCtx';
 
 const MARGEN_DEFAULT = 0.40;
-
-// ── Conversión de unidades ──────────────────────────────────────────────────
-/** Convierte una cantidad a la unidad base del grupo (gramo o mililitro) */
-function toBase(qty: number, unit: string): { value: number; base: string } {
-  switch (unit.toLowerCase()) {
-    case 'kilogramo': return { value: qty * 1000, base: 'gramo' };
-    case 'gramo':     return { value: qty,        base: 'gramo' };
-    case 'litro':     return { value: qty * 1000, base: 'mililitro' };
-    case 'mililitro': return { value: qty,        base: 'mililitro' };
-    default:          return { value: qty,        base: unit.toLowerCase() };
-  }
-}
-
-/** ¿El stock disponible cubre la cantidad necesaria teniendo en cuenta las unidades? */
-function tieneStock(stockActual: number, stockUnit: string, cantNecesaria: number, needUnit: string): boolean {
-  const stock  = toBase(stockActual, stockUnit);
-  const needed = toBase(cantNecesaria, needUnit);
-  if (stock.base === needed.base) return stock.value >= needed.value;
-  return stockActual >= cantNecesaria; // bases distintas: comparación directa como fallback
-}
-
-/** Convierte qty de fromUnit a toUnit (dentro del mismo grupo de medida) */
-function convertUnits(qty: number, fromUnit: string, toUnit: string): number {
-  const from = toBase(qty, fromUnit);
-  const one  = toBase(1, toUnit);
-  if (from.base !== one.base || one.value === 0) return qty; // no convertible → sin cambio
-  return from.value / one.value;
-}
-// ───────────────────────────────────────────────────────────────────────────
 
 export const recetaService = {
 
@@ -232,12 +204,30 @@ export const recetaService = {
         });
       }
 
+      let subtotal = 0;
+      let unidad_incompatible = false;
+      if (precio_unitario != null) {
+        const { costo, incompatible } = costoConvertido(
+          Number(ing.cantidad), ing.unidad, ing.producto.unidad_medida, precio_unitario,
+        );
+        if (incompatible) {
+          unidad_incompatible = true;
+          advertencias.push({
+            ingrediente: ing.producto.nombre,
+            mensaje:     `Unidad del ingrediente (${ing.unidad}) incompatible con la unidad del producto (${ing.producto.unidad_medida}). Costo no calculado.`,
+          });
+        } else {
+          subtotal = costo ?? 0;
+        }
+      }
+
       return {
         ingrediente:   ing.producto.nombre,
         cantidad:      Number(ing.cantidad),
         unidad:        ing.unidad as string,
         precio_unitario,
-        subtotal:      Number(ing.cantidad) * (precio_unitario ?? 0),
+        subtotal,
+        unidad_incompatible,
       };
     });
 
@@ -269,13 +259,28 @@ export const recetaService = {
   },
 
   _calcularRentabilidad(receta: {
-    ingredientes: { cantidad: number; producto: { precio_unitario: number } }[];
+    ingredientes: {
+      cantidad: number; unidad: string;
+      producto: { nombre?: string; precio_unitario: number; unidad_medida: string };
+    }[];
     merma_esperada_porcentaje?: number | null;
     cantidad_producida: number;
     producto_final: { precio_venta?: number | null; precio_unitario: number };
   }) {
+    const advertencias: { ingrediente: string; mensaje: string }[] = [];
+
     const costoIngredientes = receta.ingredientes.reduce((sum, ing) => {
-      return sum + Number(ing.cantidad) * Number(ing.producto.precio_unitario);
+      const { costo, incompatible } = costoConvertido(
+        Number(ing.cantidad), ing.unidad, ing.producto.unidad_medida, Number(ing.producto.precio_unitario),
+      );
+      if (incompatible) {
+        advertencias.push({
+          ingrediente: ing.producto.nombre ?? 'Ingrediente',
+          mensaje:     `Unidad del ingrediente (${ing.unidad}) incompatible con la unidad del producto (${ing.producto.unidad_medida}). Costo no calculado.`,
+        });
+        return sum;
+      }
+      return sum + (costo ?? 0);
     }, 0);
 
     const merma     = Number(receta.merma_esperada_porcentaje ?? 0) / 100;
@@ -300,6 +305,7 @@ export const recetaService = {
       alerta_rentabilidad:      precioActual < precioSugeridoMinimo
         ? `El precio actual ($${precioActual.toLocaleString()}) está $${Math.abs(precioActual - precioSugeridoMinimo).toLocaleString()} por debajo del mínimo rentable ($${precioSugeridoMinimo.toLocaleString()})`
         : null,
+      advertencias,
     };
   },
 
