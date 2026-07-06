@@ -43,10 +43,9 @@ vi.mock('../../repositories/orden.repository', () => ({
   },
 }));
 
-vi.mock('../../repositories/configuracion.repository', () => ({
-  configuracionRepository: {
-    findByClave:  vi.fn(),
-    parseValor:   vi.fn(),
+vi.mock('../configuracion.service', () => ({
+  configuracionService: {
+    resolverTasaImpuestoDeRestaurante: vi.fn().mockResolvedValue(null),
   },
 }));
 
@@ -67,6 +66,7 @@ vi.mock('../../config/database', () => ({ default: { $transaction: vi.fn() } }))
 import { ordenSedeService } from '../orden-sede.service';
 import { ordenSedeRepository } from '../../repositories/orden-sede.repository';
 import { ordenRepository } from '../../repositories/orden.repository';
+import { configuracionService } from '../configuracion.service';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -262,6 +262,25 @@ describe('ordenSedeService.actualizarItem — tenant guard vía sede padre', () 
     const result = await ordenSedeService.actualizarItem(20, { notas: 'sin cebolla' }, CTX_RESTAURANTE_1);
     expect(result).toBeDefined();
     expect(ordenSedeRepository.findByIdScoped).toHaveBeenCalledWith(5, CTX_RESTAURANTE_1);
+  });
+
+  it('resuelve el impuesto propio del restaurante de la sede (no un valor global fijo)', async () => {
+    const item = makeItem();
+    const sede = makeSede({ id_restaurante: 7 });
+    (ordenSedeRepository.findItemById as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(item);
+    (ordenSedeRepository.findByIdScoped as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(sede);
+    (configuracionService.resolverTasaImpuestoDeRestaurante as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ tarifa: 8, tipo: 'impoconsumo' });
+
+    const { default: prismaModule } = await import('../../config/database');
+    (prismaModule.$transaction as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ ...item, cantidad: new Decimal('2') });
+
+    await ordenSedeService.actualizarItem(20, { cantidad: 2 }, CTX_RESTAURANTE_1);
+
+    expect(configuracionService.resolverTasaImpuestoDeRestaurante).toHaveBeenCalledWith(7);
   });
 });
 

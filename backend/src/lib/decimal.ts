@@ -10,10 +10,6 @@ export const toDecimal = (value: number | string | null | undefined): Decimal =>
 export const toNumber = (value: Decimal | null | undefined): number =>
   Number(value ?? 0);
 
-/** IVA Colombia 19% */
-export const calcularIVA = (subtotal: Decimal): Decimal =>
-  subtotal.times(new Decimal('0.19'));
-
 export const calcularTotales = (
   subtotal: Decimal,
   descuento: Decimal = new Decimal(0),

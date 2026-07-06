@@ -51,6 +51,7 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
         observaciones:     ordenFull?.observaciones,
         subtotal:          factura.subtotal,
         impuestos:         factura.impuestos,
+        impuesto_tipo:     ordenFull?.impuesto_tipo,
         total:             factura.total,
         detalles,
       },

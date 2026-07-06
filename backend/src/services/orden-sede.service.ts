@@ -17,11 +17,11 @@ import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../config/database';
 import { ordenSedeRepository }  from '../repositories/orden-sede.repository';
 import { ordenRepository }      from '../repositories/orden.repository';
-import { configuracionRepository } from '../repositories/configuracion.repository';
 import { NotFoundError, BadRequestError } from '../exceptions/HttpErrors';
 import { toDecimal }            from '../lib/decimal';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { recetaService }        from './receta.service';
+import { configuracionService } from './configuracion.service';
 import { eventBus }             from '../events/eventBus';
 import { EVENTS }               from '../events/events';
 import type { TenantCtx }       from '../lib/tenantCtx';
@@ -40,13 +40,10 @@ function validarTransicion(desde: EstadoOrdenSede, hacia: EstadoOrdenSede) {
   }
 }
 
-async function getTasaIva(): Promise<number | null> {
-  try {
-    const activo = await configuracionRepository.findByClave('impuestos_activos');
-    if (!activo || configuracionRepository.parseValor(activo) === false) return null;
-    const tasa = await configuracionRepository.findByClave('porcentaje_iva');
-    return tasa ? Number(configuracionRepository.parseValor(tasa)) : 19;
-  } catch { return 19; }
+/** Resuelve la tasa de impuesto propia del restaurante (sede → grupo → global). null = sin impuesto configurado. */
+async function getTasaIvaDeRestaurante(id_restaurante: number): Promise<number | null> {
+  const impuesto = await configuracionService.resolverTasaImpuestoDeRestaurante(id_restaurante);
+  return impuesto ? impuesto.tarifa : null;
 }
 
 export const ordenSedeService = {
@@ -199,7 +196,7 @@ export const ordenSedeService = {
       { id_producto: data.id_producto, cantidad: data.cantidad },
     ]);
 
-    const tasaIva = await getTasaIva();
+    const tasaIva = await getTasaIvaDeRestaurante(sede.id_restaurante);
 
     return prisma.$transaction(async (tx) => {
       const producto = await tx.producto.findUnique({ where: { id: data.id_producto } });
@@ -256,16 +253,20 @@ export const ordenSedeService = {
         }
       }
 
-      // Recalcular totales de la sede y consolidar en la Orden
+      // Recalcular totales de la sede y consolidar en la Orden.
+      // Cada sede puede tener su propia tasa (multi-sede) — se suman los
+      // impuestos ya resueltos por sede, no se recalcula con una tasa única.
       await ordenSedeRepository.recalcularTotales(tx, id_sede, tasaIva);
       const sedeActualizada = await tx.ordenSede.findUnique({ where: { id: id_sede } });
       if (sedeActualizada) {
         const todasSedes = await tx.ordenSede.findMany({ where: { id_orden: sede.id_orden } });
         const subtotalTotal = todasSedes.reduce((a: Decimal, s: { subtotal: Decimal }) => a.plus(s.subtotal), new Decimal(0));
-        const impTotal = tasaIva !== null ? subtotalTotal.times(tasaIva / 100) : new Decimal(0);
+        const impTotal = todasSedes.reduce((a: Decimal, s: { impuestos: Decimal }) => a.plus(s.impuestos), new Decimal(0));
+        const tiposUnicos = [...new Set(todasSedes.map((s: { impuesto_tipo: string | null }) => s.impuesto_tipo).filter(Boolean))];
+        const impuestoTipo = tiposUnicos.length === 1 ? tiposUnicos[0] : null;
         await tx.orden.update({
           where: { id: sede.id_orden },
-          data: { subtotal: subtotalTotal, impuestos: impTotal, total: subtotalTotal.plus(impTotal) },
+          data: { subtotal: subtotalTotal, impuestos: impTotal, impuesto_tipo: impuestoTipo, total: subtotalTotal.plus(impTotal) },
         });
       }
 
@@ -283,7 +284,7 @@ export const ordenSedeService = {
       throw new BadRequestError('No se puede modificar este item');
     }
 
-    const tasaIva = await getTasaIva();
+    const tasaIva = await getTasaIvaDeRestaurante(sede.id_restaurante);
 
     return prisma.$transaction(async (tx) => {
       const updateData: Partial<{
@@ -315,7 +316,7 @@ export const ordenSedeService = {
       throw new BadRequestError('No se puede eliminar items de una sede en este estado');
     }
 
-    const tasaIva = await getTasaIva();
+    const tasaIva = await getTasaIvaDeRestaurante(sede.id_restaurante);
 
     return prisma.$transaction(async (tx) => {
       // Devolver stock si no tiene receta

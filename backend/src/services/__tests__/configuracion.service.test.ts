@@ -43,7 +43,14 @@ vi.mock('../../repositories/configuracion-grupo.repository', () => ({
   },
 }));
 
-vi.mock('../../config/database', () => ({ default: { permiso: { findMany: vi.fn() }, rol: { findUnique: vi.fn() }, rolPermiso: { findFirst: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn() } } }));
+vi.mock('../../config/database', () => ({
+  default: {
+    permiso: { findMany: vi.fn() },
+    rol: { findUnique: vi.fn() },
+    rolPermiso: { findFirst: vi.fn(), create: vi.fn(), delete: vi.fn(), deleteMany: vi.fn(), createMany: vi.fn() },
+    restaurante: { findUnique: vi.fn() },
+  },
+}));
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +58,7 @@ import { configuracionService } from '../configuracion.service';
 import { configuracionRepository } from '../../repositories/configuracion.repository';
 import { configuracionRestauranteRepository } from '../../repositories/configuracion-restaurante.repository';
 import { configuracionGrupoRepository } from '../../repositories/configuracion-grupo.repository';
+import prisma from '../../config/database';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -117,5 +125,82 @@ describe('configuracionService.resolverParaRestaurante', () => {
     const result = await configuracionService.resolverParaRestaurante(CLAVE, RESTAURANTE_ID, GRUPO_ID);
 
     expect(result).toEqual({ valor: 'COP', origen: 'global' });
+  });
+});
+
+// ── resolverTasaImpuesto / resolverTasaImpuestoDeRestaurante ─────────────────
+// Fix del bug: getTasaIva() dependía de una clave ('impuestos_activos') que
+// nunca existió en BD y siempre devolvía null. Estas pruebas cubren la
+// resolución correcta vía las claves que sí escribe el onboarding.
+
+describe('configuracionService.resolverTasaImpuesto', () => {
+  const RESTAURANTE_ID = 1;
+  const GRUPO_ID = 10;
+
+  beforeEach(() => vi.clearAllMocks());
+
+  it('resuelve tarifa y tipo cuando la sede tiene override (impoconsumo 8%)', async () => {
+    (configuracionRestauranteRepository.findByClave as any).mockImplementation((_id: number, clave: string) => {
+      if (clave === 'facturacion.impuesto_tarifa') return Promise.resolve(mkConfig('8'));
+      if (clave === 'facturacion.impuesto_tipo')   return Promise.resolve(mkConfig('impoconsumo'));
+      return Promise.resolve(null);
+    });
+
+    const result = await configuracionService.resolverTasaImpuesto(RESTAURANTE_ID, GRUPO_ID);
+
+    expect(result).toEqual({ tarifa: 8, tipo: 'impoconsumo' });
+  });
+
+  it('resuelve tarifa y tipo desde el default global (franquicia con iva 19%)', async () => {
+    (configuracionRestauranteRepository.findByClave as any).mockResolvedValue(null);
+    (configuracionGrupoRepository.findByClave as any).mockResolvedValue(null);
+    (configuracionRepository.findByClave as any).mockImplementation((clave: string) => {
+      if (clave === 'facturacion.impuesto_tarifa') return Promise.resolve(mkConfig('19'));
+      if (clave === 'facturacion.impuesto_tipo')   return Promise.resolve(mkConfig('iva'));
+      return Promise.resolve(null);
+    });
+
+    const result = await configuracionService.resolverTasaImpuesto(RESTAURANTE_ID, GRUPO_ID);
+
+    expect(result).toEqual({ tarifa: 19, tipo: 'iva' });
+  });
+
+  it('retorna null si no hay tarifa configurada en ninguna capa (nunca adivina un porcentaje)', async () => {
+    (configuracionRestauranteRepository.findByClave as any).mockResolvedValue(null);
+    (configuracionGrupoRepository.findByClave as any).mockResolvedValue(null);
+    (configuracionRepository.findByClave as any).mockResolvedValue(null);
+
+    const result = await configuracionService.resolverTasaImpuesto(RESTAURANTE_ID, GRUPO_ID);
+
+    expect(result).toBeNull();
+  });
+});
+
+describe('configuracionService.resolverTasaImpuestoDeRestaurante', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('resuelve id_grupo desde el restaurante y delega en resolverTasaImpuesto', async () => {
+    (prisma.restaurante.findUnique as any).mockResolvedValue({ id_grupo: 42 });
+    (configuracionRestauranteRepository.findByClave as any).mockResolvedValue(mkConfig('8'));
+    (configuracionGrupoRepository.findByClave as any).mockResolvedValue(null);
+
+    const spy = vi.spyOn(configuracionService, 'resolverTasaImpuesto');
+    // segunda llamada (impuesto_tipo) sin override de sede → cae a global (no seteado en este test)
+    (configuracionRepository.findByClave as any).mockResolvedValue(null);
+
+    const result = await configuracionService.resolverTasaImpuestoDeRestaurante(1);
+
+    expect(prisma.restaurante.findUnique).toHaveBeenCalledWith({ where: { id: 1 }, select: { id_grupo: true } });
+    expect(spy).toHaveBeenCalledWith(1, 42);
+    expect(result?.tarifa).toBe(8);
+    spy.mockRestore();
+  });
+
+  it('retorna null si el restaurante no existe', async () => {
+    (prisma.restaurante.findUnique as any).mockResolvedValue(null);
+
+    const result = await configuracionService.resolverTasaImpuestoDeRestaurante(999);
+
+    expect(result).toBeNull();
   });
 });

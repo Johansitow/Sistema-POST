@@ -122,6 +122,8 @@ export interface Orden {
   subtotal: number;
   descuento: number;
   impuestos: number;
+  /** 'iva' | 'impoconsumo' — snapshot del tipo de impuesto aplicado al crear la orden. */
+  impuesto_tipo?: string;
   propina: number;
   total: number;
   observaciones?: string;

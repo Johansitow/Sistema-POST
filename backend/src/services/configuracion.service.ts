@@ -71,6 +71,47 @@ export const configuracionService = {
     return null;
   },
 
+  /**
+   * Resuelve el impuesto de facturación (IVA o impoconsumo) para un restaurante,
+   * con la misma precedencia sede → grupo → global que `resolverParaRestaurante`.
+   *
+   * Lee las claves que escribe el onboarding: `facturacion.impuesto_tarifa` (%)
+   * y `facturacion.impuesto_tipo` ('iva' | 'impoconsumo').
+   *
+   * Si no hay tarifa configurada en ninguna capa → null (sin impuesto), nunca
+   * un fallback silencioso a un porcentaje hardcodeado.
+   */
+  async resolverTasaImpuesto(
+    restauranteId: number,
+    grupoId: number,
+  ): Promise<{ tarifa: number; tipo: string } | null> {
+    const tarifa = await this.resolverParaRestaurante('facturacion.impuesto_tarifa', restauranteId, grupoId);
+    if (!tarifa) return null;
+
+    const tipo = await this.resolverParaRestaurante('facturacion.impuesto_tipo', restauranteId, grupoId);
+
+    return {
+      tarifa: Number(tarifa.valor),
+      tipo:   tipo?.valor ?? 'impoconsumo',
+    };
+  },
+
+  /**
+   * Igual que `resolverTasaImpuesto`, pero resuelve `grupoId` automáticamente
+   * a partir del restaurante — conveniencia para call sites que solo tienen
+   * `id_restaurante` a mano (no un `TenantCtx` completo).
+   */
+  async resolverTasaImpuestoDeRestaurante(
+    restauranteId: number,
+  ): Promise<{ tarifa: number; tipo: string } | null> {
+    const restaurante = await prisma.restaurante.findUnique({
+      where: { id: restauranteId },
+      select: { id_grupo: true },
+    });
+    if (!restaurante) return null;
+    return this.resolverTasaImpuesto(restauranteId, restaurante.id_grupo);
+  },
+
   // ── ESCRITURA (solo superadmin / config.sistema) ──────────────────────────
 
   async actualizar(clave: string, valor: string) {

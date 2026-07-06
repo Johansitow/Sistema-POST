@@ -21,32 +21,29 @@ import { ordenRepository }      from '../repositories/orden.repository';
 import { ordenSedeRepository as _ordenSedeRepository }  from '../repositories/orden-sede.repository';
 import { pagoOrdenRepository as _pagoOrdenRepository }  from '../repositories/pago-orden.repository';
 import { estadoRepository }     from '../repositories/estado.repository';
-import { configuracionRepository } from '../repositories/configuracion.repository';
 import { NotFoundError, BadRequestError } from '../exceptions/HttpErrors';
 import { toDecimal, calcularTotales }     from '../lib/decimal';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { generarNumeroOrden }   from '../lib/numero-generator';
 import { facturaService }       from './factura.service';
 import { recetaService }        from './receta.service';
+import { configuracionService } from './configuracion.service';
 import { eventBus }             from '../events/eventBus';
 import { EVENTS }               from '../events/events';
 import type { TenantCtx }       from '../lib/tenantCtx';
 
 const SUFIJOS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
-// ── IVA desde configuración ───────────────────────────────────────────────────
-async function getTasaIva(): Promise<number | null> {
-  try {
-    const activo = await configuracionRepository.findByClave('impuestos_activos');
-    if (!activo || configuracionRepository.parseValor(activo) === false) return null;
-    const tasa = await configuracionRepository.findByClave('porcentaje_iva');
-    return tasa ? Number(configuracionRepository.parseValor(tasa)) : 19;
-  } catch {
-    return 19;
-  }
+// ── IVA/impoconsumo desde configuración (sede → grupo → global) ──────────────
+/** Resuelve tarifa + tipo de impuesto del restaurante. null si no hay ninguna capa configurada. */
+async function resolverImpuestoDeRestaurante(id_restaurante: number | undefined): Promise<{ tarifa: number; tipo: string } | null> {
+  if (!id_restaurante) return null;
+  return configuracionService.resolverTasaImpuestoDeRestaurante(id_restaurante);
 }
 
 // ── Consolidar totales de Orden desde sus sedes ───────────────────────────────
+// Suma los impuestos YA resueltos por sede (cada una puede tener su propia tasa,
+// por eso no se recalcula con una tasa única aquí).
 async function consolidarTotalesOrden(tx: any, id_orden: number) {
   const sedes = await tx.ordenSede.findMany({ where: { id_orden } });
   const orden = await tx.orden.findUnique({
@@ -59,17 +56,26 @@ async function consolidarTotalesOrden(tx: any, id_orden: number) {
     (acc: Decimal, s: any) => acc.plus(s.subtotal),
     new Decimal(0)
   );
-  const tasaIva = await getTasaIva();
-  const impuestosTotal = tasaIva !== null ? subtotalSedes.times(tasaIva / 100) : new Decimal(0);
+  const impuestosTotal = sedes.reduce(
+    (acc: Decimal, s: any) => acc.plus(s.impuestos),
+    new Decimal(0)
+  );
   const total = subtotalSedes
     .plus(impuestosTotal)
     .plus(orden.propina ?? 0)
     .plus(orden.costo_domicilio ?? 0)
     .minus(orden.descuento ?? 0);
 
+  // El ticket de la Orden global solo puede mostrar un tipo de impuesto — se
+  // propaga el de las sedes cuando todas coinciden (el caso común de un solo
+  // restaurante). En un pedido multi-sede con tipos distintos queda null y el
+  // detalle real vive en cada OrdenSede.
+  const tiposUnicos = [...new Set(sedes.map((s: any) => s.impuesto_tipo).filter(Boolean))];
+  const impuestoTipo = tiposUnicos.length === 1 ? tiposUnicos[0] : null;
+
   await tx.orden.update({
     where: { id: id_orden },
-    data: { subtotal: subtotalSedes, impuestos: impuestosTotal, total },
+    data: { subtotal: subtotalSedes, impuestos: impuestosTotal, impuesto_tipo: impuestoTipo, total },
   });
 }
 
@@ -139,8 +145,6 @@ export const ordenService = {
       }>;
     }>;
   }) {
-    const tasaIva = await getTasaIva();
-
     // Verificar disponibilidad de recetas POR restaurante, antes de abrir TX
     for (const sede of data.sedes) {
       await recetaService.verificarDisponibilidadParaDetalles(
@@ -234,7 +238,9 @@ export const ordenService = {
           });
         }
 
-        const sedeImpuestos = tasaIva !== null ? sedeSubtotal.times(tasaIva / 100) : new Decimal(0);
+        // Cada sede resuelve su propio impuesto — puede diferir entre restaurantes del mismo pedido
+        const impuestoSede  = await resolverImpuestoDeRestaurante(sedeData.id_restaurante);
+        const sedeImpuestos = impuestoSede ? sedeSubtotal.times(impuestoSede.tarifa / 100) : new Decimal(0);
         const sedeTotal     = sedeSubtotal.plus(sedeImpuestos);
 
         // Crear sede con sus ítems
@@ -246,6 +252,7 @@ export const ordenService = {
             estado:         'PENDIENTE',
             subtotal:       sedeSubtotal,
             impuestos:      sedeImpuestos,
+            impuesto_tipo:  impuestoSede?.tipo,
             total:          sedeTotal,
             items:          { create: itemsData },
           },
@@ -772,7 +779,8 @@ export const ordenService = {
       detalles.map(d => ({ id_producto: d.id_producto, cantidad: d.cantidad }))
     );
 
-    const tasaIva = await getTasaIva();
+    const impuesto = await resolverImpuestoDeRestaurante(data.id_restaurante);
+    const tasaIva  = impuesto?.tarifa ?? null;
     const ultima = await ordenRepository.findUltima();
     const numero_orden = generarNumeroOrden((ultima as any)?.numero_orden);
 
@@ -806,6 +814,7 @@ export const ordenService = {
           id_cliente:          data.id_cliente,
           estado_global:       EstadoOrdenGlobal.EN_PROCESO,
           subtotal, impuestos, total,
+          impuesto_tipo:       impuesto?.tipo,
           descuento:           toDecimal(data.descuento ?? 0),
           propina:             toDecimal(data.propina ?? 0),
           costo_domicilio:     data.costo_domicilio != null ? toDecimal(data.costo_domicilio) : undefined,
@@ -845,8 +854,8 @@ export const ordenService = {
     const nuevoSubtotal = detalles.reduce((s: Decimal, d: any) => s.plus(d.subtotal), new Decimal(0));
     const orden = await tx.orden.findUnique({ where: { id: ordenId } });
     if (!orden) return;
-    const tasaIva = await getTasaIva();
-    const { impuestos, total } = calcularTotales(nuevoSubtotal, orden.descuento ?? new Decimal(0), orden.propina ?? new Decimal(0), orden.costo_domicilio ?? new Decimal(0), tasaIva);
+    const impuesto = await resolverImpuestoDeRestaurante(orden.id_restaurante);
+    const { impuestos, total } = calcularTotales(nuevoSubtotal, orden.descuento ?? new Decimal(0), orden.propina ?? new Decimal(0), orden.costo_domicilio ?? new Decimal(0), impuesto?.tarifa ?? null);
     await tx.orden.update({ where: { id: ordenId }, data: { subtotal: nuevoSubtotal, impuestos, total } });
   },
 };

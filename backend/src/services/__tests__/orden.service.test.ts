@@ -54,10 +54,9 @@ vi.mock('../../repositories/estado.repository', () => ({
   },
 }));
 
-vi.mock('../../repositories/configuracion.repository', () => ({
-  configuracionRepository: {
-    findByClave:  vi.fn(),
-    parseValor:   vi.fn(),
+vi.mock('../configuracion.service', () => ({
+  configuracionService: {
+    resolverTasaImpuestoDeRestaurante: vi.fn().mockResolvedValue(null),
   },
 }));
 
@@ -91,7 +90,7 @@ vi.mock('../../config/database', () => ({
 import { ordenService } from '../orden.service';
 import { ordenRepository } from '../../repositories/orden.repository';
 import { estadoRepository } from '../../repositories/estado.repository';
-import { configuracionRepository } from '../../repositories/configuracion.repository';
+import { configuracionService } from '../configuracion.service';
 import { recetaService } from '../receta.service';
 import { facturaService } from '../factura.service';
 import prisma from '../../config/database';
@@ -122,18 +121,12 @@ const mockOrdenBase = {
   pagos: [],
 };
 
-// Silencia el fallback de getTasaIva (impuestos desactivados → null)
-const setupIva = (activo = false, tasa = 19) => {
-  (configuracionRepository.findByClave as any).mockImplementation((clave: string) => {
-    if (clave === 'impuestos_activos') return Promise.resolve({ valor: activo ? 'true' : 'false' });
-    if (clave === 'porcentaje_iva')    return Promise.resolve({ valor: String(tasa) });
-    return Promise.resolve(null);
-  });
-  (configuracionRepository.parseValor as any).mockImplementation((r: any) => {
-    if (r?.valor === 'true')  return true;
-    if (r?.valor === 'false') return false;
-    return Number(r?.valor);
-  });
+// Configura la resolución de impuesto (sede→grupo→global) para las pruebas.
+// activo=false → sin impuesto configurado (comportamiento por defecto en la mayoría de tests).
+const setupIva = (activo = false, tarifa = 19, tipo = 'iva') => {
+  (configuracionService.resolverTasaImpuestoDeRestaurante as any).mockResolvedValue(
+    activo ? { tarifa, tipo } : null
+  );
 };
 
 // ── crear ─────────────────────────────────────────────────────────────────────
@@ -165,6 +158,51 @@ describe('ordenService.crear', () => {
     expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
       { id_producto: 5, cantidad: 1 },
     ]);
+  });
+
+  it('resuelve el impuesto del restaurante (sede→grupo→global) y lo guarda en la orden — no un porcentaje fijo', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+    setupIva(true, 8, 'impoconsumo'); // override de sede: impoconsumo 8%
+
+    mockTx.receta.findFirst.mockResolvedValue(null);
+    const mockProd = { id: 5, nombre: 'Café', stock_actual: new Decimal('10'), unidad_medida: 'unidad' };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.orden.create.mockResolvedValue({ ...mockOrdenBase, estado: { codigo: 'PENDIENTE' } });
+
+    await ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1, id_restaurante: 7,
+      detalles: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000, descuento: 0 }],
+    });
+
+    expect(configuracionService.resolverTasaImpuestoDeRestaurante).toHaveBeenCalledWith(7);
+    const callArg = mockTx.orden.create.mock.calls[0][0];
+    // subtotal 10000 × 8% = 800 de impuestos, con el tipo persistido para el ticket
+    expect(callArg.data.impuestos.toString()).toBe('800');
+    expect(callArg.data.impuesto_tipo).toBe('impoconsumo');
+  });
+
+  it('sin id_restaurante: no calcula impuesto (no adivina un porcentaje)', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+
+    mockTx.receta.findFirst.mockResolvedValue(null);
+    const mockProd = { id: 5, nombre: 'Café', stock_actual: new Decimal('10'), unidad_medida: 'unidad' };
+    mockTx.producto.findUnique.mockResolvedValue(mockProd);
+    mockTx.producto.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.orden.create.mockResolvedValue({ ...mockOrdenBase, estado: { codigo: 'PENDIENTE' } });
+
+    await ordenService.crearLegado({
+      id_estado: 2, id_usuario: 1,
+      detalles: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000, descuento: 0 }],
+    });
+
+    expect(configuracionService.resolverTasaImpuestoDeRestaurante).not.toHaveBeenCalled();
+    const callArg = mockTx.orden.create.mock.calls[0][0];
+    expect(callArg.data.impuestos.toString()).toBe('0');
   });
 
   it('no crea la orden si verificarDisponibilidadParaDetalles lanza error', async () => {

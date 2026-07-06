@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Decimal } from '@prisma/client/runtime/library';
-import { toDecimal, toNumber, calcularIVA, calcularTotales } from '../decimal';
+import { toDecimal, toNumber, calcularTotales } from '../decimal';
 
 describe('toDecimal', () => {
   it('convierte número', () => {
@@ -27,18 +27,6 @@ describe('toNumber', () => {
 
   it('null → 0', () => {
     expect(toNumber(null)).toBe(0);
-  });
-});
-
-describe('calcularIVA', () => {
-  it('19% sobre 100 = 19', () => {
-    const iva = calcularIVA(new Decimal(100));
-    expect(iva.toString()).toBe('19');
-  });
-
-  it('19% sobre 50 = 9.5', () => {
-    const iva = calcularIVA(new Decimal(50));
-    expect(iva.toString()).toBe('9.5');
   });
 });
 

@@ -361,6 +361,7 @@ const DetalleModal: React.FC<{
     observaciones:     orden.observaciones,
     subtotal:          orden.subtotal,
     impuestos:         orden.impuestos,
+    impuesto_tipo:     orden.impuesto_tipo,
     total:             orden.total,
     detalles: (orden.detalles ?? []).map((d: any) => ({
       nombre:          d.producto?.nombre ?? d.nombre ?? 'Producto',

@@ -653,6 +653,11 @@ model Orden {
   propina   Decimal @default(0) @db.Decimal(12, 2)
   total     Decimal @default(0) @db.Decimal(12, 2)
 
+  // Snapshot del tipo de impuesto aplicado ('iva' | 'impoconsumo') al momento de
+  // crear la orden — para que el ticket/factura impresos no cambien retroactivamente
+  // si luego se edita la configuración fiscal del restaurante.
+  impuesto_tipo String? @db.VarChar(20)
+
   observaciones      String?   @db.Text
   fecha_apertura     DateTime  @default(now())
   fecha_confirmacion DateTime?
@@ -1333,6 +1338,7 @@ model OrdenSede {
   subtotal       Decimal     @default(0) @db.Decimal(12, 2)
   descuento      Decimal     @default(0) @db.Decimal(12, 2)
   impuestos      Decimal     @default(0) @db.Decimal(12, 2)
+  impuesto_tipo  String?     @db.VarChar(20) // snapshot 'iva' | 'impoconsumo' al crear la sede
   total          Decimal     @default(0) @db.Decimal(12, 2)
 
   // ── Trazabilidad de cocina ─────────────────────────────────────────────────
