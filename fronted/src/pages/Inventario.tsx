@@ -23,7 +23,7 @@ import {
 import ModalHeader from '../components/common/ModalHeader';
 import { productosService, Producto, ProductoCreateDTO, ProductoUpdateDTO } from '../services/productos.service';
 import { categoriasService, Categoria } from '../services/categorias.service';
-import { inventarioService } from '../services/inventario.service';
+import { inventarioService, MovimientoCreateDTO } from '../services/inventario.service';
 import { proveedorService, Proveedor } from '../services/servicios-gestion';
 import { usuariosService } from '../services/usuarios.service';
 import { variantesService, type ProductoVariante, type CreateVarianteDto } from '../services/variantes.service';
@@ -343,10 +343,19 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
   const [saving, setSaving]                   = useState(false);
   const [error, setError]                     = useState<string | null>(null);
   const [loteCreado, setLoteCreado]           = useState<string | null>(null);
+  // Registrar lote es opcional: solo aplica a productos que se almacenan (no ensamblados al vender)
+  const [registrarLote, setRegistrarLote]     = useState(false);
+  const [lotesActivos, setLotesActivos]       = useState<any[]>([]);
+  const [idLoteAfectado, setIdLoteAfectado]   = useState<number | null>(null);
 
   const esEntrada      = tipo === 'entrada';
   const esProduccion   = tipo === 'produccion';
-  const esLote         = esEntrada || esProduccion;
+  const esSalidaOMerma = tipo === 'salida' || tipo === 'merma';
+  const esAlmacenable  = !producto.es_vendible;
+  // Sección "Datos del Lote": visible solo si aplica; se envía al backend solo si el usuario la activa
+  const mostrarSeccionLote = esAlmacenable && (esEntrada || esProduccion);
+  const generarLote    = mostrarSeccionLote && registrarLote;
+  const mostrarSelectorLote = esAlmacenable && esSalidaOMerma && lotesActivos.length > 0;
   const tipoActual     = TIPOS_MOVIMIENTO.find(t => t.value === tipo)!;
   const cantidadNum    = parseFloat(cantidad) || 0;
   const stockActual    = Number(producto.stock_actual);
@@ -377,30 +386,39 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
   }, []);
 
   useEffect(() => {
-    if (!esEntrada) setIdProveedor(null);
+    setRegistrarLote(false);
+    setIdLoteAfectado(null);
+    if (esAlmacenable && esSalidaOMerma) {
+      inventarioService.getLotesActivos(producto.id)
+        .then(setLotesActivos)
+        .catch(() => setLotesActivos([]));
+    } else {
+      setLotesActivos([]);
+    }
   }, [tipo]);
 
   const handleSubmit = async () => {
     if (!cantidad || parseFloat(cantidad) <= 0) { setError('La cantidad debe ser mayor a 0'); return; }
     if (!motivo.trim()) { setError('El motivo es obligatorio'); return; }
-    if (esEntrada && !idProveedor) { setError('Selecciona un proveedor para registrar una entrada'); return; }
 
     setSaving(true); setError(null);
     try {
-      const data: any = {
+      const data: MovimientoCreateDTO = {
         id_producto:     producto.id,
-        tipo_movimiento: tipo,
+        tipo_movimiento: tipo as MovimientoCreateDTO['tipo_movimiento'],
         cantidad:        parseFloat(cantidad),
         motivo:          motivo.trim(),
         id_proveedor:    idProveedor ?? undefined,
         referencia:      referencia || undefined,
-        ...(esLote && fechaVenc        && { fecha_vencimiento:       new Date(fechaVenc).toISOString() }),
-        ...(esLote && costoProd        && { costo_produccion:        parseFloat(costoProd) }),
-        ...(esLote && idResponsable    && { id_usuario_responsable:  idResponsable }),
-        ...(esLote && vidaUtil         && { vida_util_dias:          parseInt(vidaUtil) }),
-        ...(esLote && observacionesLote && { observaciones_lote:     observacionesLote }),
-        ...(esProduccion && mermaCantidad   && { merma_cantidad:   parseFloat(mermaCantidad) }),
-        ...(esProduccion && mermaPorcentaje && { merma_porcentaje: parseFloat(mermaPorcentaje) }),
+        ...(generarLote && { generar_lote: true }),
+        ...(generarLote && fechaVenc        && { fecha_vencimiento:       new Date(fechaVenc).toISOString() }),
+        ...(generarLote && costoProd        && { costo_produccion:        parseFloat(costoProd) }),
+        ...(generarLote && idResponsable    && { id_usuario_responsable:  idResponsable }),
+        ...(generarLote && vidaUtil         && { vida_util_dias:          parseInt(vidaUtil) }),
+        ...(generarLote && observacionesLote && { observaciones_lote:    observacionesLote }),
+        ...(generarLote && esProduccion && mermaCantidad   && { merma_cantidad:   parseFloat(mermaCantidad) }),
+        ...(generarLote && esProduccion && mermaPorcentaje && { merma_porcentaje: parseFloat(mermaPorcentaje) }),
+        ...(mostrarSelectorLote && idLoteAfectado && { id_lote: idLoteAfectado }),
       };
 
       const resultado = await inventarioService.registrarMovimiento(data);
@@ -423,7 +441,7 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             <Check className="w-8 h-8 text-emerald-600" />
           </div>
           <h3 className="text-lg font-bold text-slate-800 mb-1">Movimiento registrado</h3>
-          <p className="text-slate-500 text-sm mb-4">Se generó automáticamente el lote:</p>
+          <p className="text-slate-500 text-sm mb-4">Se registró el lote:</p>
           <div className="bg-slate-100 rounded-xl px-4 py-3 font-mono font-bold text-slate-700 text-lg mb-6">
             {loteCreado}
           </div>
@@ -567,11 +585,11 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             )}
           </div>
 
-          {/* ── Proveedor (solo Entrada) ── */}
+          {/* ── Proveedor (solo Entrada, opcional) ── */}
           {esEntrada && (
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                Proveedor <span className="text-red-500">*</span>
+                Proveedor <span className="text-slate-400 font-normal">(opcional)</span>
               </label>
               {loadingProvs ? (
                 <div className="flex items-center gap-2 px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-400">
@@ -594,15 +612,23 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             </div>
           )}
 
-          {/* ── Datos del Lote (Entrada / Producción) ── */}
-          {esLote && (
+          {/* ── Datos del Lote (Entrada / Producción, opcional, solo productos almacenables) ── */}
+          {mostrarSeccionLote && (
             <div className={`rounded-xl border p-3.5 space-y-3 ${tipoActual.lote}`}>
-              <div className="flex items-center justify-between">
-                <p className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${tipoActual.loteTit}`}>
-                  <Hash className="w-3.5 h-3.5" /> Datos del Lote
+              <label className="flex items-center justify-between cursor-pointer">
+                <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${tipoActual.loteTit}`}>
+                  <Hash className="w-3.5 h-3.5" /> Registrar lote (fecha de caducidad, merma esperada)
+                </span>
+                <input type="checkbox" checked={registrarLote} onChange={e => setRegistrarLote(e.target.checked)}
+                  className="w-4 h-4 rounded accent-current" />
+              </label>
+              {!registrarLote && (
+                <p className="text-xs text-slate-500">
+                  Recomendado si este producto puede dañarse — recibirás alertas de reconteo antes de que caduque.
                 </p>
-                <span className="text-xs text-slate-400 bg-white/70 px-2 py-0.5 rounded-full border">opcional · N° auto</span>
-              </div>
+              )}
+              {registrarLote && (
+              <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1">
@@ -623,7 +649,7 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Fecha Vencimiento</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Fecha Vencimiento <span className="text-slate-400 font-normal">(recomendado)</span></label>
                   <input type="date" value={fechaVenc} onChange={e => setFechaVenc(e.target.value)}
                     min={new Date().toISOString().split('T')[0]}
                     className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs bg-white outline-none focus:ring-2 ${tipoActual.ring}`} />
@@ -645,11 +671,13 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
                   placeholder="Notas adicionales del lote..."
                   className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs outline-none resize-none focus:ring-2 ${tipoActual.ring}`} />
               </div>
+              </>
+              )}
             </div>
           )}
 
-          {/* ── Merma (solo Producción) ── */}
-          {esProduccion && (
+          {/* ── Merma esperada del lote (solo si se está registrando un lote de Producción) ── */}
+          {generarLote && esProduccion && (
             <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3.5 space-y-3">
               <p className="text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5" /> Merma de Producción
@@ -674,6 +702,26 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
               <p className="text-xs text-amber-600">
                 La merma registrada se descuenta automáticamente del lote producido.
               </p>
+            </div>
+          )}
+
+          {/* ── Lote afectado (Salida / Merma sobre productos almacenables) ── */}
+          {mostrarSelectorLote && (
+            <div className="rounded-xl border border-slate-200 p-3.5 space-y-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                <Hash className="w-3.5 h-3.5" /> Lote afectado
+                <span className="text-slate-400 font-normal normal-case">(opcional)</span>
+              </label>
+              <select value={idLoteAfectado ?? ''} onChange={e => setIdLoteAfectado(e.target.value ? Number(e.target.value) : null)}
+                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white outline-none focus:ring-2 focus:ring-slate-400">
+                <option value="">— No indicar lote —</option>
+                {lotesActivos.map((l: any) => (
+                  <option key={l.id} value={l.id}>
+                    {l.numero_lote}{l.fecha_vencimiento ? ` · vence ${new Date(l.fecha_vencimiento).toLocaleDateString('es-CO')}` : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500">Indica de qué lote salió este producto, por ejemplo si se dañó.</p>
             </div>
           )}
 

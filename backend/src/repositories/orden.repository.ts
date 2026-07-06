@@ -47,6 +47,16 @@ const includeSedes = {
   cliente: { select: { id: true, nombre_completo: true, email: true, telefono: true } },
 };
 
+/** Include completo de una Orden (legado + nueva arquitectura). Reusado por findById
+ *  y por servicios que necesitan la orden completa desde dentro de una transacción
+ *  (ej. ordenService.crear(), que debe leer vía `tx` antes del commit). */
+export const includeOrdenCompleta = {
+  ...includeCompleto,
+  ...includeSedes,
+  factura: true,
+  eventos: { orderBy: { creado_en: 'asc' as const } },
+};
+
 class OrdenRepositoryImpl extends TenantRepository {
   constructor() {
     super(prisma);
@@ -92,7 +102,7 @@ class OrdenRepositoryImpl extends TenantRepository {
   findById(id: number) {
     return prisma.orden.findUnique({
       where: { id },
-      include: { ...includeCompleto, ...includeSedes, factura: true, eventos: { orderBy: { creado_en: 'asc' } } },
+      include: includeOrdenCompleta,
     });
   }
 
@@ -105,7 +115,7 @@ class OrdenRepositoryImpl extends TenantRepository {
     return this._scopedLookup(
       (i) => prisma.orden.findUnique({
         where: { id: i },
-        include: { ...includeCompleto, ...includeSedes, factura: true, eventos: { orderBy: { creado_en: 'asc' } } },
+        include: includeOrdenCompleta,
       }),
       id,
       ctx,

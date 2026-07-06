@@ -2,16 +2,15 @@
  * inventario.job.ts — Jobs periódicos de inventario
  *
  * Jobs:
- * 1. Sincronización de alertas de stock (cada hora)
+ * 1. Sincronización de alertas de stock y de lotes próximos a vencer (cada hora, ver alerta.service.ts)
  * 2. Generación automática de lista de compras cuando hay stock bajo (cada hora, si LISTA_COMPRAS_AUTO=true)
  * 3. Ajuste automático de stock mínimo/máximo según tendencias (domingos 2am, si STOCK_AJUSTE_AUTO=true)
+ * 4. Limpieza de auditoría (diario)
  */
 
 import cron from 'node-cron';
 import { alertaService }      from '../services/alerta.service';
 import { listaComprasService } from '../services/lista-compras.service';
-import { eventBus }            from '../events/eventBus';
-import { EVENTS }              from '../events/events';
 import logger                 from '../config/logger';
 import prisma                 from '../config/database';
 
@@ -122,47 +121,6 @@ async function runAjusteStock(): Promise<void> {
   }
 }
 
-/** Verifica lotes próximos a vencer y emite LOTE_VENCIDO para cada uno */
-async function runLotesVencidos(): Promise<void> {
-  try {
-    const diasConfig = await prisma.configuracion.findFirst({ where: { clave: 'dias_alerta_vencimiento' } });
-    const dias = diasConfig ? Number(diasConfig.valor) : 7;
-
-    const limite = new Date();
-    limite.setDate(limite.getDate() + dias);
-
-    const lotes = await prisma.lote.findMany({
-      where: {
-        fecha_vencimiento: { lte: limite },
-        cantidad_producida: { gt: 0 },
-      },
-      include: {
-        producto: { select: { nombre: true } },
-      },
-    });
-
-    for (const lote of lotes) {
-      await eventBus.emit(EVENTS.LOTE_VENCIDO, {
-        idLote:         lote.id,
-        numeroLote:     lote.numero_lote,
-        idProducto:     lote.id_producto,
-        nombreProducto: lote.producto.nombre,
-        idRestaurante:  lote.id_restaurante,
-        fechaVencimiento: lote.fecha_vencimiento!,
-        diasRestantes:  Math.ceil(
-          ((lote.fecha_vencimiento?.getTime() ?? 0) - Date.now()) / 86_400_000
-        ),
-      });
-    }
-
-    if (lotes.length > 0) {
-      logger.info(`[Job:LotesVencidos] ${lotes.length} lote(s) próximos a vencer notificados.`);
-    }
-  } catch (error) {
-    logger.error('[Job:LotesVencidos] Error:', error);
-  }
-}
-
 /** Elimina registros de auditoría con más de 90 días */
 async function runLimpiezaAuditoria(): Promise<void> {
   try {
@@ -202,11 +160,11 @@ export const startInventarioJob = (): void => {
     timezone: process.env.TZ || 'America/Bogota',
   });
 
-  // Job diario: lotes próximos a vencer + limpieza de auditoría
-  cron.schedule(SCHEDULE_DIARIO, async () => {
-    await runLotesVencidos();
-    await runLimpiezaAuditoria();
-  }, { timezone: process.env.TZ || 'America/Bogota' });
+  // Job diario: limpieza de auditoría (las alertas de lotes próximos a vencer
+  // se sincronizan junto con el resto de alertas en runSync, cada hora)
+  cron.schedule(SCHEDULE_DIARIO, runLimpiezaAuditoria, {
+    timezone: process.env.TZ || 'America/Bogota',
+  });
 
   logger.info(
     `[Job:Inventario] Jobs registrados — horario: "${SCHEDULE}", diario: "${SCHEDULE_DIARIO}", semanal: "${SCHEDULE_SEMANAL}"`

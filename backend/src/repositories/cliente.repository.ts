@@ -1,26 +1,40 @@
 /**
- * ClienteRepository - Queries Prisma para el módulo de Clientes
+ * ClienteRepository — extiende TenantRepository (llave id_grupo).
+ *
+ * findByIdScoped(id, ctx): 404 si el cliente no existe o pertenece a otro grupo.
+ * ForbiddenError si ctx no tiene grupoId y no es superadmin.
+ * Superadmin: accede sin restricción (bypass).
  */
 
-import { EstadoGeneral, TipoCliente, TipoPunto } from '@prisma/client';
+import { EstadoGeneral, Prisma, TipoCliente, TipoDocumento, TipoPunto } from '@prisma/client';
 import prisma from '../config/database';
+import { TenantRepository } from './base/TenantRepository';
+import type { TenantCtx } from '../lib/tenantCtx';
 import { PaginationParams, getSkip } from '../lib/pagination';
 
-export const clienteRepository = {
+const includeCliente = {
+  direcciones: { where: { activa: true }, orderBy: { es_principal: 'desc' } },
+  _count: { select: { ordenes: true } },
+} as const;
 
-  // ── Listado y búsqueda ────────────────────────────────────────────────────
+class ClienteRepositoryImpl extends TenantRepository {
+  constructor() {
+    super(prisma);
+  }
 
-  findAll: (
+  // ── Listado y búsqueda ──────────────────────────────────────────────────────
+
+  findAll(
     pagination: PaginationParams,
     filters: {
-      id_grupo?:     number | null;   // tenant scope — clientes compartidos dentro del grupo
+      id_grupo?:     number | null;
       search?:       string;
       estado?:       EstadoGeneral;
       tipo_cliente?: TipoCliente;
     }
-  ) => {
-    const where: any = { estado: { not: EstadoGeneral.eliminado } };
-    if (filters.id_grupo != null) where.id_grupo = filters.id_grupo;
+  ) {
+    const where: Record<string, unknown> = { estado: { not: EstadoGeneral.eliminado } };
+    if (filters.id_grupo != null) where.id_grupo    = filters.id_grupo;
     if (filters.estado)           where.estado       = filters.estado;
     if (filters.tipo_cliente)     where.tipo_cliente = filters.tipo_cliente;
     if (filters.search) {
@@ -48,60 +62,81 @@ export const clienteRepository = {
       }),
       prisma.cliente.count({ where }),
     ]);
-  },
+  }
 
-  findById: (id: number) =>
-    prisma.cliente.findFirst({
+  findById(id: number) {
+    return prisma.cliente.findFirst({
       where: { id, estado: { not: EstadoGeneral.eliminado } },
-      include: {
-        direcciones: { where: { activa: true }, orderBy: { es_principal: 'desc' } },
-        _count: { select: { ordenes: true } },
-      },
-    }),
+      include: includeCliente,
+    });
+  }
 
-  findByEmail: (email: string, excludeId?: number) =>
-    prisma.cliente.findFirst({
+  /**
+   * Lookup guardado por id_grupo.
+   * NotFoundError si no existe O es de otro grupo.
+   * ForbiddenError si ctx no tiene grupoId y no es superadmin.
+   * Superadmin: accede sin restricción.
+   */
+  findByIdScoped(id: number, ctx: TenantCtx) {
+    return this._scopedLookup(
+      (i) => prisma.cliente.findFirst({
+        where: { id: i, estado: { not: EstadoGeneral.eliminado } },
+        include: includeCliente,
+      }),
+      id,
+      ctx,
+      'id_grupo',
+    );
+  }
+
+  findByEmail(email: string, excludeId?: number) {
+    return prisma.cliente.findFirst({
       where: {
         email,
         estado: { not: EstadoGeneral.eliminado },
         ...(excludeId ? { NOT: { id: excludeId } } : {}),
       },
-    }),
+    });
+  }
 
-  findByDocumento: (numero_documento: string, excludeId?: number) =>
-    prisma.cliente.findFirst({
+  findByDocumento(numero_documento: string, excludeId?: number) {
+    return prisma.cliente.findFirst({
       where: {
         numero_documento,
         estado: { not: EstadoGeneral.eliminado },
         ...(excludeId ? { NOT: { id: excludeId } } : {}),
       },
-    }),
+    });
+  }
 
-  // ── CRUD ──────────────────────────────────────────────────────────────────
+  // ── CRUD ────────────────────────────────────────────────────────────────────
 
-  create: (data: {
+  create(data: {
     nombre_completo:   string;
+    id_grupo:          number;
     email?:            string;
     telefono?:         string;
     telefono_alterno?: string;
-    tipo_documento?:   any;
+    tipo_documento?:   TipoDocumento;
     numero_documento?: string;
     direccion?:        string;
     ciudad?:           string;
     barrio?:           string;
     tipo_cliente?:     TipoCliente;
     notas?:            string;
-    preferencias?:     any;
+    preferencias?:     Prisma.InputJsonValue;
     canal_adquisicion?: string;
     fecha_nacimiento?: Date;
-  }) => prisma.cliente.create({ data }),
+  }) {
+    return prisma.cliente.create({ data });
+  }
 
-  update: (id: number, data: Partial<{
+  update(id: number, data: Partial<{
     nombre_completo:   string;
     email:             string;
     telefono:          string;
     telefono_alterno:  string;
-    tipo_documento:    any;
+    tipo_documento:    TipoDocumento;
     numero_documento:  string;
     direccion:         string;
     ciudad:            string;
@@ -109,27 +144,28 @@ export const clienteRepository = {
     tipo_cliente:      TipoCliente;
     estado:            EstadoGeneral;
     notas:             string;
-    preferencias:      any;
+    preferencias:      Prisma.InputJsonValue;
     canal_adquisicion: string;
     fecha_nacimiento:  Date;
     ultima_visita:     Date;
-  }>) => prisma.cliente.update({ where: { id }, data }),
+  }>) {
+    return prisma.cliente.update({ where: { id }, data });
+  }
 
-  // ── Estadísticas ──────────────────────────────────────────────────────────
+  // ── Estadísticas ────────────────────────────────────────────────────────────
 
-  estadisticas: async () => {
-    const [total, activos, frecuentes, vip] = await Promise.all([
+  estadisticas() {
+    return Promise.all([
       prisma.cliente.count({ where: { estado: { not: EstadoGeneral.eliminado } } }),
       prisma.cliente.count({ where: { estado: EstadoGeneral.activo } }),
       prisma.cliente.count({ where: { estado: EstadoGeneral.activo, tipo_cliente: TipoCliente.frecuente } }),
       prisma.cliente.count({ where: { estado: EstadoGeneral.activo, tipo_cliente: TipoCliente.vip } }),
-    ]);
-    return { total, activos, frecuentes, vip };
-  },
+    ]).then(([total, activos, frecuentes, vip]) => ({ total, activos, frecuentes, vip }));
+  }
 
-  // ── Órdenes del cliente ───────────────────────────────────────────────────
+  // ── Órdenes del cliente ─────────────────────────────────────────────────────
 
-  findOrdenes: (id_cliente: number, pagination: PaginationParams) => {
+  findOrdenes(id_cliente: number, pagination: PaginationParams) {
     const where = { id_cliente };
     return Promise.all([
       prisma.orden.findMany({
@@ -146,35 +182,42 @@ export const clienteRepository = {
       }),
       prisma.orden.count({ where }),
     ]);
-  },
+  }
 
-  // ── Direcciones ───────────────────────────────────────────────────────────
+  // ── Direcciones ─────────────────────────────────────────────────────────────
 
-  findDirecciones: (id_cliente: number) =>
-    prisma.clienteDireccion.findMany({
+  findDirecciones(id_cliente: number) {
+    return prisma.clienteDireccion.findMany({
       where: { id_cliente, activa: true },
       orderBy: [{ es_principal: 'desc' }, { id: 'asc' }],
-    }),
+    });
+  }
 
-  findDireccionById: (id: number, id_cliente: number) =>
-    prisma.clienteDireccion.findFirst({ where: { id, id_cliente } }),
+  findDireccionById(id: number, id_cliente: number) {
+    return prisma.clienteDireccion.findFirst({ where: { id, id_cliente } });
+  }
 
-  addDireccion: (id_cliente: number, data: {
+  addDireccion(id_cliente: number, data: {
     alias: string; direccion: string;
     ciudad?: string; barrio?: string; referencia?: string; es_principal?: boolean;
-  }) => prisma.clienteDireccion.create({ data: { id_cliente, ...data } }),
+  }) {
+    return prisma.clienteDireccion.create({ data: { id_cliente, ...data } });
+  }
 
-  updateDireccion: (id: number, data: Partial<{
+  updateDireccion(id: number, data: Partial<{
     alias: string; direccion: string; ciudad: string;
     barrio: string; referencia: string; es_principal: boolean; activa: boolean;
-  }>) => prisma.clienteDireccion.update({ where: { id }, data }),
+  }>) {
+    return prisma.clienteDireccion.update({ where: { id }, data });
+  }
 
-  deleteDireccion: (id: number) =>
-    prisma.clienteDireccion.update({ where: { id }, data: { activa: false } }),
+  deleteDireccion(id: number) {
+    return prisma.clienteDireccion.update({ where: { id }, data: { activa: false } });
+  }
 
-  // ── Puntos de lealtad ─────────────────────────────────────────────────────
+  // ── Puntos de lealtad ───────────────────────────────────────────────────────
 
-  findPuntos: (id_cliente: number, pagination: PaginationParams) => {
+  findPuntos(id_cliente: number, pagination: PaginationParams) {
     const where = { id_cliente };
     return Promise.all([
       prisma.clientePunto.findMany({
@@ -185,9 +228,9 @@ export const clienteRepository = {
       }),
       prisma.clientePunto.count({ where }),
     ]);
-  },
+  }
 
-  registrarPuntos: (data: {
+  registrarPuntos(data: {
     id_cliente:    number;
     tipo:          TipoPunto;
     puntos:        number;
@@ -195,11 +238,16 @@ export const clienteRepository = {
     saldo_antes:   number;
     saldo_despues: number;
     id_orden?:     number;
-  }) => prisma.clientePunto.create({ data }),
+  }) {
+    return prisma.clientePunto.create({ data });
+  }
 
-  actualizarPuntos: (id_cliente: number, nuevos_puntos: number) =>
-    prisma.cliente.update({
+  actualizarPuntos(id_cliente: number, nuevos_puntos: number) {
+    return prisma.cliente.update({
       where: { id: id_cliente },
       data:  { puntos_acumulados: nuevos_puntos },
-    }),
-};
+    });
+  }
+}
+
+export const clienteRepository = new ClienteRepositoryImpl();

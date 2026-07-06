@@ -21,13 +21,16 @@ import { ForbiddenError, NotFoundError } from '../../exceptions/HttpErrors';
 
 const { mockTx } = vi.hoisted(() => {
   const mockTx: any = {
-    receta:       { findFirst: vi.fn() },
-    producto:     { findUnique: vi.fn(), update: vi.fn() },
-    movimiento:   { create: vi.fn() },
-    orden:        { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
-    ordenDetalle: { create: vi.fn(), update: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn(), findUnique: vi.fn() },
-    factura:      { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
-    pago:         { create: vi.fn() },
+    receta:        { findFirst: vi.fn() },
+    producto:      { findUnique: vi.fn(), update: vi.fn() },
+    productoStock: { findUnique: vi.fn(), update: vi.fn() },
+    movimiento:    { create: vi.fn() },
+    orden:         { create: vi.fn(), update: vi.fn(), findUnique: vi.fn(), delete: vi.fn() },
+    ordenDetalle:  { create: vi.fn(), update: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn(), delete: vi.fn(), findUnique: vi.fn() },
+    ordenSede:     { create: vi.fn(), findMany: vi.fn() },
+    ordenEvento:   { create: vi.fn() },
+    factura:       { findUnique: vi.fn(), create: vi.fn(), update: vi.fn() },
+    pago:          { create: vi.fn() },
   };
   return { mockTx };
 });
@@ -45,6 +48,7 @@ vi.mock('../../repositories/orden.repository', () => ({
     groupByTipo:      vi.fn(),
     aggregate:        vi.fn(),
   },
+  includeOrdenCompleta: {},
 }));
 
 vi.mock('../../repositories/estado.repository', () => ({
@@ -262,6 +266,98 @@ describe('ordenService.crear', () => {
     // No debe descontar stock del producto (el descuento ocurre al entregar vía ingredientes)
     expect(mockTx.producto.update).not.toHaveBeenCalled();
     expect(mockTx.movimiento.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── crear (nueva arquitectura, multi-sede) ────────────────────────────────────
+// Antes sin cobertura — cubre el fix de "retorna null tras crear con éxito"
+// (ordenService.crear() leía la orden vía el cliente prisma global, todavía
+// dentro de la transacción sin commit) y el fix de impuesto por sede.
+
+describe('ordenService.crear — nueva arquitectura (multi-sede)', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  const mockProd = (id: number, stock = 100) => ({
+    id, nombre: `Producto ${id}`, stock_actual: new Decimal(stock), unidad_medida: 'unidad',
+  });
+
+  it('retorna la orden completa (no null) tras crear con éxito — no usa ordenRepository.findById', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+    (configuracionService.resolverTasaImpuestoDeRestaurante as any).mockResolvedValue(null);
+
+    mockTx.orden.create.mockResolvedValueOnce({ id: 1 });
+    mockTx.producto.findUnique.mockResolvedValue(mockProd(5));
+    mockTx.receta.findFirst.mockResolvedValue(null);
+    mockTx.productoStock.findUnique.mockResolvedValue(null);
+    mockTx.productoStock.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.ordenSede.create.mockResolvedValue({ id: 10 });
+    mockTx.ordenSede.findMany.mockResolvedValue([
+      { id: 10, id_restaurante: 1, subtotal: new Decimal('10000'), impuestos: new Decimal('800'), impuesto_tipo: 'impoconsumo' },
+    ]);
+    mockTx.orden.findUnique
+      .mockResolvedValueOnce({ descuento: new Decimal(0), propina: new Decimal(0), costo_domicilio: new Decimal(0) }) // consolidarTotalesOrden
+      .mockResolvedValueOnce({ id: 1, numero_orden: 'ORD-000001', sedes: [{ id: 10, id_restaurante: 1, sufijo: null }] }); // ordenFinal
+    mockTx.orden.update.mockResolvedValue({});
+    mockTx.ordenEvento.create.mockResolvedValue({});
+
+    const result = await ordenService.crear({
+      id_grupo: 2, id_usuario: 1, tipo_orden: 'local' as any,
+      sedes: [{ id_restaurante: 1, items: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000 }] }],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result).toMatchObject({ id: 1, numero_orden: 'ORD-000001' });
+    expect(ordenRepository.findById).not.toHaveBeenCalled();
+  });
+
+  it('multi-sede: resuelve el impuesto por cada restaurante y consolida la suma en la Orden', async () => {
+    (recetaService.verificarDisponibilidadParaDetalles as any).mockResolvedValue({ ok: true });
+    (ordenRepository.findUltima as any).mockResolvedValue(null);
+    // Sede 1: impoconsumo 8%. Sede 2: iva 19% — tasas distintas en el mismo pedido.
+    (configuracionService.resolverTasaImpuestoDeRestaurante as any)
+      .mockResolvedValueOnce({ tarifa: 8, tipo: 'impoconsumo' })
+      .mockResolvedValueOnce({ tarifa: 19, tipo: 'iva' });
+
+    mockTx.orden.create.mockResolvedValueOnce({ id: 1 });
+    mockTx.producto.findUnique.mockResolvedValue(mockProd(5));
+    mockTx.receta.findFirst.mockResolvedValue(null);
+    mockTx.productoStock.findUnique.mockResolvedValue(null);
+    mockTx.productoStock.update.mockResolvedValue({});
+    mockTx.movimiento.create.mockResolvedValue({});
+    mockTx.ordenSede.create.mockResolvedValue({ id: 10 });
+    mockTx.ordenSede.findMany.mockResolvedValue([
+      { id: 10, id_restaurante: 1, subtotal: new Decimal('10000'), impuestos: new Decimal('800'),  impuesto_tipo: 'impoconsumo' },
+      { id: 11, id_restaurante: 2, subtotal: new Decimal('10000'), impuestos: new Decimal('1900'), impuesto_tipo: 'iva' },
+    ]);
+    mockTx.orden.findUnique
+      .mockResolvedValueOnce({ descuento: new Decimal(0), propina: new Decimal(0), costo_domicilio: new Decimal(0) })
+      .mockResolvedValueOnce({ id: 1, numero_orden: 'ORD-000001' });
+    mockTx.orden.update.mockResolvedValue({});
+    mockTx.ordenEvento.create.mockResolvedValue({});
+
+    await ordenService.crear({
+      id_grupo: 2, id_usuario: 1, tipo_orden: 'local' as any,
+      sedes: [
+        { id_restaurante: 1, items: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000 }] },
+        { id_restaurante: 2, items: [{ id_producto: 5, cantidad: 1, precio_unitario: 10000 }] },
+      ],
+    });
+
+    // Cada sede resolvió su propia tasa — no una tasa única para todo el pedido
+    expect(configuracionService.resolverTasaImpuestoDeRestaurante).toHaveBeenNthCalledWith(1, 1);
+    expect(configuracionService.resolverTasaImpuestoDeRestaurante).toHaveBeenNthCalledWith(2, 2);
+
+    // Cada sede se crea con SU propio impuesto (800 y 1900) — no una tasa compartida
+    expect(mockTx.ordenSede.create.mock.calls[0][0].data.impuestos.toString()).toBe('800');
+    expect(mockTx.ordenSede.create.mock.calls[1][0].data.impuestos.toString()).toBe('1900');
+
+    // Consolidado de la Orden = suma de los impuestos YA resueltos por sede (800 + 1900 = 2700),
+    // no una tasa única recalculada sobre el subtotal total.
+    const updateArg = mockTx.orden.update.mock.calls[0][0];
+    expect(updateArg.data.impuestos.toString()).toBe('2700');
+    expect(updateArg.data.impuesto_tipo).toBeNull(); // tipos distintos por sede → ambiguo a nivel Orden
   });
 });
 

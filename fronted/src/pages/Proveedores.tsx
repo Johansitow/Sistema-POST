@@ -7,15 +7,19 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Plus, Search, Edit2, X, Check, RefreshCw, AlertCircle,
   Building2, Phone, Mail, MapPin, Star, Clock, Package,
   ToggleLeft, ToggleRight, Eye, Globe, MessageCircle, ShoppingCart,
+  Home, Calendar, History,
 } from 'lucide-react';
 import { proveedorService, Proveedor, ProveedorCreateDTO, ProveedorProducto } from '../services/servicios-gestion';
 import { productosService } from '../services/productos.service';
+import { listaComprasService, ListaCompras } from '../services/lista-compras.service';
 import { formatCurrency } from '../utils';
-import { EmptyState, LoadingScreen } from '../components/common';
+import { EmptyState, LoadingScreen, EstadoListaBadge } from '../components/common';
+import { Z_INDEX } from '../lib/zIndex';
 
 // ============================================================================
 // HELPERS
@@ -221,7 +225,7 @@ const AsociarProductoModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 60 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_NESTED }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
         <div className="bg-gradient-to-r from-teal-600 to-emerald-600 px-5 py-4 flex items-center justify-between">
@@ -291,6 +295,8 @@ const DetalleProveedorPanel: React.FC<{
   const [productos, setProductos]           = useState<ProveedorProducto[]>([]);
   const [loading, setLoading]               = useState(true);
   const [showAsociar, setShowAsociar]       = useState(false);
+  const [listasCompras, setListasCompras]   = useState<ListaCompras[]>([]);
+  const [loadingListas, setLoadingListas]   = useState(true);
 
   const loadProductos = useCallback(() => {
     setLoading(true);
@@ -302,19 +308,36 @@ const DetalleProveedorPanel: React.FC<{
 
   useEffect(() => { loadProductos(); }, [loadProductos]);
 
+  useEffect(() => {
+    setLoadingListas(true);
+    listaComprasService.listar({ id_proveedor: proveedor.id, limit: 5 })
+      .then(res => setListasCompras(res.data))
+      .catch(console.error)
+      .finally(() => setLoadingListas(false));
+  }, [proveedor.id]);
+
+  const tieneCalificacion = proveedor.calificacion != null;
   const calScore = Number(proveedor.calificacion ?? 0);
+  const esPreferido = productos.some(p => p.es_proveedor_preferido);
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
         <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-        <div className="relative bg-white w-full max-w-md h-full flex flex-col shadow-2xl overflow-hidden">
-          <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5">
+        <div className="relative bg-white w-full max-w-md max-h-[90vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5 flex-shrink-0">
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-indigo-200 text-xs font-medium mb-1">Proveedor</p>
                 <h2 className="text-white font-bold text-lg leading-tight">{proveedor.razon_social}</h2>
-                {proveedor.nit && <p className="text-indigo-200 text-xs mt-1">NIT: {proveedor.nit}</p>}
+                <div className="flex items-center gap-2 mt-1">
+                  {proveedor.nit && <p className="text-indigo-200 text-xs">NIT: {proveedor.nit}</p>}
+                  {esPreferido && (
+                    <span className="inline-flex items-center gap-1 bg-amber-400/90 text-amber-900 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                      <Star className="w-2.5 h-2.5 fill-amber-900" /> Preferido
+                    </span>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={onEdit} className="bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1">
@@ -331,8 +354,8 @@ const DetalleProveedorPanel: React.FC<{
             {/* Info grid */}
             <div className="grid grid-cols-2 gap-3">
               {[
-                { icon: <Phone className="w-4 h-4 text-blue-500" />,  label: 'Teléfono', value: proveedor.contacto_telefono || '—' },
-                { icon: <Mail  className="w-4 h-4 text-violet-500" />, label: 'Email',    value: proveedor.contacto_email   || '—' },
+                { icon: <Phone className="w-4 h-4 text-blue-500" />,  label: 'Teléfono', value: proveedor.contacto_telefono ? <a href={`tel:${proveedor.contacto_telefono}`} className="hover:underline hover:text-blue-600">{proveedor.contacto_telefono}</a> : '—' },
+                { icon: <Mail  className="w-4 h-4 text-violet-500" />, label: 'Email',    value: proveedor.contacto_email ? <a href={`mailto:${proveedor.contacto_email}`} className="hover:underline hover:text-violet-600">{proveedor.contacto_email}</a> : '—' },
                 { icon: <MapPin className="w-4 h-4 text-red-500" />,   label: 'Ciudad',   value: proveedor.ciudad           || '—' },
                 { icon: <Clock  className="w-4 h-4 text-amber-500" />, label: 'Entrega',  value: proveedor.tiempo_entrega_promedio ? `${proveedor.tiempo_entrega_promedio} días` : '—' },
               ].map(item => (
@@ -342,6 +365,23 @@ const DetalleProveedorPanel: React.FC<{
                 </div>
               ))}
             </div>
+
+            {/* Dirección */}
+            {proveedor.direccion && (
+              <div className="bg-slate-50 rounded-xl p-3 flex items-start gap-2">
+                <Home className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-500">Dirección</p>
+                  <p className="text-sm font-semibold text-slate-700">{proveedor.direccion}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Proveedor desde */}
+            <p className="text-xs text-slate-400 flex items-center gap-1.5">
+              <Calendar className="w-3 h-3" />
+              Proveedor desde {new Date(proveedor.fecha_creacion).toLocaleDateString('es-CO', { year: 'numeric', month: 'long' })}
+            </p>
 
             {/* WhatsApp + Sitio web */}
             {(proveedor.contacto_whatsapp || proveedor.sitio_web) && (
@@ -367,19 +407,32 @@ const DetalleProveedorPanel: React.FC<{
             )}
 
             {/* Calificación automática */}
-            <div className={`rounded-xl p-4 border ${calScore >= 4 ? 'bg-emerald-50 border-emerald-200' : calScore >= 3 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Calificación automática</p>
-                <p className={`text-xl font-black ${calScore >= 4 ? 'text-emerald-700' : calScore >= 3 ? 'text-amber-700' : 'text-slate-600'}`}>
-                  {calScore.toFixed(1)} / 5.0
+            {tieneCalificacion ? (
+              <div className={`rounded-xl p-4 border ${calScore >= 4 ? 'bg-emerald-50 border-emerald-200' : calScore >= 3 ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Calificación automática</p>
+                  <p className={`text-xl font-black ${calScore >= 4 ? 'text-emerald-700' : calScore >= 3 ? 'text-amber-700' : 'text-slate-600'}`}>
+                    {calScore.toFixed(1)} / 5.0
+                  </p>
+                </div>
+                <StarRating value={calScore} />
+                <p className="text-xs text-slate-400 mt-2">
+                  Calculada automáticamente: 40% precio, 40% calidad de productos, 20% tiempo de entrega.
+                  Se actualiza al asociar o modificar productos.
                 </p>
               </div>
-              <StarRating value={calScore} />
-              <p className="text-xs text-slate-400 mt-2">
-                Calculada automáticamente: 40% precio, 40% calidad de productos, 20% tiempo de entrega.
-                Se actualiza al asociar o modificar productos.
-              </p>
-            </div>
+            ) : (
+              <div className="rounded-xl p-4 border bg-slate-50 border-slate-200">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Calificación automática</p>
+                  <span className="text-sm font-semibold text-slate-400">Sin calificar</span>
+                </div>
+                <p className="text-xs text-slate-400">
+                  Aún no hay suficientes datos (productos asociados con calidad y precio) para calcular una calificación.
+                  Se generará automáticamente al asociar productos.
+                </p>
+              </div>
+            )}
 
             {/* Contacto */}
             {proveedor.contacto_nombre && (
@@ -388,6 +441,38 @@ const DetalleProveedorPanel: React.FC<{
                 <p className="font-semibold text-slate-700">{proveedor.contacto_nombre}</p>
               </div>
             )}
+
+            {/* Historial de compras */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                  <History className="w-3.5 h-3.5" /> Historial de compras
+                </p>
+                <Link to="/listas-compras" className="text-xs text-indigo-600 font-semibold hover:underline">
+                  Ver todo →
+                </Link>
+              </div>
+              {loadingListas ? (
+                <div className="text-center py-4 text-slate-400 text-sm">Cargando historial...</div>
+              ) : listasCompras.length === 0 ? (
+                <div className="text-center py-4 text-slate-400 text-sm">Sin compras registradas</div>
+              ) : (
+                <div className="space-y-2">
+                  {listasCompras.map(l => (
+                    <div key={l.id} className="bg-slate-50 rounded-xl px-3 py-2.5 border border-slate-100 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-slate-700 truncate">{l.numero_lista}</p>
+                        <p className="text-xs text-slate-400">{new Date(l.fecha_generacion).toLocaleDateString('es-CO')}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0 flex items-center gap-2">
+                        {l.total_estimado != null && <span className="text-sm font-bold text-slate-700">{formatCurrency(l.total_estimado)}</span>}
+                        <EstadoListaBadge estado={l.estado} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Productos asociados */}
             <div>

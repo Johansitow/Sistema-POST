@@ -469,10 +469,8 @@ export const reporteService = {
   },
 
   /**
-   * getMetodosPagoGrupo — agrega los métodos de pago del grupo.
-   * Considera dos fuentes:
-   *   1. PagoGrupo → pagos de órdenes multi-restaurante
-   *   2. Pago      → pagos de órdenes individuales dentro del grupo
+   * getMetodosPagoGrupo — agrega los métodos de pago de las órdenes del grupo
+   * de negocio (todas sus sedes).
    */
   async getMetodosPagoGrupo(idGrupo: number, params: {
     fecha_desde?: Date; fecha_hasta?: Date;
@@ -484,24 +482,11 @@ export const reporteService = {
     const fechaW   = buildFechaWhere(params.fecha_desde, params.fecha_hasta);
     const idEstado = await getEstadoFinalId();
 
-    // Fuente 1: PagoGrupo (órdenes multi-restaurante)
-    const pagosGrupo = await prisma.pagoGrupo.findMany({
-      where: {
-        orden_grupo: {
-          id_grupo: idGrupo,
-          ...(fechaW ? { fecha_creacion: fechaW } : {}),
-        },
-      },
-      include: { metodo_pago: { select: { nombre: true } } },
-    }) as any[];
-
-    // Fuente 2: Pago individual (órdenes sin grupo, dentro del grupo de restaurantes)
-    const pagosIndividuales = await prisma.pago.findMany({
+    const pagos = await prisma.pago.findMany({
       where: {
         orden: {
-          id_estado:       idEstado,
-          id_restaurante:  { in: idsRest },
-          id_orden_grupo:  null, // solo órdenes sin grupo (no duplicar con PagoGrupo)
+          id_estado:      idEstado,
+          id_restaurante: { in: idsRest },
           ...(fechaW ? { fecha_apertura: fechaW } : {}),
         },
       },
@@ -516,8 +501,7 @@ export const reporteService = {
       e.total += monto;
     };
 
-    pagosGrupo.forEach((p: any)        => acumular(p.metodo_pago.nombre, Number(p.monto)));
-    pagosIndividuales.forEach((p: any) => acumular(p.metodo_pago.nombre, Number(p.monto)));
+    pagos.forEach((p: any) => acumular(p.metodo_pago.nombre, Number(p.monto)));
 
     return Array.from(mapa.values()).sort((a, b) => b.total - a.total);
   },

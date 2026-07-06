@@ -14,6 +14,7 @@ import { formatCurrency } from '../utils';
 import { LoadingScreen, EmptyState } from '../components/common';
 import LoteRentabilidad from '../components/lotes/LoteRentabilidad';
 import { Z_INDEX } from '../lib/zIndex';
+import { inventarioService, type VidaUtilPromedio } from '../services/inventario.service';
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ interface Lote {
   merma_porcentaje:       number | string;
   fecha_produccion:       string;
   fecha_vencimiento:      string | null;
+  fecha_cierre:           string | null;
   vida_util_dias:         number | null;
   estado_lote:            EstadoLote;
   costo_produccion:       number | string | null;
@@ -105,6 +107,7 @@ export const Lotes: React.FC = () => {
   const [filterEstado, setFilterEstado] = useState<EstadoLote | ''>('');
   const [showFilters, setShowFilters]   = useState(false);
   const [rentabilidadLote, setRentabilidadLote] = useState<Lote | null>(null);
+  const [vidaUtilPromedio, setVidaUtilPromedio] = useState<VidaUtilPromedio[]>([]);
 
   const LIMIT = 20;
 
@@ -140,6 +143,12 @@ export const Lotes: React.FC = () => {
   }, [page, filterEstado, idRestaurante]);
 
   useEffect(() => { loadLotes(); }, [filterEstado, page]);
+
+  useEffect(() => {
+    inventarioService.getVidaUtilPromedio()
+      .then(setVidaUtilPromedio)
+      .catch(() => setVidaUtilPromedio([]));
+  }, [idRestaurante]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,14 +241,41 @@ export const Lotes: React.FC = () => {
           )}
         </div>
 
-        {/* Alerta lotes próximos a vencer */}
+        {/* Alerta de reconteo — lotes próximos a vencer */}
         {proxVencer > 0 && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
             <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
             <p className="text-sm text-amber-800">
               <strong>{proxVencer} lote{proxVencer > 1 ? 's' : ''}</strong> vence{proxVencer > 1 ? 'n' : ''} en los próximos 7 días.
-              Revisa el estado del inventario.
+              Haz un reconteo para verificar si {proxVencer > 1 ? 'se están dañando' : 'se está dañando'} antes de tiempo.
             </p>
+          </div>
+        )}
+
+        {/* Vida útil promedio de productos caseros/almacenados */}
+        {vidaUtilPromedio.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+            <p className="text-sm font-bold text-slate-800 flex items-center gap-2 mb-3">
+              <Clock className="w-4 h-4 text-indigo-600" /> Vida útil promedio (productos almacenados)
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {vidaUtilPromedio.map(v => (
+                <div key={v.id_producto} className="border border-slate-100 rounded-xl px-3.5 py-3">
+                  <p className="text-sm font-semibold text-slate-700 truncate">{v.nombre}</p>
+                  {v.dias_reales_promedio != null ? (
+                    <p className="text-lg font-bold text-emerald-600">
+                      {v.dias_reales_promedio}d <span className="text-xs font-normal text-slate-400">real ({v.muestras_reales} lote{v.muestras_reales > 1 ? 's' : ''})</span>
+                    </p>
+                  ) : v.dias_estimados_promedio != null ? (
+                    <p className="text-lg font-bold text-slate-500">
+                      {v.dias_estimados_promedio}d <span className="text-xs font-normal text-slate-400">estimado — aún sin datos reales</span>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-300">Sin datos suficientes</p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -248,7 +284,7 @@ export const Lotes: React.FC = () => {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <EmptyState
               message="No se encontraron lotes"
-              description="Los lotes se crean automáticamente al registrar movimientos de Entrada o Producción en el Inventario"
+              description="Los lotes se registran opcionalmente al agregar cantidad en Inventario, marcando 'Registrar lote'"
               actionLabel="Ir a Inventario"
               onAction={() => window.location.href = '/inventario'}
             />
@@ -328,6 +364,11 @@ export const Lotes: React.FC = () => {
                             </div>
                           ) : (
                             <span className="text-xs text-slate-300">Sin fecha</span>
+                          )}
+                          {lote.fecha_cierre && (
+                            <p className="text-xs text-indigo-600 mt-0.5">
+                              Real: {Math.round((new Date(lote.fecha_cierre).getTime() - new Date(lote.fecha_produccion).getTime()) / 86400000)}d
+                            </p>
                           )}
                         </td>
 
@@ -410,7 +451,7 @@ export const Lotes: React.FC = () => {
         <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-100 rounded-2xl">
           <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
           <p className="text-xs text-blue-700">
-            Los lotes se generan automáticamente al registrar movimientos de tipo <strong>Entrada</strong> o <strong>Producción</strong> en el módulo de Inventario.
+            Los lotes se registran opcionalmente al marcar <strong>"Registrar lote"</strong> en un movimiento de Entrada o Producción del módulo de Inventario — solo aplica a productos que se almacenan.
             Cada lote tiene un número único y trazabilidad completa del producto.
           </p>
         </div>

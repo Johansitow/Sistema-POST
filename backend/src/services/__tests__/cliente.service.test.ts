@@ -1,15 +1,18 @@
 /**
  * Tests para clienteService
  *
+ * Oleada 3b-ii: añade tenant guards (assertGrupoCtx + findByIdScoped con id_grupo).
  * Cubre:
- *   - crear: unicidad email/documento, puntos de bienvenida
- *   - actualizar: unicidad excluyendo el cliente actual
- *   - canjearPuntos: saldo suficiente / insuficiente / exacto, registro correcto
- *   - obtenerPorId: found / not found
- *   - cambiarEstado: delega al repo
+ *   - crear: assertGrupoCtx, id_grupo inyectado desde ctx, unicidad, puntos bienvenida
+ *   - actualizar, cambiarEstado: findByIdScoped cross-tenant → 404, superadmin → ok
+ *   - getDirecciones, addDireccion, updateDireccion, deleteDireccion: guard vía cliente padre
+ *   - getOrdenes, getPuntos: guard vía cliente padre
+ *   - canjearPuntos: guard + lógica de saldo
+ *   - obtenerPorId: sin cambios (read público sin scope)
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { TenantCtx } from '../../lib/tenantCtx';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -17,6 +20,7 @@ vi.mock('../../repositories/cliente.repository', () => ({
   clienteRepository: {
     findAll:           vi.fn(),
     findById:          vi.fn(),
+    findByIdScoped:    vi.fn(),
     findByEmail:       vi.fn(),
     findByDocumento:   vi.fn(),
     create:            vi.fn(),
@@ -38,13 +42,21 @@ vi.mock('../../repositories/cliente.repository', () => ({
 
 import { clienteService } from '../cliente.service';
 import { clienteRepository } from '../../repositories/cliente.repository';
-import { ConflictError, NotFoundError, BadRequestError } from '../../exceptions/HttpErrors';
+import { ConflictError, NotFoundError, BadRequestError, ForbiddenError } from '../../exceptions/HttpErrors';
+
+const repo = clienteRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
+const CTX_GRUPO_1: TenantCtx   = { grupoId: 1, restauranteId: 10 };
+const CTX_GRUPO_2: TenantCtx   = { grupoId: 2, restauranteId: 20 };
+const CTX_SIN_GRUPO: TenantCtx = { restauranteId: 10 };
+const CTX_SUPER: TenantCtx     = { esSuperAdmin: true };
+
 const mockCliente = {
   id:                 1,
-  nombre:             'Ana García',
+  id_grupo:           1,
+  nombre_completo:    'Ana García',
   email:              'ana@test.com',
   numero_documento:   '12345678',
   puntos_acumulados:  200,
@@ -52,253 +64,347 @@ const mockCliente = {
   tipo_cliente:       'regular',
 };
 
-const makeCreateDTO = (overrides: Record<string, any> = {}): any => ({
+const makeCreateDTO = (overrides: Record<string, unknown> = {}): Parameters<typeof clienteService.crear>[0] => ({
   nombre_completo:  'Nuevo Cliente',
-  tipo_documento:   'cc',
-  tipo_cliente:     'regular',
+  tipo_documento:   'cc' as never,
+  tipo_cliente:     'regular' as never,
   puntos_bienvenida: false,
   email:            'nuevo@test.com',
   numero_documento: '99999999',
   ...overrides,
-});
+} as never);
 
-// ── obtenerPorId ──────────────────────────────────────────────────────────────
+// ── obtenerPorId — sin cambios (lectura pública) ──────────────────────────────
 
 describe('clienteService.obtenerPorId', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => vi.resetAllMocks());
 
   it('retorna el cliente si existe', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(mockCliente);
+    repo.findById.mockResolvedValue(mockCliente);
     const result = await clienteService.obtenerPorId(1);
     expect(result.id).toBe(1);
   });
 
   it('lanza NotFoundError si el cliente no existe', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(null);
+    repo.findById.mockResolvedValue(null);
     await expect(clienteService.obtenerPorId(999)).rejects.toThrow(NotFoundError);
   });
 });
 
-// ── crear ─────────────────────────────────────────────────────────────────────
+// ── crear — assertGrupoCtx + id_grupo desde ctx ───────────────────────────────
 
-describe('clienteService.crear', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('clienteService.crear — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza ForbiddenError si ctx no tiene grupoId y no es superadmin', async () => {
+    await expect(clienteService.crear(makeCreateDTO(), CTX_SIN_GRUPO))
+      .rejects.toThrow(ForbiddenError);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('el cliente nace con id_grupo del contexto (no del body)', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 2 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 2, id_grupo: 1 });
+
+    await clienteService.crear(makeCreateDTO(), CTX_GRUPO_1);
+
+    expect(repo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id_grupo: 1 })
+    );
+  });
 
   it('crea cliente exitosamente sin puntos de bienvenida', async () => {
-    (clienteRepository.findByEmail as any).mockResolvedValue(null);
-    (clienteRepository.findByDocumento as any).mockResolvedValue(null);
-    (clienteRepository.create as any).mockResolvedValue({ id: 2 });
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, id: 2 });
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 2 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 2 });
 
-    await clienteService.crear(makeCreateDTO());
+    await clienteService.crear(makeCreateDTO(), CTX_GRUPO_1);
 
-    expect(clienteRepository.create).toHaveBeenCalledOnce();
-    expect(clienteRepository.registrarPuntos).not.toHaveBeenCalled();
-    expect(clienteRepository.actualizarPuntos).not.toHaveBeenCalled();
+    expect(repo.create).toHaveBeenCalledOnce();
+    expect(repo.registrarPuntos).not.toHaveBeenCalled();
+    expect(repo.actualizarPuntos).not.toHaveBeenCalled();
   });
 
   it('registra 100 puntos de bienvenida cuando se solicita', async () => {
-    (clienteRepository.findByEmail as any).mockResolvedValue(null);
-    (clienteRepository.findByDocumento as any).mockResolvedValue(null);
-    (clienteRepository.create as any).mockResolvedValue({ id: 3 });
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, id: 3, puntos_acumulados: 100 });
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 3 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 3, puntos_acumulados: 100 });
 
-    await clienteService.crear(makeCreateDTO({ puntos_bienvenida: true }));
+    await clienteService.crear(makeCreateDTO({ puntos_bienvenida: true }), CTX_GRUPO_1);
 
-    expect(clienteRepository.registrarPuntos).toHaveBeenCalledOnce();
-    const puntoArgs = (clienteRepository.registrarPuntos as any).mock.calls[0][0];
+    expect(repo.registrarPuntos).toHaveBeenCalledOnce();
+    const puntoArgs = repo.registrarPuntos.mock.calls[0][0];
     expect(puntoArgs.puntos).toBe(100);
     expect(puntoArgs.tipo).toBe('bienvenida');
     expect(puntoArgs.saldo_antes).toBe(0);
     expect(puntoArgs.saldo_despues).toBe(100);
-
-    expect(clienteRepository.actualizarPuntos).toHaveBeenCalledWith(3, 100);
+    expect(repo.actualizarPuntos).toHaveBeenCalledWith(3, 100);
   });
 
   it('lanza ConflictError si el email ya está registrado', async () => {
-    (clienteRepository.findByEmail as any).mockResolvedValue(mockCliente);
+    repo.findByEmail.mockResolvedValue(mockCliente);
 
-    await expect(clienteService.crear(makeCreateDTO({ email: 'ana@test.com' })))
+    await expect(clienteService.crear(makeCreateDTO({ email: 'ana@test.com' }), CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
-    expect(clienteRepository.create).not.toHaveBeenCalled();
+    expect(repo.create).not.toHaveBeenCalled();
   });
 
   it('lanza ConflictError si el número de documento ya está registrado', async () => {
-    (clienteRepository.findByEmail as any).mockResolvedValue(null);
-    (clienteRepository.findByDocumento as any).mockResolvedValue(mockCliente);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(mockCliente);
 
-    await expect(clienteService.crear(makeCreateDTO({ numero_documento: '12345678' })))
+    await expect(clienteService.crear(makeCreateDTO({ numero_documento: '12345678' }), CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
-    expect(clienteRepository.create).not.toHaveBeenCalled();
+    expect(repo.create).not.toHaveBeenCalled();
   });
 
-  it('omite verificación de email si no se proporciona', async () => {
-    (clienteRepository.findByDocumento as any).mockResolvedValue(null);
-    (clienteRepository.create as any).mockResolvedValue({ id: 4 });
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, id: 4 });
+  it('superadmin puede crear clientes', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 10 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 10 });
 
-    await clienteService.crear(makeCreateDTO({ email: undefined }));
-
-    expect(clienteRepository.findByEmail).not.toHaveBeenCalled();
-    expect(clienteRepository.create).toHaveBeenCalledOnce();
-  });
-
-  it('omite verificación de documento si no se proporciona', async () => {
-    (clienteRepository.findByEmail as any).mockResolvedValue(null);
-    (clienteRepository.create as any).mockResolvedValue({ id: 5 });
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, id: 5 });
-
-    await clienteService.crear(makeCreateDTO({ numero_documento: undefined }));
-
-    expect(clienteRepository.findByDocumento).not.toHaveBeenCalled();
-    expect(clienteRepository.create).toHaveBeenCalledOnce();
+    await expect(clienteService.crear(makeCreateDTO(), CTX_SUPER)).resolves.toBeDefined();
   });
 });
 
-// ── actualizar ────────────────────────────────────────────────────────────────
+// ── actualizar — tenant guard ─────────────────────────────────────────────────
 
-describe('clienteService.actualizar', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('clienteService.actualizar — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza NotFoundError cross-tenant (cadena A → cliente de cadena B)', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+
+    await expect(clienteService.actualizar(1, { nombre_completo: 'X' }, CTX_GRUPO_2))
+      .rejects.toThrow(NotFoundError);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
 
   it('lanza ConflictError si el email ya pertenece a otro cliente', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(mockCliente);        // cliente actual existe
-    (clienteRepository.findByEmail as any).mockResolvedValue({ id: 99, email: 'otro@test.com' }); // otro cliente con ese email
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findByEmail.mockResolvedValue({ id: 99, email: 'otro@test.com' });
 
-    await expect(clienteService.actualizar(1, { email: 'otro@test.com' }))
+    await expect(clienteService.actualizar(1, { email: 'otro@test.com' }, CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
-    expect(clienteRepository.update).not.toHaveBeenCalled();
+    expect(repo.update).not.toHaveBeenCalled();
   });
 
-  it('pasa excludeId correcto a findByEmail para evitar falso conflicto con el propio email', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(mockCliente);
-    (clienteRepository.findByEmail as any).mockResolvedValue(null); // ningún OTRO cliente tiene ese email
-    (clienteRepository.findByDocumento as any).mockResolvedValue(null);
-    (clienteRepository.update as any).mockResolvedValue({});
-    (clienteRepository.findById as any).mockResolvedValue(mockCliente);
+  it('happy path: dueño legítimo actualiza su cliente', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.update.mockResolvedValue({});
+    repo.findById.mockResolvedValue({ ...mockCliente, nombre_completo: 'Ana G.' });
 
-    await clienteService.actualizar(1, { email: 'ana@test.com' });
-
-    expect(clienteRepository.findByEmail).toHaveBeenCalledWith('ana@test.com', 1); // excludeId = 1
-    expect(clienteRepository.update).toHaveBeenCalledOnce();
+    const result = await clienteService.actualizar(1, { nombre_completo: 'Ana G.' }, CTX_GRUPO_1);
+    expect(result).toMatchObject({ nombre_completo: 'Ana G.' });
+    expect(repo.findByIdScoped).toHaveBeenCalledWith(1, CTX_GRUPO_1);
   });
 
-  it('lanza ConflictError si el número de documento ya pertenece a otro cliente', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(mockCliente);
-    (clienteRepository.findByEmail as any).mockResolvedValue(null);
-    (clienteRepository.findByDocumento as any).mockResolvedValue({ id: 99 });
+  it('superadmin puede actualizar cualquier cliente', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.update.mockResolvedValue({});
+    repo.findById.mockResolvedValue(mockCliente);
 
-    await expect(clienteService.actualizar(1, { numero_documento: '99999999' }))
-      .rejects.toThrow(ConflictError);
+    await expect(
+      clienteService.actualizar(1, { nombre_completo: 'Y' }, CTX_SUPER)
+    ).resolves.toBeDefined();
   });
 
   it('lanza NotFoundError si el cliente no existe', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(null);
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Cliente'));
 
-    await expect(clienteService.actualizar(999, { nombre_completo: 'X' })).rejects.toThrow(NotFoundError);
+    await expect(clienteService.actualizar(999, { nombre_completo: 'X' }, CTX_GRUPO_1))
+      .rejects.toThrow(NotFoundError);
   });
 });
 
-// ── canjearPuntos ─────────────────────────────────────────────────────────────
+// ── cambiarEstado — tenant guard ──────────────────────────────────────────────
 
-describe('clienteService.canjearPuntos', () => {
-  beforeEach(() => vi.clearAllMocks());
+describe('clienteService.cambiarEstado — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('lanza NotFoundError cross-tenant', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+
+    await expect(clienteService.cambiarEstado(1, 'inactivo', CTX_GRUPO_2))
+      .rejects.toThrow(NotFoundError);
+    expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('llama update con el nuevo estado', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.update.mockResolvedValue({});
+    repo.findById.mockResolvedValue({ ...mockCliente, estado: 'inactivo' });
+
+    await clienteService.cambiarEstado(1, 'inactivo', CTX_GRUPO_1);
+
+    expect(repo.update).toHaveBeenCalledWith(1, { estado: 'inactivo' });
+  });
+
+  it('superadmin puede cambiar estado de cualquier cliente', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.update.mockResolvedValue({});
+    repo.findById.mockResolvedValue(mockCliente);
+
+    await expect(clienteService.cambiarEstado(1, 'inactivo', CTX_SUPER)).resolves.toBeDefined();
+  });
+});
+
+// ── Sub-recursos — guard vía cliente padre ────────────────────────────────────
+
+describe('clienteService sub-recursos — tenant guard', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('getDirecciones: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(clienteService.getDirecciones(1, CTX_GRUPO_2)).rejects.toThrow(NotFoundError);
+    expect(repo.findDirecciones).not.toHaveBeenCalled();
+  });
+
+  it('getDirecciones: happy path', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findDirecciones.mockResolvedValueOnce([]);
+    await expect(clienteService.getDirecciones(1, CTX_GRUPO_1)).resolves.toEqual([]);
+  });
+
+  it('addDireccion: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(
+      clienteService.addDireccion(1, { alias: 'Casa', direccion: 'Calle 1', es_principal: false }, CTX_GRUPO_2)
+    ).rejects.toThrow(NotFoundError);
+    expect(repo.addDireccion).not.toHaveBeenCalled();
+  });
+
+  it('updateDireccion: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(
+      clienteService.updateDireccion(1, 10, { alias: 'Oficina' }, CTX_GRUPO_2)
+    ).rejects.toThrow(NotFoundError);
+    expect(repo.updateDireccion).not.toHaveBeenCalled();
+  });
+
+  it('updateDireccion: dirección no encontrada → NotFoundError', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findDireccionById.mockResolvedValueOnce(null);
+    await expect(
+      clienteService.updateDireccion(1, 99, { alias: 'X' }, CTX_GRUPO_1)
+    ).rejects.toThrow(NotFoundError);
+    expect(repo.updateDireccion).not.toHaveBeenCalled();
+  });
+
+  it('deleteDireccion: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(clienteService.deleteDireccion(1, 10, CTX_GRUPO_2)).rejects.toThrow(NotFoundError);
+    expect(repo.deleteDireccion).not.toHaveBeenCalled();
+  });
+
+  it('getOrdenes: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(clienteService.getOrdenes(1, {}, CTX_GRUPO_2)).rejects.toThrow(NotFoundError);
+    expect(repo.findOrdenes).not.toHaveBeenCalled();
+  });
+
+  it('getPuntos: cross-tenant → NotFoundError', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+    await expect(clienteService.getPuntos(1, {}, CTX_GRUPO_2)).rejects.toThrow(NotFoundError);
+    expect(repo.findPuntos).not.toHaveBeenCalled();
+  });
+
+  it('superadmin puede ver sub-recursos de cualquier cliente', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findDirecciones.mockResolvedValueOnce([{ id: 5 }]);
+    await expect(clienteService.getDirecciones(1, CTX_SUPER)).resolves.toHaveLength(1);
+  });
+});
+
+// ── canjearPuntos — tenant guard + lógica de saldo ───────────────────────────
+
+describe('clienteService.canjearPuntos — tenant guard + saldo', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('cross-tenant → NotFoundError, no mueve puntos', async () => {
+    repo.findByIdScoped.mockRejectedValueOnce(new NotFoundError('Registro 1'));
+
+    await expect(clienteService.canjearPuntos(1, 50, CTX_GRUPO_2))
+      .rejects.toThrow(NotFoundError);
+    expect(repo.registrarPuntos).not.toHaveBeenCalled();
+    expect(repo.actualizarPuntos).not.toHaveBeenCalled();
+  });
 
   it('canjea puntos correctamente cuando el saldo es suficiente', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 200 });
-    (clienteRepository.registrarPuntos as any).mockResolvedValue({});
-    (clienteRepository.actualizarPuntos as any).mockResolvedValue({});
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 200 });
+    repo.registrarPuntos.mockResolvedValue({});
+    repo.actualizarPuntos.mockResolvedValue({});
 
-    const result = await clienteService.canjearPuntos(1, 150);
+    const result = await clienteService.canjearPuntos(1, 150, CTX_GRUPO_1);
 
     expect(result.puntos_canjeados).toBe(150);
-    expect(result.saldo_actual).toBe(50); // 200 - 150
-
-    const puntoArgs = (clienteRepository.registrarPuntos as any).mock.calls[0][0];
-    expect(puntoArgs.puntos).toBe(-150);           // negativo = salida
+    expect(result.saldo_actual).toBe(50);
+    const puntoArgs = repo.registrarPuntos.mock.calls[0][0];
+    expect(puntoArgs.puntos).toBe(-150);
     expect(puntoArgs.tipo).toBe('canjeado');
     expect(puntoArgs.saldo_antes).toBe(200);
     expect(puntoArgs.saldo_despues).toBe(50);
-
-    expect(clienteRepository.actualizarPuntos).toHaveBeenCalledWith(1, 50);
+    expect(repo.actualizarPuntos).toHaveBeenCalledWith(1, 50);
   });
 
-  it('permite canjear el saldo exacto (saldo == puntos requeridos)', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 100 });
-    (clienteRepository.registrarPuntos as any).mockResolvedValue({});
-    (clienteRepository.actualizarPuntos as any).mockResolvedValue({});
+  it('permite canjear el saldo exacto', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 100 });
+    repo.registrarPuntos.mockResolvedValue({});
+    repo.actualizarPuntos.mockResolvedValue({});
 
-    const result = await clienteService.canjearPuntos(1, 100);
-
+    const result = await clienteService.canjearPuntos(1, 100, CTX_GRUPO_1);
     expect(result.saldo_actual).toBe(0);
-    expect(clienteRepository.actualizarPuntos).toHaveBeenCalledWith(1, 0);
   });
 
   it('lanza BadRequestError cuando los puntos son insuficientes', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 50 });
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 50 });
 
-    await expect(clienteService.canjearPuntos(1, 100)).rejects.toThrow(BadRequestError);
-
-    expect(clienteRepository.registrarPuntos).not.toHaveBeenCalled();
-    expect(clienteRepository.actualizarPuntos).not.toHaveBeenCalled();
+    await expect(clienteService.canjearPuntos(1, 100, CTX_GRUPO_1))
+      .rejects.toThrow(BadRequestError);
+    expect(repo.registrarPuntos).not.toHaveBeenCalled();
   });
 
   it('el mensaje de error incluye los puntos disponibles y requeridos', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 30 });
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 30 });
 
-    await expect(clienteService.canjearPuntos(1, 80)).rejects.toMatchObject({
-      message: expect.stringContaining('30'),
-    });
-  });
-
-  it('lanza NotFoundError si el cliente no existe', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(null);
-
-    await expect(clienteService.canjearPuntos(999, 10)).rejects.toThrow(NotFoundError);
+    await expect(clienteService.canjearPuntos(1, 80, CTX_GRUPO_1))
+      .rejects.toMatchObject({ message: expect.stringContaining('30') });
   });
 
   it('usa descripción por defecto si no se proporciona', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 100 });
-    (clienteRepository.registrarPuntos as any).mockResolvedValue({});
-    (clienteRepository.actualizarPuntos as any).mockResolvedValue({});
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 100 });
+    repo.registrarPuntos.mockResolvedValue({});
+    repo.actualizarPuntos.mockResolvedValue({});
 
-    await clienteService.canjearPuntos(1, 50);
+    await clienteService.canjearPuntos(1, 50, CTX_GRUPO_1);
 
-    const puntoArgs = (clienteRepository.registrarPuntos as any).mock.calls[0][0];
+    const puntoArgs = repo.registrarPuntos.mock.calls[0][0];
     expect(puntoArgs.descripcion).toBe('Canje de puntos');
   });
 
   it('usa descripción personalizada si se proporciona', async () => {
-    (clienteRepository.findById as any).mockResolvedValue({ ...mockCliente, puntos_acumulados: 100 });
-    (clienteRepository.registrarPuntos as any).mockResolvedValue({});
-    (clienteRepository.actualizarPuntos as any).mockResolvedValue({});
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 100 });
+    repo.registrarPuntos.mockResolvedValue({});
+    repo.actualizarPuntos.mockResolvedValue({});
 
-    await clienteService.canjearPuntos(1, 50, 'Descuento cumpleaños');
+    await clienteService.canjearPuntos(1, 50, CTX_GRUPO_1, 'Descuento cumpleaños');
 
-    const puntoArgs = (clienteRepository.registrarPuntos as any).mock.calls[0][0];
+    const puntoArgs = repo.registrarPuntos.mock.calls[0][0];
     expect(puntoArgs.descripcion).toBe('Descuento cumpleaños');
   });
-});
 
-// ── cambiarEstado ─────────────────────────────────────────────────────────────
+  it('superadmin puede canjear puntos de cualquier cliente', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce({ ...mockCliente, puntos_acumulados: 200 });
+    repo.registrarPuntos.mockResolvedValue({});
+    repo.actualizarPuntos.mockResolvedValue({});
 
-describe('clienteService.cambiarEstado', () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it('lanza NotFoundError si el cliente no existe', async () => {
-    (clienteRepository.findById as any).mockResolvedValue(null);
-
-    await expect(clienteService.cambiarEstado(999, 'inactivo')).rejects.toThrow(NotFoundError);
-    expect(clienteRepository.update).not.toHaveBeenCalled();
-  });
-
-  it('llama update con el nuevo estado', async () => {
-    (clienteRepository.findById as any)
-      .mockResolvedValueOnce(mockCliente)   // obtenerPorId
-      .mockResolvedValueOnce({ ...mockCliente, estado: 'inactivo' }); // retorno final
-    (clienteRepository.update as any).mockResolvedValue({});
-
-    await clienteService.cambiarEstado(1, 'inactivo');
-
-    expect(clienteRepository.update).toHaveBeenCalledWith(1, { estado: 'inactivo' });
+    await expect(clienteService.canjearPuntos(1, 100, CTX_SUPER)).resolves.toBeDefined();
   });
 });

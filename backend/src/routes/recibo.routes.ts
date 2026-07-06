@@ -6,7 +6,7 @@
  *
  * Middleware:
  *   authenticate    — JWT válido requerido
- *   tenantContext   — opcional (el recibo puede pertenecer a otro restaurante en el grupo)
+ *   tenantContext   — opcional
  *   requirePermission('ordenes.ver') — permiso mínimo para acceder al recibo
  */
 
@@ -21,12 +21,6 @@ const router = Router();
 router.use(authenticate, tenantContextOptional);
 
 // Recibo de orden individual
-router.get('/orden/:id',       requirePermission('ordenes.ver'), reciboController.porOrden);
-
-// Recibo unificado de grupo (multi-restaurante)
-router.get('/orden-grupo/:id', requirePermission('ordenes.ver'), reciboController.porOrdenGrupo);
-
-// Punto de entrada inteligente — detecta si la orden es simple o grupal
-router.get('/auto/:id',        requirePermission('ordenes.ver'), reciboController.auto);
+router.get('/orden/:id', requirePermission('ordenes.ver'), reciboController.porOrden);
 
 export default router;

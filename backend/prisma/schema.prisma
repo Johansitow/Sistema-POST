@@ -86,7 +86,6 @@ model GrupoNegocio {
 
   restaurantes          Restaurante[]
   usuarios              UsuarioGrupo[]
-  ordenes_grupo         OrdenGrupo[]
   ordenes               Orden[]              // relación directa para nueva arquitectura
   categorias            Categoria[]
   productos             Producto[]
@@ -220,7 +219,6 @@ model Usuario {
   nomina           NominaEmpleado?
   restaurantes     UsuarioRestaurante[]
   grupos           UsuarioGrupo[]
-  ordenes_grupo    OrdenGrupo[]
 
   @@map("usuarios")
 }
@@ -618,7 +616,6 @@ model MetodoPago {
   fecha_creacion      DateTime @default(now())
 
   pagos        Pago[]
-  pagos_grupo  PagoGrupo[]
   pagos_orden  PagoOrden[]  // pagos de nueva arquitectura
 
   @@map("metodos_pago")
@@ -632,8 +629,6 @@ model Orden {
   id_usuario      Int
   id_cliente      Int?
   id_restaurante  Int       // multi-tenant: toda orden debe pertenecer a una sede
-  id_orden_grupo  Int?      // presente cuando la orden es parte de un grupo multi-restaurante
-  sufijo_orden    String?   @db.VarChar(10) // ej: "-A", "-B" para identificar la sede en el grupo
 
   // ── Nueva arquitectura multi-restaurante ─────────────────────────────────
   // id_grupo: tenant raíz — permite órdenes globales sin id_restaurante fijo
@@ -669,7 +664,6 @@ model Orden {
   usuario      Usuario       @relation(fields: [id_usuario], references: [id])
   cliente      Cliente?      @relation(fields: [id_cliente], references: [id])
   restaurante  Restaurante   @relation(fields: [id_restaurante], references: [id])
-  orden_grupo  OrdenGrupo?   @relation(fields: [id_orden_grupo], references: [id])
   grupo        GrupoNegocio? @relation(fields: [id_grupo], references: [id])
   detalles     OrdenDetalle[]
   factura      Factura?
@@ -685,7 +679,6 @@ model Orden {
   @@index([tipo_orden])
   @@index([id_cliente])
   @@index([id_restaurante])
-  @@index([id_orden_grupo])
   @@index([fecha_apertura])
   @@map("ordenes")
 }
@@ -768,6 +761,7 @@ model Lote {
   fecha_produccion        DateTime   @default(now())
   fecha_vencimiento       DateTime?
   vida_util_dias          Int?
+  fecha_cierre            DateTime?  // duración real observada: se estampa al pasar a agotado/vencido
   estado_lote             EstadoLote @default(activo)
   costo_produccion        Decimal?   @db.Decimal(12, 2)
   observaciones           String?    @db.Text
@@ -985,14 +979,13 @@ model Cliente {
   ultima_visita      DateTime?
 
   // Scoping por grupo: clientes compartidos dentro del mismo negocio
-  // (restaurants compartidos ven el mismo cliente; tenants aislados no)
-  id_grupo           Int?
+  id_grupo           Int
 
   // Relaciones
   ordenes            Orden[]
   direcciones        ClienteDireccion[]
   puntos             ClientePunto[]
-  grupo              GrupoNegocio?     @relation(fields: [id_grupo], references: [id])
+  grupo              GrupoNegocio      @relation(fields: [id_grupo], references: [id])
 
   @@index([email])
   @@index([telefono])
@@ -1449,50 +1442,3 @@ enum RolGrupo {
   auditor  // solo lectura consolidada
 }
 
-// ── OrdenGrupo — orden que agrupa pedidos de múltiples restaurantes ────────────
-// Permite que un cliente haga un único pedido que se distribuye a varias sedes.
-// Cada sede procesa sus items de forma independiente (una Orden por restaurante).
-
-model OrdenGrupo {
-  id            Int      @id @default(autoincrement())
-  numero_grupo  String   @unique @db.VarChar(50)
-  id_grupo      Int      // GrupoNegocio al que pertenece
-  id_usuario    Int      // usuario que creó el grupo de órdenes
-
-  // Totales consolidados de todas las órdenes del grupo
-  subtotal      Decimal  @default(0) @db.Decimal(12, 2)
-  descuento     Decimal  @default(0) @db.Decimal(12, 2)
-  impuestos     Decimal  @default(0) @db.Decimal(12, 2)
-  total         Decimal  @default(0) @db.Decimal(12, 2)
-
-  estado        String   @default("abierto") @db.VarChar(30) // abierto | pagado | cancelado
-  notas         String?  @db.Text
-  fecha_creacion DateTime @default(now())
-  fecha_cierre  DateTime?
-
-  grupo   GrupoNegocio @relation(fields: [id_grupo],   references: [id])
-  usuario Usuario      @relation(fields: [id_usuario], references: [id])
-  ordenes Orden[]
-  pagos   PagoGrupo[]
-
-  @@index([id_grupo])
-  @@index([id_usuario])
-  @@index([fecha_creacion])
-  @@map("ordenes_grupo")
-}
-
-// ── PagoGrupo — pago que cubre una OrdenGrupo completa ───────────────────────
-model PagoGrupo {
-  id              Int      @id @default(autoincrement())
-  id_orden_grupo  Int
-  id_metodo_pago  Int
-  monto           Decimal  @db.Decimal(12, 2)
-  referencia      String?  @db.VarChar(100)
-  fecha_pago      DateTime @default(now())
-
-  orden_grupo OrdenGrupo @relation(fields: [id_orden_grupo], references: [id], onDelete: Cascade)
-  metodo_pago MetodoPago @relation(fields: [id_metodo_pago], references: [id])
-
-  @@index([id_orden_grupo])
-  @@map("pagos_grupo")
-}

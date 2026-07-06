@@ -30,9 +30,23 @@ export interface ConfigSalida {
   nivel: Nivel;
 }
 
+/** Un flag que quedaría activo pero cuyo módulo-padre fue apagado por el nuevo perfil. */
+export interface HuerfanoDetectado {
+  /** Nombre del flag dependiente que quedaría sin padre. */
+  clave: string;
+  /** Nombre del flag-padre que el nuevo perfil apaga. */
+  dependeDe: string;
+  /** Texto legible para el usuario final. */
+  motivo: string;
+}
+
 export interface PerfilResuelta {
   flags: FlagSalida[];
   configs: ConfigSalida[];
+  /** Orphans que el apply desactivará en cascada (populado por el service, no por resolverPerfil). */
+  desactivadosPorDependencia?: HuerfanoDetectado[];
+  /** Orphans que NO se pudieron desactivar porque es_editable=false (populado por el service). */
+  omitidosPorDependencia?: HuerfanoDetectado[];
 }
 
 export interface EntradaResolver {
@@ -41,6 +55,48 @@ export interface EntradaResolver {
   /** Overrides del usuario. Se aplican encima del preset del arquetipo. */
   ejes?: Record<string, string>;
 }
+
+// ── Dependencias declaradas (fuente de verdad — ver Sección 5 del catálogo) ────
+// Cada entrada dice: si `padre` queda en false y `hijo` queda/sigue en true → huérfano.
+
+export interface Dependencia {
+  hijo: string;
+  padre: string;
+  motivo: string;
+}
+
+export const DEPENDENCIAS: readonly Dependencia[] = [
+  {
+    hijo:    'modulo.fidelizacion',
+    padre:   'modulo.clientes',
+    motivo:  'fidelización se desactivará porque el módulo de clientes quedó apagado',
+  },
+  {
+    hijo:    'inventario.lotes',
+    padre:   'modulo.inventario',
+    motivo:  'lotes se desactivará porque el módulo de inventario quedó apagado',
+  },
+  {
+    hijo:    'inventario.descuento_auto',
+    padre:   'modulo.inventario',
+    motivo:  'descuento automático se desactivará porque el módulo de inventario quedó apagado',
+  },
+  {
+    hijo:    'recetas.fases',
+    padre:   'modulo.recetas',
+    motivo:  'recetas por fases se desactivarán porque el módulo de recetas quedó apagado',
+  },
+  {
+    hijo:    'modulo.reportes_consolidados',
+    padre:   'estructura.multisede',
+    motivo:  'reportes consolidados se desactivarán porque la estructura multi-sede quedó apagada',
+  },
+  {
+    hijo:    'ordenes.propina',
+    padre:   'modulo.mesas',
+    motivo:  'propina se desactivará porque el módulo de mesas quedó apagado',
+  },
+] as const;
 
 // ── Arquetipos — presets de ejes según tabla Sección 6 del catálogo ───────────
 
@@ -364,6 +420,55 @@ const TRADUCTORES: Record<string, TraductorFn> = {
   multisede:        traducirMultisede,
   franquicia:       traducirFranquicia,
 };
+
+// ── detectarHuerfanos ─────────────────────────────────────────────────────────
+/**
+ * Función pura. Dado el set de flags que el nuevo perfil va a escribir y,
+ * opcionalmente, el estado actual de los flags en BD (para relanzamientos),
+ * devuelve los ítems que quedarían sin módulo-padre activo.
+ *
+ * Un ítem es huérfano cuando:
+ *   - El padre queda en `false` en el nuevo perfil, Y
+ *   - El hijo queda en `true` en el nuevo perfil O el hijo está actualmente en `true`
+ *     en BD pero el nuevo perfil no lo incluye (relanzamiento sin override).
+ *
+ * No accede a BD, no tiene efectos secundarios, determinista.
+ * @param perfil        Resultado de resolverPerfil().
+ * @param estadoActual  Mapa nombre→habilitado leído de BD antes de aplicar (relanzamiento).
+ */
+export function detectarHuerfanos(
+  perfil: PerfilResuelta,
+  estadoActual?: Map<string, boolean>,
+): HuerfanoDetectado[] {
+  const flagsDelPerfil = new Map<string, boolean>(
+    perfil.flags.map(f => [f.nombre, f.habilitado]),
+  );
+
+  const huerfanos: HuerfanoDetectado[] = [];
+
+  for (const dep of DEPENDENCIAS) {
+    const padreTrasApply = flagsDelPerfil.get(dep.padre);
+
+    // Si el padre NO está en el perfil o queda en true → no hay huérfano posible.
+    if (padreTrasApply !== false) continue;
+
+    const hijoEnPerfil  = flagsDelPerfil.get(dep.hijo);
+    const hijoActual    = estadoActual?.get(dep.hijo);
+
+    // El hijo quedaría activo si:
+    //   a) El nuevo perfil lo pone en true, o
+    //   b) El nuevo perfil no lo toca (undefined) y en BD está en true.
+    const hijoQuedaraActivo =
+      hijoEnPerfil === true ||
+      (hijoEnPerfil === undefined && hijoActual === true);
+
+    if (hijoQuedaraActivo) {
+      huerfanos.push({ clave: dep.hijo, dependeDe: dep.padre, motivo: dep.motivo });
+    }
+  }
+
+  return huerfanos;
+}
 
 // ── Guardia de colisiones ──────────────────────────────────────────────────────
 // Exportada para poder testearla de forma aislada.

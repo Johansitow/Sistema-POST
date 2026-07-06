@@ -4,6 +4,7 @@
 
 import { Request, Response } from 'express';
 import { plantillaService } from '../services/plantilla.service';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 import { z } from 'zod';
@@ -39,7 +40,7 @@ export const getDefault = asyncHandler(async (req: Request, res: Response) => {
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const data = plantillaSchema.parse(req.body);
-  const plantilla = await plantillaService.crear(data);
+  const plantilla = await plantillaService.crear(data, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -58,7 +59,7 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 export const update = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const data = updatePlantillaSchema.parse(req.body);
-  const plantilla = await plantillaService.actualizar(id, data);
+  const plantilla = await plantillaService.actualizar(id, data, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -76,7 +77,7 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
-  await plantillaService.eliminar(id);
+  await plantillaService.eliminar(id, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,

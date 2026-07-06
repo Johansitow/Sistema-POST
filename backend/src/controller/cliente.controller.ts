@@ -4,6 +4,7 @@
 
 import { Request, Response } from 'express';
 import { clienteService } from '../services/cliente.service';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { EstadoGeneral, TipoCliente } from '@prisma/client';
 import {
@@ -45,42 +46,43 @@ export const clienteController = {
 
   create: asyncHandler(async (req: Request, res: Response) => {
     const data = createClienteSchema.parse(req.body);
-    const cliente = await clienteService.crear(data);
+    const cliente = await clienteService.crear(data, buildTenantCtx(req));
     res.status(201).json({ success: true, cliente, message: 'Cliente creado correctamente' });
   }),
 
   update: asyncHandler(async (req: Request, res: Response) => {
     const data = updateClienteSchema.parse(req.body);
-    const cliente = await clienteService.actualizar(Number(req.params.id), data);
+    const cliente = await clienteService.actualizar(Number(req.params.id), data, buildTenantCtx(req));
     res.json({ success: true, cliente, message: 'Cliente actualizado correctamente' });
   }),
 
   cambiarEstado: asyncHandler(async (req: Request, res: Response) => {
     const { estado } = cambiarEstadoClienteSchema.parse(req.body);
-    const cliente = await clienteService.cambiarEstado(Number(req.params.id), estado);
+    const cliente = await clienteService.cambiarEstado(Number(req.params.id), estado, buildTenantCtx(req));
     res.json({ success: true, cliente, message: `Cliente ${estado} correctamente` });
   }),
 
   // ── Órdenes ───────────────────────────────────────────────────────────────
 
   getOrdenes: asyncHandler(async (req: Request, res: Response) => {
-    const result = await clienteService.getOrdenes(Number(req.params.id), {
-      page:  req.query.page,
-      limit: req.query.limit,
-    });
+    const result = await clienteService.getOrdenes(
+      Number(req.params.id),
+      { page: req.query.page, limit: req.query.limit },
+      buildTenantCtx(req),
+    );
     res.json({ success: true, ...result });
   }),
 
   // ── Direcciones ───────────────────────────────────────────────────────────
 
   getDirecciones: asyncHandler(async (req: Request, res: Response) => {
-    const direcciones = await clienteService.getDirecciones(Number(req.params.id));
+    const direcciones = await clienteService.getDirecciones(Number(req.params.id), buildTenantCtx(req));
     res.json({ success: true, direcciones });
   }),
 
   addDireccion: asyncHandler(async (req: Request, res: Response) => {
     const data = addDireccionSchema.parse(req.body);
-    const direccion = await clienteService.addDireccion(Number(req.params.id), data);
+    const direccion = await clienteService.addDireccion(Number(req.params.id), data, buildTenantCtx(req));
     res.status(201).json({ success: true, direccion, message: 'Dirección agregada correctamente' });
   }),
 
@@ -89,7 +91,8 @@ export const clienteController = {
     const direccion = await clienteService.updateDireccion(
       Number(req.params.id),
       Number(req.params.id_dir),
-      data
+      data,
+      buildTenantCtx(req),
     );
     res.json({ success: true, direccion, message: 'Dirección actualizada correctamente' });
   }),
@@ -97,7 +100,8 @@ export const clienteController = {
   deleteDireccion: asyncHandler(async (req: Request, res: Response) => {
     await clienteService.deleteDireccion(
       Number(req.params.id),
-      Number(req.params.id_dir)
+      Number(req.params.id_dir),
+      buildTenantCtx(req),
     );
     res.json({ success: true, message: 'Dirección eliminada correctamente' });
   }),
@@ -105,16 +109,22 @@ export const clienteController = {
   // ── Puntos de lealtad ─────────────────────────────────────────────────────
 
   getPuntos: asyncHandler(async (req: Request, res: Response) => {
-    const result = await clienteService.getPuntos(Number(req.params.id), {
-      page:  req.query.page,
-      limit: req.query.limit,
-    });
+    const result = await clienteService.getPuntos(
+      Number(req.params.id),
+      { page: req.query.page, limit: req.query.limit },
+      buildTenantCtx(req),
+    );
     res.json({ success: true, ...result });
   }),
 
   canjearPuntos: asyncHandler(async (req: Request, res: Response) => {
     const { puntos, descripcion } = canjearPuntosSchema.parse(req.body);
-    const result = await clienteService.canjearPuntos(Number(req.params.id), puntos, descripcion);
+    const result = await clienteService.canjearPuntos(
+      Number(req.params.id),
+      puntos,
+      buildTenantCtx(req),
+      descripcion,
+    );
     res.json({ success: true, ...result, message: 'Puntos canjeados correctamente' });
   }),
 };

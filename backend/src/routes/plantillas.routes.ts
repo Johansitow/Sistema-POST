@@ -5,12 +5,12 @@
 import { Router } from 'express';
 import { getAll, getById, getDefault, create, update, remove } from '../controller/plantillas.controller';
 import { authenticate } from '../middlewares/auth.middleware';
-import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
+import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
 
 const router = Router();
 
-router.use(authenticate, tenantContextOptional, tenantIsolation);
+router.use(authenticate);
 
 /**
  * @openapi
@@ -130,11 +130,11 @@ router.use(authenticate, tenantContextOptional, tenantIsolation);
  *       204: { description: Eliminada }
  *       404: { description: No encontrada }
  */
-router.get('/',                getAll);
-router.get('/default/:tipo',   getDefault);
-router.get('/:id',             getById);
-router.post('/',               create);
-router.put('/:id',             update);
-router.delete('/:id',          remove);
+router.get('/',              tenantContextOptional, getAll);
+router.get('/default/:tipo', tenantContextOptional, getDefault);
+router.get('/:id',           tenantContextOptional, getById);
+router.post('/',             tenantContext, tenantIsolation, create);
+router.put('/:id',           tenantContext, tenantIsolation, update);
+router.delete('/:id',        tenantContext, tenantIsolation, remove);
 
 export default router;

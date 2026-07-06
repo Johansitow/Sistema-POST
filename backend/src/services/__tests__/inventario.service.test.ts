@@ -19,11 +19,12 @@ vi.mock('../../repositories/producto.repository', () => ({
 
 vi.mock('../../repositories/lote.repository', () => ({
   loteRepository: {
-    findProximosVencer:   vi.fn(),
-    findAll:              vi.fn(),
-    findById:             vi.fn(),
-    findByIdWithReceta:   vi.fn(),
-    update:               vi.fn(),
+    findProximosVencer:      vi.fn(),
+    findAll:                 vi.fn(),
+    findById:                vi.fn(),
+    findByIdWithReceta:      vi.fn(),
+    findActivosPorProducto:  vi.fn(),
+    update:                  vi.fn(),
   },
 }));
 
@@ -42,15 +43,18 @@ const mockTx = {
     findFirst:  vi.fn(),
     create:     vi.fn(),
     findUnique: vi.fn(),
+    update:     vi.fn(),
   },
   movimiento: {
-    create: vi.fn(),
+    create:    vi.fn(),
+    aggregate: vi.fn(),
   },
 };
 
 vi.mock('../../config/database', () => ({
   default: {
     $transaction: vi.fn(async (fn: (tx: typeof mockTx) => unknown) => fn(mockTx)),
+    lote: { findMany: vi.fn() },
   },
 }));
 
@@ -61,10 +65,12 @@ import { loteRepository } from '../../repositories/lote.repository';
 
 const loteRepo = loteRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
 import { movimientoRepository } from '../../repositories/movimiento.repository';
+import prisma from '../../config/database';
 
 const movRepo = movimientoRepository as ReturnType<typeof vi.fn> & typeof movimientoRepository;
+const prismaMock = prisma as unknown as { lote: { findMany: ReturnType<typeof vi.fn> } };
 
-const mockProducto = { id: 1, nombre: 'Harina', stock_actual: 100 };
+const mockProducto = { id: 1, nombre: 'Harina', stock_actual: 100, es_vendible: false };
 const mockMovimiento = {
   id: 1, id_producto: 1, tipo_movimiento: TipoMovimiento.entrada,
   cantidad: 50, stock_anterior: 100, stock_nuevo: 150,
@@ -89,7 +95,7 @@ describe('listarMovimientos', () => {
 // ── registrarMovimiento ───────────────────────────────────────────────────────
 
 describe('registrarMovimiento', () => {
-  it('registra una entrada y crea lote', async () => {
+  it('registra una entrada con generar_lote y crea el lote', async () => {
     mockTx.producto.findUnique.mockResolvedValueOnce(mockProducto);
     mockTx.productoStock.findUnique.mockResolvedValueOnce(null); // sin registro previo → usa producto.stock_actual
     mockTx.lote.findFirst.mockResolvedValueOnce({ numero_lote: 'LOTE-000001' });
@@ -106,6 +112,7 @@ describe('registrarMovimiento', () => {
       cantidad:        50,
       motivo:          'Reposición',
       id_proveedor:    2,
+      generar_lote:    true,
     });
 
     expect(result.movimiento.tipo_movimiento).toBe(TipoMovimiento.entrada);
@@ -113,14 +120,70 @@ describe('registrarMovimiento', () => {
     expect(mockTx.lote.create).toHaveBeenCalled();
   });
 
-  it('lanza BadRequestError si entrada sin proveedor', async () => {
-    await expect(inventarioService.registrarMovimiento({
+  it('registra una entrada manual sin proveedor y sin lote (solo suma stock)', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce(mockProducto);
+    mockTx.productoStock.findUnique.mockResolvedValueOnce(null);
+    mockTx.productoStock.upsert.mockResolvedValueOnce({});
+    mockTx.producto.update.mockResolvedValueOnce({});
+    mockTx.movimiento.create.mockResolvedValueOnce({ ...mockMovimiento, id_proveedor: undefined });
+
+    const result = await inventarioService.registrarMovimiento({
       id_producto:     1,
       id_restaurante:  1,
       tipo_movimiento: TipoMovimiento.entrada,
       cantidad:        50,
-      motivo:          'Sin proveedor',
-    })).rejects.toThrow('proveedor es obligatorio');
+      motivo:          'Conteo físico — encontramos más stock',
+    });
+
+    expect(result.movimiento).toBeTruthy();
+    expect(result.lote_generado).toBeNull();
+    expect(mockTx.lote.create).not.toHaveBeenCalled();
+  });
+
+  it('lanza BadRequestError si generar_lote sobre un producto vendible (ensamblado)', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce({ ...mockProducto, es_vendible: true });
+
+    await expect(inventarioService.registrarMovimiento({
+      id_producto:     1,
+      id_restaurante:  1,
+      tipo_movimiento: TipoMovimiento.entrada,
+      cantidad:        5,
+      motivo:          'Hamburguesa ensamblada',
+      generar_lote:    true,
+    })).rejects.toThrow('solo aplican a productos que se almacenan');
+  });
+
+  it('merma con id_lote existente acumula la merma y cierra el lote al agotarse', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce(mockProducto);
+    mockTx.productoStock.findUnique.mockResolvedValueOnce({ stock_actual: 100 });
+    mockTx.lote.findUnique.mockResolvedValueOnce({
+      id: 10, id_producto: 1, id_restaurante: 1,
+      cantidad_producida: '20', merma_cantidad: '0', fecha_cierre: null,
+    });
+    mockTx.movimiento.aggregate.mockResolvedValueOnce({ _sum: { cantidad: null } }); // sin salidas previas
+    mockTx.lote.update.mockResolvedValueOnce({});
+    mockTx.productoStock.upsert.mockResolvedValueOnce({});
+    mockTx.producto.update.mockResolvedValueOnce({});
+    mockTx.movimiento.create.mockResolvedValueOnce({ ...mockMovimiento, tipo_movimiento: TipoMovimiento.merma });
+
+    await inventarioService.registrarMovimiento({
+      id_producto:     1,
+      id_restaurante:  1,
+      tipo_movimiento: TipoMovimiento.merma,
+      cantidad:        20, // agota toda la cantidad producida del lote
+      motivo:          'Se dañó el lote completo',
+      id_lote:         10,
+    });
+
+    expect(mockTx.lote.update).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: expect.objectContaining({
+        merma_cantidad:   expect.anything(),
+        merma_porcentaje: expect.anything(),
+        estado_lote:      'agotado',
+        fecha_cierre:     expect.any(Date),
+      }),
+    });
   });
 
   it('lanza NotFoundError si producto no existe', async () => {
@@ -190,6 +253,85 @@ describe('registrarMovimiento', () => {
 
     expect(result.movimiento).toBeTruthy();
     expect(mockTx.lote.create).not.toHaveBeenCalled();
+  });
+});
+
+// ── actualizarEstadoLote ──────────────────────────────────────────────────────
+
+describe('actualizarEstadoLote', () => {
+  it('estampa fecha_cierre la primera vez que el lote pasa a agotado', async () => {
+    loteRepo.findById.mockResolvedValueOnce({ id: 1, fecha_cierre: null });
+    loteRepo.update.mockResolvedValueOnce({});
+
+    await inventarioService.actualizarEstadoLote(1, { estado_lote: 'agotado' as never });
+
+    expect(loteRepo.update).toHaveBeenCalledWith(1, expect.objectContaining({
+      estado_lote:  'agotado',
+      fecha_cierre: expect.any(Date),
+    }));
+  });
+
+  it('no vuelve a estampar fecha_cierre si el lote ya estaba cerrado', async () => {
+    const yaCerrado = new Date('2026-01-01');
+    loteRepo.findById.mockResolvedValueOnce({ id: 1, fecha_cierre: yaCerrado });
+    loteRepo.update.mockResolvedValueOnce({});
+
+    await inventarioService.actualizarEstadoLote(1, { estado_lote: 'vencido' as never });
+
+    const dataEnviada = loteRepo.update.mock.calls[0][1];
+    expect(dataEnviada.fecha_cierre).toBeUndefined();
+  });
+
+  it('lanza NotFoundError si el lote no existe', async () => {
+    loteRepo.findById.mockResolvedValueOnce(null);
+
+    await expect(inventarioService.actualizarEstadoLote(999, { observaciones: 'x' }))
+      .rejects.toThrow('Lote');
+  });
+});
+
+// ── vidaUtilPromedio ──────────────────────────────────────────────────────────
+
+describe('vidaUtilPromedio', () => {
+  it('combina duración real observada con la estimación declarada', async () => {
+    prismaMock.lote.findMany.mockResolvedValueOnce([
+      {
+        id_producto: 1, vida_util_dias: 5,
+        fecha_produccion: new Date('2026-01-01'),
+        fecha_cierre:     new Date('2026-01-08'), // 7 días reales
+        producto: { nombre: 'Salsa casera', sku: 'MPP-SALSA' },
+      },
+      {
+        id_producto: 1, vida_util_dias: 6,
+        fecha_produccion: new Date('2026-02-01'),
+        fecha_cierre:     null, // aún abierto — no cuenta para el real
+        producto: { nombre: 'Salsa casera', sku: 'MPP-SALSA' },
+      },
+    ]);
+
+    const [resultado] = await inventarioService.vidaUtilPromedio(1);
+
+    expect(resultado.dias_reales_promedio).toBe(7);
+    expect(resultado.muestras_reales).toBe(1);
+    expect(resultado.dias_estimados_promedio).toBe(5.5);
+    expect(resultado.muestras_estimadas).toBe(2);
+  });
+
+  it('devuelve null cuando no hay ninguna muestra real', async () => {
+    prismaMock.lote.findMany.mockResolvedValueOnce([
+      {
+        id_producto: 2, vida_util_dias: 3,
+        fecha_produccion: new Date('2026-02-01'),
+        fecha_cierre:     null,
+        producto: { nombre: 'Masa', sku: 'MPP-MASA' },
+      },
+    ]);
+
+    const [resultado] = await inventarioService.vidaUtilPromedio(1);
+
+    expect(resultado.dias_reales_promedio).toBeNull();
+    expect(resultado.muestras_reales).toBe(0);
+    expect(resultado.dias_estimados_promedio).toBe(3);
   });
 });
 

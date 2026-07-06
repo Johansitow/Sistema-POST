@@ -1,17 +1,15 @@
 /**
  * InventarioService - Solo lógica de negocio para inventario
  *
- * Cambios respecto a la versión anterior:
- * 1. registrarMovimiento() requiere id_proveedor cuando tipo = 'entrada'
- * 2. Al registrar una entrada se crea automáticamente un lote
- *    con número secuencial global (LOTE-000001, LOTE-000002...)
- * 3. El id del lote generado se asocia al movimiento
- *
- * Correcciones de TypeScript:
- * - TIPOS_ENTRADA y TIPOS_SALIDA tipados como Set<TipoMovimiento> (fix error 2345)
+ * registrarMovimiento() suma/resta cantidad libremente (proveedor y lote son
+ * siempre opcionales). El lote es un registro aparte y explícito:
+ * - `generar_lote: true` en una entrada/producción crea un lote nuevo (solo
+ *   para productos que se almacenan, es_vendible = false) y lo asocia al movimiento.
+ * - `id_lote` en una salida/merma vincula el movimiento a un lote existente
+ *   (para saber qué lote se dañó) y actualiza su merma acumulada.
  */
 
-import { TipoMovimiento } from '@prisma/client';
+import { TipoMovimiento, EstadoLote, Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { movimientoRepository } from '../repositories/movimiento.repository';
 import { productoRepository } from '../repositories/producto.repository';
@@ -36,6 +34,63 @@ const TIPOS_SALIDA = new Set<TipoMovimiento>([
   TipoMovimiento.venta,
 ]);
 
+/** Tipos de movimiento que admiten generar un lote nuevo (generar_lote: true) */
+const TIPOS_CON_LOTE = new Set<TipoMovimiento>([
+  TipoMovimiento.entrada,
+  TipoMovimiento.produccion,
+]);
+
+/** Estados de lote que representan un cierre definitivo (para estampar fecha_cierre) */
+const ESTADOS_CIERRE_LOTE = new Set<EstadoLote>([EstadoLote.agotado, EstadoLote.vencido]);
+
+/**
+ * vincularLoteASalida — asocia una salida/merma a un lote existente.
+ * En 'merma' acumula la merma del lote; si la merma + salidas acumuladas
+ * agotan la cantidad producida, cierra el lote (agotado + fecha_cierre).
+ */
+async function vincularLoteASalida(
+  tx: Prisma.TransactionClient,
+  id_lote: number,
+  id_producto: number,
+  id_restaurante: number,
+  tipo_movimiento: TipoMovimiento,
+  cantidad: number,
+): Promise<number> {
+  const lote = await tx.lote.findUnique({ where: { id: id_lote } });
+  if (!lote) throw new NotFoundError('Lote');
+  if (lote.id_producto !== id_producto || lote.id_restaurante !== id_restaurante) {
+    throw new BadRequestError('El lote no corresponde a este producto o restaurante');
+  }
+
+  const dataUpdate: Record<string, unknown> = {};
+
+  if (tipo_movimiento === TipoMovimiento.merma) {
+    const cantidadProducida  = Number(lote.cantidad_producida);
+    const mermaAcumulada     = Number(lote.merma_cantidad) + cantidad;
+    dataUpdate.merma_cantidad   = toDecimal(mermaAcumulada);
+    dataUpdate.merma_porcentaje = toDecimal(
+      cantidadProducida > 0 ? (mermaAcumulada / cantidadProducida) * 100 : 0
+    );
+  }
+
+  // ¿Se agotó el lote? (merma acumulada + salidas previas vinculadas a este lote)
+  const salidasPrevias = await tx.movimiento.aggregate({
+    where: { id_lote, tipo_movimiento: { in: [TipoMovimiento.salida, TipoMovimiento.merma] } },
+    _sum: { cantidad: true },
+  });
+  const totalConsumido = Number(salidasPrevias._sum.cantidad ?? 0) + cantidad;
+  if (!lote.fecha_cierre && totalConsumido >= Number(lote.cantidad_producida)) {
+    dataUpdate.estado_lote  = EstadoLote.agotado;
+    dataUpdate.fecha_cierre = new Date();
+  }
+
+  if (Object.keys(dataUpdate).length > 0) {
+    await tx.lote.update({ where: { id: id_lote }, data: dataUpdate });
+  }
+
+  return lote.id;
+}
+
 export const inventarioService = {
 
   async listarMovimientos(params: {
@@ -59,13 +114,14 @@ export const inventarioService = {
    * registrarMovimiento — registra un movimiento de inventario
    *
    * Reglas:
-   * - tipo 'entrada': id_proveedor es REQUERIDO, se crea un lote automáticamente
    * - tipo 'salida' / 'merma' / 'venta': verifica stock suficiente
    * - tipo 'ajuste': establece el stock en el valor exacto recibido
-   * - tipo 'produccion' / 'devolucion': incrementa sin requerir proveedor
-   *
-   * El lote generado tiene número secuencial global (LOTE-000001...).
-   * fecha_vencimiento y costo_produccion son opcionales en el lote.
+   * - proveedor y lote son siempre opcionales — sumar/restar cantidad nunca
+   *   depende de registrar un lote ni un proveedor.
+   * - `generar_lote: true` crea un lote nuevo (solo tipo 'entrada'/'produccion',
+   *   y solo si el producto se almacena: es_vendible = false).
+   * - `id_lote` vincula el movimiento (tipo 'salida'/'merma') a un lote existente;
+   *   en 'merma' acumula la merma del lote y lo cierra si se agota.
    */
   async registrarMovimiento(data: {
     id_producto:              number;
@@ -74,8 +130,10 @@ export const inventarioService = {
     cantidad:                 number;
     motivo:                   string;
     id_proveedor?:            number;
+    id_lote?:                 number;
     referencia?:              string;
-    // Datos del lote (aplican para tipo 'entrada' y 'produccion')
+    // Genera un lote nuevo junto con este movimiento (entrada/producción)
+    generar_lote?:            boolean;
     fecha_vencimiento?:       Date;
     costo_produccion?:        number;
     observaciones_lote?:      string;
@@ -84,14 +142,19 @@ export const inventarioService = {
     merma_cantidad?:          number;
     merma_porcentaje?:        number;
   }) {
-    // Validar proveedor obligatorio en entradas
-    if (data.tipo_movimiento === TipoMovimiento.entrada && !data.id_proveedor) {
-      throw new BadRequestError('El proveedor es obligatorio para registrar una entrada de inventario');
-    }
-
     return prisma.$transaction(async (tx) => {
       const producto = await tx.producto.findUnique({ where: { id: data.id_producto } });
       if (!producto) throw new NotFoundError('Producto');
+
+      if (data.generar_lote && !TIPOS_CON_LOTE.has(data.tipo_movimiento)) {
+        throw new BadRequestError('Solo se puede registrar un lote en movimientos de entrada o producción');
+      }
+      if (data.generar_lote && producto.es_vendible) {
+        throw new BadRequestError('Los lotes solo aplican a productos que se almacenan, no a productos vendibles ensamblados al momento de la venta');
+      }
+      if (data.id_lote && !TIPOS_SALIDA.has(data.tipo_movimiento)) {
+        throw new BadRequestError('Solo se puede vincular un lote existente en movimientos de salida o merma');
+      }
 
       // Stock POR RESTAURANTE — fuente autoritativa para multi-tenant.
       // Si el registro de ProductoStock no existe aún (primera vez que este restaurante
@@ -106,8 +169,7 @@ export const inventarioService = {
       if (TIPOS_ENTRADA.has(data.tipo_movimiento)) {
         nuevoStock = stockActual + data.cantidad;
 
-        // Crear lote automáticamente para entradas y producciones
-        if (data.tipo_movimiento === TipoMovimiento.entrada || data.tipo_movimiento === TipoMovimiento.produccion) {
+        if (data.generar_lote) {
           // IMPORTANTE: usar `tx` (no loteRepository) para que la lectura del último
           // lote sea parte de la misma transacción y evitar race conditions en numero_lote @unique
           const ultimoLote = await tx.lote.findFirst({ orderBy: { numero_lote: 'desc' }, select: { numero_lote: true } });
@@ -144,6 +206,10 @@ export const inventarioService = {
           );
         }
         nuevoStock = stockActual - data.cantidad;
+
+        if (data.id_lote) {
+          id_lote = await vincularLoteASalida(tx, data.id_lote, data.id_producto, data.id_restaurante, data.tipo_movimiento, data.cantidad);
+        }
 
       } else if (data.tipo_movimiento === TipoMovimiento.ajuste) {
         nuevoStock = data.cantidad; // ajuste directo al valor exacto
@@ -251,13 +317,88 @@ export const inventarioService = {
   },
 
   async actualizarEstadoLote(id: number, data: Partial<{
-    estado_lote:       any;
+    estado_lote:       EstadoLote;
     fecha_vencimiento: Date;
     observaciones:     string;
   }>) {
     const lote = await loteRepository.findById(id);
     if (!lote) throw new NotFoundError('Lote');
-    return loteRepository.update(id, data);
+
+    // Estampa la duración real observada la primera vez que el lote se cierra
+    const cierraAhora = data.estado_lote != null
+      && ESTADOS_CIERRE_LOTE.has(data.estado_lote)
+      && !lote.fecha_cierre;
+
+    return loteRepository.update(id, {
+      ...data,
+      ...(cierraAhora ? { fecha_cierre: new Date() } : {}),
+    });
+  },
+
+  /** Lotes activos de un producto — para elegir "qué lote se dañó" al registrar una salida/merma */
+  async lotesActivosPorProducto(id_producto: number, id_restaurante: number) {
+    return loteRepository.findActivosPorProducto(id_producto, id_restaurante);
+  },
+
+  /**
+   * vidaUtilPromedio — promedio de días de vida útil de productos que se almacenan
+   * (es_vendible = false), combinando duración real observada (fecha_cierre - fecha_produccion)
+   * con la estimación declarada (vida_util_dias) como respaldo.
+   */
+  async vidaUtilPromedio(id_restaurante?: number) {
+    const lotes = await prisma.lote.findMany({
+      where: {
+        producto: { es_vendible: false },
+        ...(id_restaurante !== undefined ? { id_restaurante } : {}),
+      },
+      select: {
+        id_producto:       true,
+        fecha_produccion:  true,
+        fecha_cierre:      true,
+        vida_util_dias:    true,
+        producto:          { select: { nombre: true, sku: true } },
+      },
+    });
+
+    type Acumulado = {
+      nombre: string; sku: string;
+      diasRealesSum: number; muestrasReales: number;
+      diasEstimadosSum: number; muestrasEstimadas: number;
+    };
+    const porProducto = new Map<number, Acumulado>();
+
+    for (const lote of lotes) {
+      let entry = porProducto.get(lote.id_producto);
+      if (!entry) {
+        entry = {
+          nombre: lote.producto.nombre, sku: lote.producto.sku,
+          diasRealesSum: 0, muestrasReales: 0,
+          diasEstimadosSum: 0, muestrasEstimadas: 0,
+        };
+        porProducto.set(lote.id_producto, entry);
+      }
+      if (lote.fecha_cierre) {
+        const dias = (lote.fecha_cierre.getTime() - lote.fecha_produccion.getTime()) / 86_400_000;
+        entry.diasRealesSum += dias;
+        entry.muestrasReales++;
+      }
+      if (lote.vida_util_dias != null) {
+        entry.diasEstimadosSum += lote.vida_util_dias;
+        entry.muestrasEstimadas++;
+      }
+    }
+
+    const round1 = (n: number) => Math.round(n * 10) / 10;
+
+    return Array.from(porProducto.entries()).map(([id_producto, e]) => ({
+      id_producto,
+      nombre:                  e.nombre,
+      sku:                     e.sku,
+      dias_reales_promedio:    e.muestrasReales > 0 ? round1(e.diasRealesSum / e.muestrasReales) : null,
+      dias_estimados_promedio: e.muestrasEstimadas > 0 ? round1(e.diasEstimadosSum / e.muestrasEstimadas) : null,
+      muestras_reales:         e.muestrasReales,
+      muestras_estimadas:      e.muestrasEstimadas,
+    }));
   },
 
   async calcularRentabilidadLote(id: number, id_restaurante: number) {

@@ -124,3 +124,47 @@ VITE_SOCKET_URL=http://localhost:3000
 - **Feature flags**: `FeatureFlag` model + `flagGate` middleware. Frontend: `useFeatureFlag()` hook + `featureFlagStore`.
 - **Swagger docs**: Available at `http://localhost:3000/api/docs` in development only.
 - **BigInt serialization**: `BigInt.prototype.toJSON` is patched in `server.ts` to serialize as string (needed for `Auditoria.id`).
+
+---
+
+## Non-negotiable Rules
+
+Work as a senior engineer: prioritize clarity, consistency, and maintainability over apparent speed.
+
+1. **Respect the layers.** Frontend never touches the DB directly. Backend flow is always Routes → Controller → Service → Repository → Prisma. Controllers are thin; business logic lives in Services; data access only in Repositories.
+
+2. **No duplicated logic (DRY).** Before creating a function, search the repo for an equivalent. If something similar exists, reuse or refactor it. Report what you found and what you decided to reuse.
+
+3. **Multi-tenant first.** Every query or mutation on business data must be scoped by `restauranteId` / `grupoNegocioId`. Never return or modify data from a different tenant than the authenticated user. This is a security requirement, not a preference.
+
+4. **Mind the dual order system.** The legacy model (`Orden`/`OrdenDetalle`) and the new model (`OrdenSede`/`OrdenSedeItem`) coexist. Before touching orders, identify which one you're working with. Do not mix or bridge both systems without explicit user approval.
+
+5. **One responsibility per module.** Descriptive names. If a file does two unrelated things, split it. Put each new piece in the correct module, not the fastest one to reach.
+
+6. **Strict typing.** No `any`. Define or reuse types/interfaces. Leverage Prisma-generated types.
+
+7. **Complex operations via CQRS.** Multi-step flows or side-effect-heavy logic go through Command/Query/EventBus. Multi-aggregate orchestration goes through Sagas. Never put that logic in a controller.
+
+8. **Nothing half-done.** No unimplemented stubs, silent TODOs, or dead code. If something is left pending, say so explicitly in the summary.
+
+---
+
+## Mandatory Workflow
+
+1. **Plan before code.** For any multi-file or non-trivial change, explore the relevant code, propose a plan, and wait for approval before editing.
+2. **Implement in small, verifiable steps**, layer by layer.
+3. **Verify before marking done.** Run tests and build/typecheck (use the real commands in the Commands section above). Use `/code-review` on the diff to catch duplication or layer violations. If you touched the Prisma schema, create the migration.
+4. **Commit + push** following the `commit-push` skill.
+5. **Human-readable summary.** Always end with a brief summary in plain language of what changed and why, understandable without reading the diff.
+
+---
+
+## Definition of Done
+
+A change is done only when: it respects layers and multi-tenancy, has no duplicated logic, compiles without type errors, tests pass (with new tests if behavior was added), has a Prisma migration if the schema changed, is committed and pushed, and includes an understandable summary.
+
+---
+
+## Documentation
+
+When closing a feature, carry the summary (what was done, why, layers touched, decisions made, how to test it) to the Confluence knowledge base, in addition to the commit message.

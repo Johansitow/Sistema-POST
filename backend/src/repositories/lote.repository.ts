@@ -76,6 +76,17 @@ export const loteRepository = {
       },
     }),
 
+  /** Lotes activos de un producto en un restaurante, para vincular una salida/merma a un lote existente */
+  findActivosPorProducto: (id_producto: number, id_restaurante: number) =>
+    prisma.lote.findMany({
+      where: {
+        id_producto,
+        id_restaurante,
+        estado_lote: { in: [EstadoLote.activo, EstadoLote.en_produccion] },
+      },
+      orderBy: { fecha_vencimiento: 'asc' },
+    }),
+
   findByIdWithReceta: (id: number) =>
     prisma.lote.findUnique({
       where: { id },
@@ -112,6 +123,7 @@ export const loteRepository = {
   update: (id: number, data: Partial<{
     estado_lote:       EstadoLote;
     fecha_vencimiento: Date;
+    fecha_cierre:      Date;
     observaciones:     string;
     merma_cantidad:    any;
     merma_porcentaje:  any;

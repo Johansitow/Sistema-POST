@@ -174,7 +174,40 @@ sola sede (siempre hay exactamente un `OrdenSede` por `Orden`; la saga
 
 ---
 
-## 5. Ejes destacados vs ajustes finos
+## 5. Dependencias entre flags (fuente de verdad)
+
+Un flag/capacidad puede depender de que otro módulo esté activo. Si el módulo-padre se
+apaga, el dependiente queda "huérfano" — activo pero sin función real. La lógica de
+`detectarHuerfanos` usa esta tabla como única fuente; no infiere dependencias del código.
+
+| Dependiente (hijo) | Requiere (padre) | Motivo | Estado |
+|---|---|---|---|
+| `modulo.fidelizacion` | `modulo.clientes` | La fidelización por puntos necesita una base de clientes; sin ella `LoyaltyPlugin` no tiene a quién asignar puntos. | ✅ confirmada |
+| `inventario.lotes` | `modulo.inventario` | El control de lotes/vencimiento requiere que el módulo de inventario esté activo; sin él no hay movimientos ni stock. | ✅ confirmada |
+| `inventario.descuento_auto` | `modulo.inventario` | El descuento automático por exceso de stock necesita el módulo de inventario para leer los niveles actuales. | ✅ confirmada |
+| `recetas.fases` | `modulo.recetas` | Las fases (KDS por estaciones) son una capacidad del módulo de recetas; sin ese módulo no hay receta que dividir en fases. | ✅ confirmada |
+| `modulo.reportes_consolidados` | `estructura.multisede` | Los reportes consolidados agregan datos de múltiples sedes; con una sola sede no hay nada que consolidar. | ✅ confirmada |
+| `ordenes.propina` | `modulo.mesas` | La propina está diseñada para atención en mesa (Eje 1); en delivery/mostrador el campo no aplica. Ambos flags son escritos juntos por el mismo eje, pero la dependencia es real. | ✅ confirmada |
+
+### Candidatas evaluadas y descartadas
+
+| Par evaluado | Decisión |
+|---|---|
+| `ordenes.modelo_servicio` → `modulo.mesas` | No es una dependencia; es un valor KV de configuración, no un flag booleano que pueda quedar "activo sin padre". |
+| `modulo.facturas` → cualquier otro módulo | Sin dependencia en el catálogo actual; funciona de forma independiente (Eje 4). |
+| `modulo.caja` → cualquier otro módulo | Sin dependencia declarada; es un módulo autónomo (Eje 5). |
+
+### Separación de conceptos
+
+- **Colisión** (`mergeConColisionGuard`): dos ejes distintos escriben valores DISTINTOS a la
+  misma clave. Error de configuración del catálogo. Se lanza antes de persistir.
+- **Dependencia huérfana** (`detectarHuerfanos`): un flag que está o quedaría activo, pero su
+  módulo-padre quedó apagado por el nuevo perfil. No es un error del catálogo; es una
+  consecuencia derivada que debe comunicarse al usuario y, en apply, corregirse.
+
+---
+
+## 6. Ejes destacados vs ajustes finos
 
 Para que el onboarding no se sienta un interrogatorio, el wizard destaca los ejes que
 más cambian la cara de la app (**1, 2, 4**) y deriva el resto del arquetipo elegido,
@@ -182,7 +215,7 @@ dejándolos como "ajustes finos" opcionales.
 
 ---
 
-## 6. Arquetipos (presets de ejes)
+## 7. Arquetipos (presets de ejes)
 
 Cada arquetipo es una fila de respuestas predefinidas. El usuario elige uno y puede
 ajustar cualquier eje después.
@@ -198,7 +231,7 @@ ajustar cualquier eje después.
 
 ---
 
-## 7. Lo que falta para el wizard (mapa de entregables)
+## 8. Lo que falta para el wizard (mapa de entregables)
 
 | Pieza | Estado | Entregable |
 |---|---|---|
@@ -223,7 +256,7 @@ ajustar cualquier eje después.
 
 ---
 
-## 8. Pendientes antes de cerrar
+## 9. Pendientes antes de cerrar
 
 - [x] Confirmar si `ConfiguracionRestaurante` admite scope de grupo → resuelto: se creó
   `ConfiguracionGrupo` como espejo con `id_grupo`. Las tres capas están alineadas.
@@ -238,7 +271,7 @@ ajustar cualquier eje después.
 
 ---
 
-## 9. Qué se documentará en Confluence al cerrar la feature
+## 10. Qué se documentará en Confluence al cerrar la feature
 
 La versión depurada: la decisión grupo/sede, el contrato de los endpoints
 preview/apply, y el catálogo final de ejes (como conocimiento de negocio durable).

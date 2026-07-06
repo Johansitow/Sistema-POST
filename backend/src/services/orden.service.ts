@@ -17,7 +17,7 @@
 import { EstadoOrdenGlobal, TipoOrden } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../config/database';
-import { ordenRepository }      from '../repositories/orden.repository';
+import { ordenRepository, includeOrdenCompleta } from '../repositories/orden.repository';
 import { ordenSedeRepository as _ordenSedeRepository }  from '../repositories/orden-sede.repository';
 import { pagoOrdenRepository as _pagoOrdenRepository }  from '../repositories/pago-orden.repository';
 import { estadoRepository }     from '../repositories/estado.repository';
@@ -312,12 +312,13 @@ export const ordenService = {
         },
       });
 
-      // 5. Emitir evento al bus (fire-and-forget)
+      // 5. Emitir evento al bus (fire-and-forget) y obtener la orden completa.
+      // Se consulta vía `tx` (no el cliente prisma global) porque la transacción
+      // todavía no hizo commit — una consulta fuera de `tx` no vería estas filas
+      // y devolvería null.
       const ordenFinal = await tx.orden.findUnique({
         where: { id: orden.id },
-        include: {
-          sedes: { select: { id: true, id_restaurante: true, sufijo: true } },
-        },
+        include: includeOrdenCompleta,
       });
 
       eventBus.emit(EVENTS.ORDEN_GLOBAL_CREADA, {
@@ -345,7 +346,7 @@ export const ordenService = {
         total:         0,
       });
 
-      return ordenRepository.findById(orden.id);
+      return ordenFinal;
     });
   },
 

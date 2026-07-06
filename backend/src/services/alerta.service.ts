@@ -203,7 +203,7 @@ export const alertaService = {
           id_tipo_alerta:  tipoVencimiento.id,
           id_producto:     lote.id_producto,
           id_restaurante:  lote.id_restaurante,
-          mensaje:         `Lote ${lote.numero_lote} de "${lote.producto.nombre}" vence en ${diasRestantes} día(s)`,
+          mensaje:         `Lote ${lote.numero_lote} de "${lote.producto.nombre}" vence en ${diasRestantes} día(s) — haz un reconteo para verificar su estado`,
           nivel_prioridad: tipoVencimiento.prioridad_default,
         });
         eventBus.emit(EVENTS.LOTE_VENCIDO, {

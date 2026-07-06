@@ -8,7 +8,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress,
-  Dialog, DialogActions, DialogContent, DialogTitle, Divider,
+  Dialog, DialogTitle, Divider,
   FormControl, FormControlLabel, IconButton, InputLabel,
   MenuItem, Paper, Select, Snackbar, Switch, Tab, Tabs,
   TextField, Tooltip, Typography,
@@ -20,9 +20,11 @@ import {
 import {
   plantillasService,
   type PlantillaImpresion,
+  type PlantillaConfig,
   type TipoPlantilla,
   PLANTILLA_DEFAULTS,
 } from '../../services/plantillas.service';
+import { PlantillaPreview } from '../../components/plantillas/PlantillaPreview';
 import { uiConfigService } from '../../services/ui-config.service';
 
 // ── Impresión defaults ────────────────────────────────────────────────────────
@@ -205,13 +207,6 @@ const CAMPO_LABELS: Record<string, string> = {
   totalItems: 'Total de ítems',
 };
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-interface PlantillaConfig {
-  config: { paperWidth: string; fontSize: string; showLogo: boolean };
-  sections: { id: string; tipo: string; visible: boolean; orden: number; campos: Record<string, boolean> }[];
-}
-
 // ── Section editor ────────────────────────────────────────────────────────────
 
 function SectionEditor({
@@ -376,8 +371,8 @@ function PlantillaDialog({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 1.5 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           <Print fontSize="small" />
           <Typography fontWeight={700}>{isEdit ? 'Editar plantilla' : 'Nueva plantilla'}</Typography>
@@ -385,49 +380,65 @@ function PlantillaDialog({
         <IconButton size="small" onClick={onClose}><Close fontSize="small" /></IconButton>
       </DialogTitle>
       <Divider />
-      <DialogContent sx={{ pt: 2, maxHeight: '70vh', overflowY: 'auto' }}>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <TextField
-            fullWidth size="small"
-            label="Nombre de la plantilla *"
-            value={nombre}
-            onChange={e => setNombre(e.target.value)}
-            placeholder="Ej: Ticket compacto, Factura legal"
-          />
-          <Box sx={{ display: 'flex', gap: 2 }}>
-            <FormControl size="small" fullWidth>
-              <InputLabel>Tipo</InputLabel>
-              <Select
-                label="Tipo"
-                value={tipo}
-                onChange={e => handleTipoChange(e.target.value as TipoPlantilla)}
-                disabled={isEdit}
-              >
-                {TIPOS.map(t => (
-                  <MenuItem key={t.value} value={t.value}>
-                    {t.icono} {t.label}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControlLabel
-              control={<Switch checked={esDefault} onChange={e => setEsDefault(e.target.checked)} />}
-              label="Predeterminada"
-            />
+
+      {/* Dos columnas: editor | preview */}
+      <Box sx={{ display: 'flex', height: '78vh', overflow: 'hidden' }}>
+
+        {/* Columna izquierda — editor */}
+        <Box sx={{ width: '42%', flexShrink: 0, display: 'flex', flexDirection: 'column', borderRight: 1, borderColor: 'divider' }}>
+          <Box sx={{ flex: 1, overflowY: 'auto', p: 2.5 }}>
+            {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                fullWidth size="small"
+                label="Nombre de la plantilla *"
+                value={nombre}
+                onChange={e => setNombre(e.target.value)}
+                placeholder="Ej: Ticket compacto, Factura legal"
+              />
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <FormControl size="small" fullWidth>
+                  <InputLabel>Tipo</InputLabel>
+                  <Select
+                    label="Tipo"
+                    value={tipo}
+                    onChange={e => handleTipoChange(e.target.value as TipoPlantilla)}
+                    disabled={isEdit}
+                  >
+                    {TIPOS.map(t => (
+                      <MenuItem key={t.value} value={t.value}>
+                        {t.icono} {t.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControlLabel
+                  control={<Switch checked={esDefault} onChange={e => setEsDefault(e.target.checked)} />}
+                  label="Predeterminada"
+                />
+              </Box>
+              <Divider>
+                <Typography variant="caption" color="text.secondary">Configurar secciones</Typography>
+              </Divider>
+              <SectionEditor config={config} onChange={setConfig} />
+            </Box>
           </Box>
-          <Divider>
-            <Typography variant="caption" color="text.secondary">Configurar secciones</Typography>
-          </Divider>
-          <SectionEditor config={config} onChange={setConfig} />
+
+          {/* Acciones en el pie de la columna izquierda */}
+          <Box sx={{ px: 2.5, py: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button onClick={onClose} disabled={loading}>Cancelar</Button>
+            <Button variant="contained" onClick={handleSave} disabled={loading}>
+              {loading ? <CircularProgress size={20} /> : isEdit ? 'Guardar cambios' : 'Crear plantilla'}
+            </Button>
+          </Box>
         </Box>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={loading}>Cancelar</Button>
-        <Button variant="contained" onClick={handleSave} disabled={loading}>
-          {loading ? <CircularProgress size={20} /> : isEdit ? 'Guardar cambios' : 'Crear plantilla'}
-        </Button>
-      </DialogActions>
+
+        {/* Columna derecha — preview en vivo */}
+        <Box sx={{ flex: 1, overflow: 'hidden' }}>
+          <PlantillaPreview tipo={tipo} config={config} />
+        </Box>
+
+      </Box>
     </Dialog>
   );
 }

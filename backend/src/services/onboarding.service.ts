@@ -12,20 +12,68 @@
  */
 
 import prisma from '../config/database';
-import { resolverPerfil } from '../lib/onboarding/resolverPerfil';
+import { resolverPerfil, detectarHuerfanos, DEPENDENCIAS } from '../lib/onboarding/resolverPerfil';
 import { buildContexto } from '../lib/flagContexto';
-import type { EntradaResolver, PerfilResuelta } from '../lib/onboarding/resolverPerfil';
+import { cacheDel } from '../config/redis';
+import type { EntradaResolver, HuerfanoDetectado, PerfilResuelta } from '../lib/onboarding/resolverPerfil';
 
 const ONBOARDING_COMPLETADO = 'onboarding_completado';
 
+// ── helpers internos ───────────────────────────────────────────────────────────
+
+/**
+ * Lee de BD el estado actual de los flags que son "hijo" en DEPENDENCIAS.
+ * Se usa en relanzamientos para que detectarHuerfanos vea qué estaba activo antes.
+ * Solo consulta los contextos del restaurante y del grupo para este tenant.
+ */
+async function leerEstadoFlagsRelevantes(
+  restauranteId: number,
+  grupoId: number,
+): Promise<Map<string, boolean>> {
+  const nombresHijos = DEPENDENCIAS.map(d => d.hijo);
+  const ctxSede   = buildContexto('restaurante', restauranteId);
+  const ctxGrupo  = buildContexto('grupo', grupoId);
+
+  const asignaciones = await prisma.featureFlagAsignacion.findMany({
+    where: {
+      feature_flag: { nombre: { in: nombresHijos } },
+      contexto:     { in: [ctxSede, ctxGrupo] },
+    },
+    include: { feature_flag: { select: { nombre: true } } },
+  });
+
+  // Si hay asignaciones para el mismo flag en sede y grupo, sede tiene precedencia.
+  const mapa = new Map<string, boolean>();
+  for (const a of asignaciones) {
+    const nombre = a.feature_flag.nombre;
+    if (a.contexto === ctxSede || !mapa.has(nombre)) {
+      mapa.set(nombre, a.habilitado);
+    }
+  }
+  return mapa;
+}
+
 export const onboardingService = {
-  /** Devuelve el plan de flags+configs sin escribir nada en la BD. */
+  /**
+   * Devuelve el plan de flags+configs sin escribir nada en la BD.
+   * Incluye desactivadosPorDependencia: huérfanos detectados dentro del nuevo perfil.
+   * (Para relanzamientos el frontend debe llamar preview antes de apply.)
+   */
   previsualizarPerfil(input: EntradaResolver): PerfilResuelta {
-    return resolverPerfil(input);
+    const perfil = resolverPerfil(input);
+    const desactivadosPorDependencia = detectarHuerfanos(perfil);
+    return { ...perfil, desactivadosPorDependencia };
   },
 
   /**
    * Persiste el perfil del wizard de forma transaccional.
+   * Incluye la cascada de dependencias: apaga los flags huérfanos cuyo módulo-padre
+   * quedó desactivado, salvo que estén bloqueados (es_editable=false en ConfiguracionRestaurante).
+   *
+   * IMPORTANTE: este endpoint NO debe ser invocado por el frontend sin que el usuario
+   * haya confirmado previamente el preview (incluyendo desactivadosPorDependencia). La
+   * confirmación es responsabilidad de la UI (Entregable E3).
+   *
    * Si resolverPerfil lanza (colisión, arquetipo desconocido, etc.), el error
    * se propaga antes de abrir la transacción.
    */
@@ -36,8 +84,15 @@ export const onboardingService = {
   ): Promise<PerfilResuelta> {
     const perfil = resolverPerfil(input);
 
+    // Leer estado actual de flags relevantes (para relanzamientos).
+    const estadoActual = await leerEstadoFlagsRelevantes(restauranteId, grupoId);
+    const huerfanos = detectarHuerfanos(perfil, estadoActual);
+
+    const desactivadosPorDependencia: HuerfanoDetectado[] = [];
+    const omitidosPorDependencia:     HuerfanoDetectado[] = [];
+
     await prisma.$transaction(async (tx) => {
-      // ── 1. Flags ────────────────────────────────────────────────────────────
+      // ── 1. Flags del perfil ──────────────────────────────────────────────────
       for (const f of perfil.flags) {
         const contexto = buildContexto(
           f.nivel === 'sede' ? 'restaurante' : 'grupo',
@@ -59,7 +114,7 @@ export const onboardingService = {
         });
       }
 
-      // ── 2. Configs KV ───────────────────────────────────────────────────────
+      // ── 2. Configs KV ────────────────────────────────────────────────────────
       for (const c of perfil.configs) {
         if (c.nivel === 'sede') {
           await tx.configuracionRestaurante.upsert({
@@ -76,18 +131,57 @@ export const onboardingService = {
         }
       }
 
-      // ── 3. Marcar onboarding_completado solo para ESTA sede ─────────────────
-      let completadoFlag = await tx.featureFlag.findUnique({ where: { nombre: ONBOARDING_COMPLETADO } });
-      if (!completadoFlag) {
-        completadoFlag = await tx.featureFlag.create({
-          data: {
-            nombre:      ONBOARDING_COMPLETADO,
-            habilitado:  false,
-            scope:       'contexto',
-            descripcion: 'El restaurante completó el wizard de configuración inicial',
-          },
+      // ── 3. Cascada de huérfanos ──────────────────────────────────────────────
+      // Para cada flag huérfano: si está bloqueado (es_editable=false en ConfiguracionRestaurante
+      // para esa clave), se omite; si no, se apaga en su contexto correspondiente.
+      for (const huerfano of huerfanos) {
+        const bloqueado = await tx.configuracionRestaurante.findFirst({
+          where: { id_restaurante: restauranteId, clave: huerfano.clave, es_editable: false },
         });
+
+        if (bloqueado) {
+          omitidosPorDependencia.push(huerfano);
+          continue;
+        }
+
+        // Determinar el contexto del flag huérfano basándose en los flags del perfil.
+        // Si no está en el perfil (relanzamiento), asumimos contexto de sede.
+        const enPerfil = perfil.flags.find(f => f.nombre === huerfano.clave);
+        const nivel    = enPerfil?.nivel ?? 'sede';
+        const contexto = buildContexto(
+          nivel === 'sede' ? 'restaurante' : 'grupo',
+          nivel === 'sede' ? restauranteId : grupoId,
+        );
+
+        let flag = await tx.featureFlag.findUnique({ where: { nombre: huerfano.clave } });
+        if (!flag) {
+          flag = await tx.featureFlag.create({
+            data: { nombre: huerfano.clave, habilitado: false, scope: 'contexto' },
+          });
+        }
+
+        await tx.featureFlagAsignacion.upsert({
+          where:  { id_feature_flag_contexto: { id_feature_flag: flag.id, contexto } },
+          create: { id_feature_flag: flag.id, contexto, habilitado: false },
+          update: { habilitado: false },
+        });
+
+        desactivadosPorDependencia.push(huerfano);
       }
+
+      // ── 4. Marcar onboarding_completado solo para ESTA sede ──────────────────
+      // El flag master debe tener habilitado=true para que getClientFlags alcance
+      // resolveAsignacion. Si fue sembrado con false (versiones anteriores), se corrige aquí.
+      const completadoFlag = await tx.featureFlag.upsert({
+        where:  { nombre: ONBOARDING_COMPLETADO },
+        create: {
+          nombre:      ONBOARDING_COMPLETADO,
+          habilitado:  true,
+          scope:       'contexto',
+          descripcion: 'El restaurante completó el wizard de configuración inicial',
+        },
+        update: { habilitado: true },
+      });
       const ctxRestaurante = buildContexto('restaurante', restauranteId);
       await tx.featureFlagAsignacion.upsert({
         where:  { id_feature_flag_contexto: { id_feature_flag: completadoFlag.id, contexto: ctxRestaurante } },
@@ -96,6 +190,9 @@ export const onboardingService = {
       });
     });
 
-    return perfil;
+    // Invalida el cache de flags para que reloadFlags() post-apply lea datos frescos.
+    await cacheDel('ff:all');
+
+    return { ...perfil, desactivadosPorDependencia, omitidosPorDependencia };
   },
 };

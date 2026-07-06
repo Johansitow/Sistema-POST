@@ -10,7 +10,7 @@ import { Request, Response } from 'express';
 import { TipoMovimiento } from '@prisma/client';
 import { inventarioService } from '../services/inventario.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { registrarMovimientoSchema } from '../dto/inventario.dto';
+import { registrarMovimientoSchema, actualizarEstadoLoteSchema } from '../dto/inventario.dto';
 import { commandBus } from '../application/commands/CommandBus';
 import { queryBus }   from '../application/queries/QueryBus';
 import { GetMovimientosQuery }        from '../application/queries/inventario/GetMovimientosQuery';
@@ -76,5 +76,27 @@ export const getLotes = asyncHandler(async (req: Request, res: Response) => {
 export const getRentabilidadLote = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const data = await inventarioService.calcularRentabilidadLote(id, req.restauranteId!);
+  res.json({ success: true, data });
+});
+
+export const actualizarEstadoLote = asyncHandler(async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const data = actualizarEstadoLoteSchema.parse(req.body);
+  const lote = await inventarioService.actualizarEstadoLote(id, {
+    estado_lote:       data.estado_lote,
+    observaciones:     data.observaciones,
+    fecha_vencimiento: data.fecha_vencimiento ? new Date(data.fecha_vencimiento) : undefined,
+  });
+  res.json({ success: true, data: lote, message: 'Lote actualizado correctamente' });
+});
+
+export const getLotesActivosPorProducto = asyncHandler(async (req: Request, res: Response) => {
+  const id_producto = Number(req.params.id_producto);
+  const lotes = await inventarioService.lotesActivosPorProducto(id_producto, req.restauranteId!);
+  res.json({ success: true, data: lotes });
+});
+
+export const getVidaUtilPromedio = asyncHandler(async (req: Request, res: Response) => {
+  const data = await inventarioService.vidaUtilPromedio(req.restauranteId);
   res.json({ success: true, data });
 });

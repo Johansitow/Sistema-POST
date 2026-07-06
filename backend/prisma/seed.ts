@@ -553,7 +553,7 @@ async function main() {
     { nombre: 'cierre_caja_avanzado',  descripcion: 'Cierres de caja con turnos y conciliación',            habilitado: true  },
     { nombre: 'reportes_avanzados',    descripcion: 'Reportes de rentabilidad, merma y tendencias',          habilitado: false },
     // Wizard de onboarding: marcador de completitud (scope=contexto → por restaurante)
-    { nombre: 'onboarding_completado',         descripcion: 'El restaurante completó el wizard de configuración inicial', habilitado: false, scope: 'contexto' },
+    { nombre: 'onboarding_completado',         descripcion: 'El restaurante completó el wizard de configuración inicial', habilitado: true,  scope: 'contexto' },
     // Flags escritos por el wizard (scope=contexto, todos inician en off; el apply los activa por sede/grupo)
     { nombre: 'modulo.mesas',                  descripcion: 'Campo mesa habilitado en órdenes (módulo parcial: sin gestor de salón)', habilitado: false, scope: 'contexto' },
     { nombre: 'ordenes.propina',               descripcion: 'Campo propina habilitado en creación de órdenes',                       habilitado: false, scope: 'contexto' },

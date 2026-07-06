@@ -39,7 +39,8 @@ vi.mock('../../config/redis', () => ({
 import { productoService } from '../producto.service';
 import { productoRepository } from '../../repositories/producto.repository';
 import { movimientoRepository } from '../../repositories/movimiento.repository';
-import { ConflictError, NotFoundError, BadRequestError } from '../../exceptions/HttpErrors';
+import { ConflictError, NotFoundError, BadRequestError, ForbiddenError } from '../../exceptions/HttpErrors';
+import { createProductoSchema } from '../../dto/productos.dto';
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,41 @@ describe('productoService.crear', () => {
 
     await expect(productoService.crear({ sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000, id_grupo: 1 }))
       .rejects.toThrow(ConflictError);
+  });
+
+  it('lanza ForbiddenError si no se pasa id_grupo (guard multi-tenant)', async () => {
+    // Reproduce el bug original: controller omitía req.grupoId → assertGrupoId lanzaba
+    await expect(
+      productoService.crear({ sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000 } as any)
+    ).rejects.toThrow(ForbiddenError);
+  });
+
+  it('propaga id_grupo al repositorio (el producto queda en el grupo correcto)', async () => {
+    (productoRepository.findBySKU as any).mockResolvedValue(null);
+    (productoRepository.create as any).mockResolvedValue(mockProducto);
+
+    await productoService.crear({ sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000, id_grupo: 7 });
+
+    const callArg = (productoRepository.create as any).mock.calls[0][0];
+    expect(callArg.id_grupo).toBe(7);
+  });
+});
+
+// ── Seguridad multi-tenant: id_grupo NO viene del body ────────────────────────
+
+describe('createProductoSchema — id_grupo no se acepta desde el body', () => {
+  it('strips id_grupo si el cliente lo envía en el body (Zod unknown = strip)', () => {
+    const body = {
+      sku:             'PROD-001',
+      nombre:          'Producto Prueba',
+      tipo_materia:    'prima',
+      unidad_medida:   'unidad',
+      precio_unitario: 10000,
+      id_grupo:        999,   // <-- el cliente intenta fijar el grupo
+    };
+    const parsed = createProductoSchema.parse(body);
+    // Zod strip: campos no declarados en el schema se eliminan silenciosamente
+    expect((parsed as any).id_grupo).toBeUndefined();
   });
 });
 

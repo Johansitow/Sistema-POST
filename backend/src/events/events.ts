@@ -51,7 +51,6 @@ export interface OrdenCreadaPayload {
   idCliente?:     number;
   tipoOrden:      string;
   total:          number;
-  idOrdenGrupo?:  number;
 }
 
 export interface OrdenEstadoCambiadoPayload {

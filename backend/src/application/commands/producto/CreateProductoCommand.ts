@@ -5,6 +5,8 @@
 import type { ICommand } from '../CommandBus';
 
 export interface CreateProductoData {
+  /** Obligatorio — viene de req.grupoId (contexto autenticado), nunca del body del cliente. */
+  id_grupo:               number;
   sku:                    string;
   nombre:                 string;
   descripcion?:           string;

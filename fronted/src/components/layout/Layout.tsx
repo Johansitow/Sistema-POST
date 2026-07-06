@@ -27,6 +27,7 @@ import {
   MenuBook, PointOfSale, Settings, ChevronLeft, PlaylistAdd,
   Inventory2, Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount, RestaurantMenu,
+  PlayCircleOutline,
 } from '@mui/icons-material';
 import { useAuthStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
@@ -58,7 +59,6 @@ const menuGroups = [
     items: [
       { text: 'Órdenes',        icon: <ShoppingCart />,    path: '/ordenes'       },
       { text: 'Cocina (KDS)',   icon: <RestaurantMenu />, path: '/cocina'         },
-      { text: 'Grupos Órdenes', icon: <AccountTree />,    path: '/ordenes-grupo'  },
       { text: 'Clientes',       icon: <People />,         path: '/clientes'      },
       { text: 'Proveedores',    icon: <LocalShipping />,  path: '/proveedores'   },
     ],
@@ -99,9 +99,10 @@ const ADMIN_GROUPS = [
   {
     label: 'Configuración',
     items: [
-      { text: 'Funciones',    icon: <Flag />,           path: '/admin/feature-flags' },
-      { text: 'Parámetros',   icon: <Settings />,       path: '/admin/configuracion' },
-      { text: 'Categorías',   icon: <Category />,       path: '/admin/categorias'    },
+      { text: 'Funciones',    icon: <Flag />,                path: '/admin/feature-flags'      },
+      { text: 'Parámetros',   icon: <Settings />,            path: '/admin/configuracion'      },
+      { text: 'Categorías',   icon: <Category />,            path: '/admin/categorias'         },
+      { text: 'Probar configuración', icon: <PlayCircleOutline />, path: '/admin/onboarding-prueba' },
     ],
   },
   {
@@ -179,7 +180,6 @@ export default function Layout() {
   const showListasCompras    = useFeatureFlag('listas_compras');
   const showRecetas          = useFeatureFlag('recetas');
   const showClientes         = useFeatureFlag('clientes_fidelizacion');
-  const showMultiRestaurante = useFeatureFlag('multi_restaurante');
 
   const { restaurantes, activo: restauranteActivo,
           cargar: cargarRestaurantes, setActivo: setRestActivo,
@@ -246,12 +246,11 @@ export default function Layout() {
 
   const effectiveGroups = useMemo(() => {
     const flagOcultos: string[] = [];
-    if (!showListasCompras)    flagOcultos.push('/listas-compras');
-    if (!showRecetas)          flagOcultos.push('/recetas');
-    if (!showClientes)         flagOcultos.push('/clientes');
-    if (!showMultiRestaurante) flagOcultos.push('/ordenes-grupo');
+    if (!showListasCompras) flagOcultos.push('/listas-compras');
+    if (!showRecetas)       flagOcultos.push('/recetas');
+    if (!showClientes)      flagOcultos.push('/clientes');
     return applyNavConfig(menuGroups, [...itemsOcultos, ...flagOcultos], ordenItems);
-  }, [itemsOcultos, ordenItems, showListasCompras, showRecetas, showClientes, showMultiRestaurante]);
+  }, [itemsOcultos, ordenItems, showListasCompras, showRecetas, showClientes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 

@@ -26,10 +26,12 @@ import { useAuthStore } from './store/useStore';
 import { ErrorBoundary }       from './components/common/ErrorBoundary';
 import { GlobalSnackbar }      from './components/common/GlobalSnackbar';
 import { RequireRestaurante }  from './components/common/RequireRestaurante';
+import { OnboardingGuard }     from './components/common/OnboardingGuard';
 
 // ── Páginas principales (bundle inicial) ─────────────────────────────────────
 
 import { Login }        from './pages/Login';
+import { Onboarding }   from './pages/Onboarding';
 import { Dashboard }    from './pages/Dashboard';
 import { Inventario }   from './pages/Inventario';
 import { Ordenes }      from './pages/Ordenes';
@@ -41,7 +43,6 @@ import { Recetas }      from './pages/Recetas';
 import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
 import { Lotes }        from './pages/Lotes';
-import { OrdenesGrupo } from './pages/OrdenesGrupo';
 import { Cocina }       from './pages/Cocina';
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
@@ -57,6 +58,7 @@ const UiConfiguracion = lazy(() => import('./pages/admin/UiConfiguracion'));
 const Permisos        = lazy(() => import('./pages/admin/Permisos').then(m => ({ default: m.Permisos })));
 const Apariencia      = lazy(() => import('./pages/admin/Apariencia'));
 const GruposNegocio   = lazy(() => import('./pages/admin/GruposNegocio'));
+const OnboardingPrueba = lazy(() => import('./pages/admin/OnboardingPrueba').then(m => ({ default: m.OnboardingPrueba })));
 
 // ── Fallback mientras el chunk lazy se descarga ────────────────────────────────
 
@@ -108,6 +110,19 @@ export default function App() {
           <Route element={<PrivateGuard />}>
             <Route element={<Layout />}>
 
+              {/*
+               * /onboarding está FUERA de OnboardingGuard para evitar bucle:
+               * el guard redirige aquí, y esta ruta no vuelve a pasar por el guard.
+               */}
+              <Route path="/onboarding" element={<Onboarding />} />
+
+              {/*
+               * OnboardingGuard envuelve todas las rutas que requieren que el
+               * onboarding esté completado. Si onboarding_completado=false,
+               * redirige a /onboarding antes de renderizar cualquier ruta hija.
+               */}
+              <Route element={<OnboardingGuard />}>
+
               {/* Raíz → dashboard */}
               <Route index element={<Navigate to="/dashboard" replace />} />
               <Route path="/" element={<Navigate to="/dashboard" replace />} />
@@ -124,7 +139,6 @@ export default function App() {
               <Route path="/caja"          element={<RequireRestaurante><CierreCaja  /></RequireRestaurante>} />
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
               <Route path="/lotes"         element={<RequireRestaurante><Lotes         /></RequireRestaurante>} />
-              <Route path="/ordenes-grupo" element={<OrdenesGrupo  />} />
               <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}
@@ -218,6 +232,16 @@ export default function App() {
                   </AdminGuard>
                 }
               />
+              <Route
+                path="/admin/onboarding-prueba"
+                element={
+                  <AdminGuard>
+                    <Suspense fallback={<PageFallback />}><OnboardingPrueba /></Suspense>
+                  </AdminGuard>
+                }
+              />
+
+              </Route>{/* /OnboardingGuard */}
 
             </Route>
           </Route>

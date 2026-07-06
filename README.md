@@ -10,7 +10,7 @@ Sistema de punto de venta (POS) completo para restaurantes y dark kitchens. Dise
 |---|---|
 | **Órdenes** | Crea, gestiona y hace seguimiento de pedidos locales y a domicilio en tiempo real |
 | **Cocina (KDS)** | Vista de cocina con actualizaciones por WebSocket — sin necesidad de refrescar la página |
-| **Inventario** | Stock por sede, alertas de bajo inventario, lotes de producción y movimientos |
+| **Inventario** | Stock por sede con movimientos libres (entrada/salida/ajuste/merma), alertas de bajo inventario y lotes opcionales para productos almacenables (control de caducidad, reconteo y vida útil real vs. estimada) |
 | **Recetas** | Construcción de recetas con ingredientes, fases, mermas y costos de producción |
 | **Clientes** | Perfil de cliente, historial de órdenes y programa de puntos / fidelización |
 | **Reportes** | Ventas por período, productos más vendidos, cierre de caja por turno |
@@ -278,7 +278,7 @@ cd backend && npm test
 npx vitest run src/services/__tests__/auth.service.test.ts
 ```
 
-Cobertura actual: **45 tests** en 4 suites (pagination, decimal utils, auth service, producto service).
+Cobertura actual: **420 tests** en 21 suites de servicios y utilidades (auth, inventario/lotes, órdenes, recetas, cierre de caja, onboarding, entre otros).
 
 ---
 

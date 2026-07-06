@@ -11,6 +11,7 @@
 import { EstadoGeneral, TipoCliente, TipoPunto } from '@prisma/client';
 import { clienteRepository } from '../repositories/cliente.repository';
 import { NotFoundError, BadRequestError, ConflictError } from '../exceptions/HttpErrors';
+import { assertGrupoCtx, type TenantCtx } from '../lib/tenantCtx';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import type { CreateClienteDTO, UpdateClienteDTO, AddDireccionDTO, UpdateDireccionDTO } from '../dto/cliente.dto';
 
@@ -46,14 +47,14 @@ export const clienteService = {
     return cliente;
   },
 
-  async crear(data: CreateClienteDTO) {
-    // Verificar unicidad de email
+  async crear(data: CreateClienteDTO, ctx: TenantCtx) {
+    assertGrupoCtx(ctx);
+
     if (data.email) {
       const existe = await clienteRepository.findByEmail(data.email);
       if (existe) throw new ConflictError('Ya existe un cliente con ese email');
     }
 
-    // Verificar unicidad de documento
     if (data.numero_documento) {
       const existe = await clienteRepository.findByDocumento(data.numero_documento);
       if (existe) throw new ConflictError('Ya existe un cliente con ese número de documento');
@@ -65,9 +66,13 @@ export const clienteService = {
       ? new Date(clienteData.fecha_nacimiento)
       : undefined;
 
-    const cliente = await clienteRepository.create({ ...clienteData, fecha_nacimiento });
+    // id_grupo SIEMPRE del contexto autenticado — nunca del body
+    const cliente = await clienteRepository.create({
+      ...clienteData,
+      fecha_nacimiento,
+      id_grupo: ctx.grupoId!,
+    });
 
-    // Registrar puntos de bienvenida si se solicitó
     if (puntos_bienvenida) {
       await clienteRepository.registrarPuntos({
         id_cliente:    cliente.id,
@@ -83,8 +88,8 @@ export const clienteService = {
     return clienteRepository.findById(cliente.id);
   },
 
-  async actualizar(id: number, data: UpdateClienteDTO) {
-    await this.obtenerPorId(id);
+  async actualizar(id: number, data: UpdateClienteDTO, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
 
     if (data.email) {
       const existe = await clienteRepository.findByEmail(data.email, id);
@@ -104,16 +109,16 @@ export const clienteService = {
     return clienteRepository.findById(id);
   },
 
-  async cambiarEstado(id: number, estado: 'activo' | 'inactivo') {
-    await this.obtenerPorId(id);
+  async cambiarEstado(id: number, estado: 'activo' | 'inactivo', ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     await clienteRepository.update(id, { estado: estado as EstadoGeneral });
     return clienteRepository.findById(id);
   },
 
   // ── Órdenes ───────────────────────────────────────────────────────────────
 
-  async getOrdenes(id: number, params: { page?: unknown; limit?: unknown }) {
-    await this.obtenerPorId(id);
+  async getOrdenes(id: number, params: { page?: unknown; limit?: unknown }, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     const pagination = getPaginationParams(params.page, params.limit);
     const [ordenes, total] = await clienteRepository.findOrdenes(id, pagination);
     return buildPaginatedResult(ordenes, total, pagination);
@@ -121,25 +126,25 @@ export const clienteService = {
 
   // ── Direcciones ───────────────────────────────────────────────────────────
 
-  async getDirecciones(id: number) {
-    await this.obtenerPorId(id);
+  async getDirecciones(id: number, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     return clienteRepository.findDirecciones(id);
   },
 
-  async addDireccion(id: number, data: AddDireccionDTO) {
-    await this.obtenerPorId(id);
+  async addDireccion(id: number, data: AddDireccionDTO, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     return clienteRepository.addDireccion(id, data);
   },
 
-  async updateDireccion(id: number, id_dir: number, data: UpdateDireccionDTO) {
-    await this.obtenerPorId(id);
+  async updateDireccion(id: number, id_dir: number, data: UpdateDireccionDTO, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     const dir = await clienteRepository.findDireccionById(id_dir, id);
     if (!dir) throw new NotFoundError('Dirección');
     return clienteRepository.updateDireccion(id_dir, data);
   },
 
-  async deleteDireccion(id: number, id_dir: number) {
-    await this.obtenerPorId(id);
+  async deleteDireccion(id: number, id_dir: number, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     const dir = await clienteRepository.findDireccionById(id_dir, id);
     if (!dir) throw new NotFoundError('Dirección');
     return clienteRepository.deleteDireccion(id_dir);
@@ -147,15 +152,15 @@ export const clienteService = {
 
   // ── Puntos de lealtad ─────────────────────────────────────────────────────
 
-  async getPuntos(id: number, params: { page?: unknown; limit?: unknown }) {
-    await this.obtenerPorId(id);
+  async getPuntos(id: number, params: { page?: unknown; limit?: unknown }, ctx: TenantCtx) {
+    await clienteRepository.findByIdScoped(id, ctx);
     const pagination = getPaginationParams(params.page, params.limit);
     const [puntos, total] = await clienteRepository.findPuntos(id, pagination);
     return buildPaginatedResult(puntos, total, pagination);
   },
 
-  async canjearPuntos(id: number, puntos: number, descripcion?: string) {
-    const cliente = await this.obtenerPorId(id);
+  async canjearPuntos(id: number, puntos: number, ctx: TenantCtx, descripcion?: string) {
+    const cliente = await clienteRepository.findByIdScoped(id, ctx);
     if (cliente.puntos_acumulados < puntos)
       throw new BadRequestError(
         `Puntos insuficientes. Disponibles: ${cliente.puntos_acumulados}, requeridos: ${puntos}`

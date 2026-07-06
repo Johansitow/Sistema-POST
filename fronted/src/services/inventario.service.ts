@@ -37,8 +37,19 @@ export interface MovimientoCreateDTO {
   cantidad: number;
   motivo: string;
   id_proveedor?: number;
+  // Vincula la salida/merma a un lote existente (para saber qué lote se dañó)
   id_lote?: number;
   referencia?: string;
+  // Registra un lote nuevo junto con este movimiento (solo entrada/producción,
+  // y solo para productos que se almacenan — es_vendible = false)
+  generar_lote?: boolean;
+  fecha_vencimiento?: string;
+  costo_produccion?: number;
+  id_usuario_responsable?: number;
+  vida_util_dias?: number;
+  merma_cantidad?: number;
+  merma_porcentaje?: number;
+  observaciones_lote?: string;
 }
 
 export interface MovimientosParams {
@@ -77,9 +88,20 @@ export interface Lote {
   merma_porcentaje: number;
   fecha_produccion: string;
   fecha_vencimiento?: string;
+  fecha_cierre?: string | null;
   estado_lote: string;
   costo_produccion?: number;
   observaciones?: string;
+}
+
+export interface VidaUtilPromedio {
+  id_producto: number;
+  nombre: string;
+  sku: string;
+  dias_reales_promedio: number | null;
+  dias_estimados_promedio: number | null;
+  muestras_reales: number;
+  muestras_estimadas: number;
 }
 
 export interface ValorInventario {
@@ -187,6 +209,58 @@ class InventarioService {
       }));
     } catch (error) {
       console.error('Error al obtener lotes:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Lotes activos de un producto (para elegir "qué lote se dañó" al registrar una salida/merma)
+   */
+  async getLotesActivos(idProducto: number): Promise<Lote[]> {
+    try {
+      const response = await api.get<{ success: boolean; data: Lote[] }>(
+        `${this.basePath}/productos/${idProducto}/lotes-activos`
+      );
+      return response.data.data.map(l => ({
+        ...l,
+        cantidad_producida: this.toNumber(l.cantidad_producida),
+        merma_cantidad: this.toNumber(l.merma_cantidad),
+        merma_porcentaje: this.toNumber(l.merma_porcentaje),
+      }));
+    } catch (error) {
+      console.error('Error al obtener lotes activos:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Actualizar estado de un lote (ej. cerrar tras un reconteo)
+   */
+  async actualizarEstadoLote(id: number, data: {
+    estado_lote?: 'activo' | 'vencido' | 'agotado' | 'en_produccion';
+    fecha_vencimiento?: string;
+    observaciones?: string;
+  }): Promise<Lote> {
+    try {
+      const response = await api.patch<{ success: boolean; data: Lote }>(`${this.basePath}/lotes/${id}`, data);
+      return response.data.data;
+    } catch (error) {
+      console.error('Error al actualizar el lote:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /**
+   * Promedio de vida útil real/estimada de productos que se almacenan
+   */
+  async getVidaUtilPromedio(): Promise<VidaUtilPromedio[]> {
+    try {
+      const response = await api.get<{ success: boolean; data: VidaUtilPromedio[] }>(
+        `${this.basePath}/lotes/vida-util-promedio`
+      );
+      return response.data.data;
+    } catch (error) {
+      console.error('Error al obtener vida útil promedio:', error);
       throw this.handleError(error);
     }
   }

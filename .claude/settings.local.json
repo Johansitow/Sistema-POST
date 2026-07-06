@@ -22,7 +22,12 @@
       "Bash(node -e \":*)",
       "Bash(node -e \"const { PrismaClient } = require\\(''@prisma/client''\\); const p = new PrismaClient\\(\\); p.producto.findMany\\({ where: { nombre: { contains: ''Stromboli'' } }, select: { sku: true, nombre: true }, orderBy: { sku: ''asc'' } }\\).then\\(rows => { rows.forEach\\(r => console.log\\(r.sku, r.nombre\\)\\); p.disconnect\\(\\); }\\);\")",
       "Bash(del \"C:\\\\Users\\\\jnosp\\\\pos-restaurante\\\\fronted\\\\src\\\\pages\\\\Carta.tsx\")",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "PowerShell($ts = Get-Date -Format \"yyyyMMddHHmmss\"; $dir = \"C:\\\\Users\\\\jnosp\\\\pos-restaurante\\\\backend\\\\prisma\\\\migrations\\\\${ts}_add_configuracion_grupo\"; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Write-Output $dir)",
+      "Bash(npx vitest *)"
     ]
   }
 }

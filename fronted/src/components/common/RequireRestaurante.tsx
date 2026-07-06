@@ -9,7 +9,6 @@
  *   - /reportes     → tiene vista de grupo como alternativa
  *   - /clientes     → scoped por grupo, no por restaurante
  *   - /admin/*      → gestión global
- *   - /ordenes-grupo → opera a nivel grupo
  */
 
 import type { ReactNode } from 'react';

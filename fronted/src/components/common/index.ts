@@ -22,3 +22,4 @@ export { StatusChip     } from './StatusChip';
 export { TableSkeleton, CardSkeleton, FormSkeleton, ListSkeleton } from './Skeletons';
 export { RequireRestaurante } from './RequireRestaurante';
 export { default as ModalHeader } from './ModalHeader';
+export { EstadoListaBadge, ESTADO_LISTA_CFG } from './EstadoListaBadge';

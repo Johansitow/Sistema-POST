@@ -153,7 +153,7 @@ export const getProductosGrupo = asyncHandler(async (req: Request, res: Response
 
 /**
  * GET /reportes/consolidado/:id_grupo/pagos
- * Métodos de pago consolidados (PagoGrupo + Pago) para el grupo.
+ * Métodos de pago consolidados de todas las sedes del grupo de negocio.
  */
 export const getPagosGrupo = asyncHandler(async (req: Request, res: Response) => {
   const idGrupo = parseIdGrupo(req);

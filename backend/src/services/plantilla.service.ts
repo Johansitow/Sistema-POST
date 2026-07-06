@@ -8,9 +8,10 @@
  *   'cocina'   → comanda simplificada para cocina
  */
 
-import { EstadoGeneral } from '@prisma/client';
+import { EstadoGeneral, Prisma } from '@prisma/client';
 import { plantillaRepository } from '../repositories/plantilla.repository';
 import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
+import { assertGrupoCtx, type TenantCtx } from '../lib/tenantCtx';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import prisma from '../config/database';
 
@@ -51,21 +52,28 @@ export const plantillaService = {
     tipo: string;
     es_default?: boolean;
     plantilla: Record<string, unknown>;
-  }) {
+  }, ctx: TenantCtx) {
+    assertGrupoCtx(ctx);
+
     if (!TIPOS_VALIDOS.includes(data.tipo)) {
       throw new ConflictError(`Tipo inválido. Tipos válidos: ${TIPOS_VALIDOS.join(', ')}`);
     }
 
+    // Superadmin sin grupoId crea plantilla global (id_grupo=null)
+    const id_grupo: number | null = ctx.grupoId ?? null;
+
     // clearDefaults + create en una sola transacción para evitar que dos requests
-    // concurrentes dejen dos plantillas con es_default=true del mismo tipo
+    // concurrentes dejen dos plantillas con es_default=true del mismo tipo y grupo
     const plantilla = await prisma.$transaction(async (tx) => {
       if (data.es_default) {
         await tx.plantillaImpresion.updateMany({
-          where: { tipo: data.tipo, es_default: true },
+          where: { tipo: data.tipo, es_default: true, id_grupo },
           data:  { es_default: false },
         });
       }
-      return tx.plantillaImpresion.create({ data: data as any });
+      return tx.plantillaImpresion.create({
+        data: { ...data, id_grupo, plantilla: data.plantilla as Prisma.InputJsonValue },
+      });
     });
 
     await cacheDel(KEY_ALL, `plantillas:tipo:${data.tipo}`, keyDefault(data.tipo));
@@ -77,8 +85,8 @@ export const plantillaService = {
     tipo: string;
     es_default: boolean;
     plantilla: Record<string, unknown>;
-  }>) {
-    const existente = await this.obtenerPorId(id);
+  }>, ctx: TenantCtx) {
+    const existente = await plantillaRepository.findByIdScoped(id, ctx);
 
     if (data.tipo && !TIPOS_VALIDOS.includes(data.tipo)) {
       throw new ConflictError(`Tipo inválido. Tipos válidos: ${TIPOS_VALIDOS.join(', ')}`);
@@ -86,15 +94,22 @@ export const plantillaService = {
 
     const tipo = data.tipo || existente.tipo;
 
-    // clearDefaults + update en una sola transacción (mismo motivo que en crear)
+    // clearDefaults scoped al mismo grupo — evita limpiar defaults de otras cadenas
     const plantilla = await prisma.$transaction(async (tx) => {
       if (data.es_default) {
         await tx.plantillaImpresion.updateMany({
-          where: { tipo, es_default: true, id: { not: id } },
+          where: { tipo, es_default: true, id: { not: id }, id_grupo: existente.id_grupo },
           data:  { es_default: false },
         });
       }
-      return tx.plantillaImpresion.update({ where: { id }, data: data as any });
+      const { plantilla: plantillaJson, ...restData } = data;
+      return tx.plantillaImpresion.update({
+        where: { id },
+        data:  {
+          ...restData,
+          ...(plantillaJson !== undefined && { plantilla: plantillaJson as Prisma.InputJsonValue }),
+        },
+      });
     });
 
     // Si cambió el tipo, también invalidar el caché del tipo ANTERIOR
@@ -106,8 +121,8 @@ export const plantillaService = {
     return plantilla;
   },
 
-  async eliminar(id: number) {
-    const existente = await this.obtenerPorId(id);
+  async eliminar(id: number, ctx: TenantCtx) {
+    const existente = await plantillaRepository.findByIdScoped(id, ctx);
     await plantillaRepository.softDelete(id);
     await cacheDel(KEY_ALL, keyOne(id), `plantillas:tipo:${existente.tipo}`, keyDefault(existente.tipo));
   },

@@ -13,8 +13,12 @@ export const registrarMovimientoSchema = z.object({
   cantidad:                 z.number().positive('La cantidad debe ser positiva'),
   motivo:                   z.string().min(1, 'El motivo es obligatorio').max(255),
   id_proveedor:             z.number().int().positive().optional(),
+  // Vincula el movimiento (salida/merma) a un lote existente — no crea uno nuevo
   id_lote:                  z.number().int().positive().optional(),
   referencia:               z.string().max(100).optional(),
+  // Registra explícitamente un lote nuevo junto con este movimiento (entrada/producción).
+  // Sin este flag, el movimiento solo suma/resta cantidad y no toca el módulo de Lotes.
+  generar_lote:             z.boolean().optional(),
   id_usuario_responsable:   z.number().int().positive().optional(),
   vida_util_dias:           z.number().int().positive().optional(),
   merma_cantidad:           z.number().min(0).optional(),
@@ -23,5 +27,13 @@ export const registrarMovimientoSchema = z.object({
   fecha_vencimiento:        z.string().datetime().optional(),
   observaciones_lote:       z.string().max(500).optional(),
 });
+
+export const actualizarEstadoLoteSchema = z.object({
+  estado_lote:       z.enum(['activo', 'vencido', 'agotado', 'en_produccion']).optional(),
+  fecha_vencimiento: z.string().datetime().optional(),
+  observaciones:     z.string().max(500).optional(),
+});
+
+export type ActualizarEstadoLoteDTO = z.infer<typeof actualizarEstadoLoteSchema>;
 
 export type RegistrarMovimientoDTO = z.infer<typeof registrarMovimientoSchema>;

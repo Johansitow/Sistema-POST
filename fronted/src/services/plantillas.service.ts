@@ -85,6 +85,25 @@ export const PLANTILLA_COCINA_DEFAULT: Record<string, unknown> = {
 };
 
 /** Mapa de plantillas por tipo */
+/** Sección dentro de una plantilla (formato del editor + BD). */
+export interface PlantillaSeccion {
+  id:      string;
+  tipo:    string;
+  visible: boolean;
+  orden:   number;
+  campos:  Record<string, boolean>;
+}
+
+/** Estructura completa de configuración de una plantilla (campo `plantilla` en BD). */
+export interface PlantillaConfig {
+  config: {
+    paperWidth: string;
+    fontSize:   string;
+    showLogo:   boolean;
+  };
+  sections: PlantillaSeccion[];
+}
+
 export const PLANTILLA_DEFAULTS: Record<TipoPlantilla, Record<string, unknown>> = {
   ticket:  PLANTILLA_TICKET_DEFAULT,
   factura: PLANTILLA_FACTURA_DEFAULT,
