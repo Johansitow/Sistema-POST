@@ -17,8 +17,8 @@ import {
   Search, Plus, Edit2, Trash2, Package, AlertCircle,
   X, Check, ChevronDown, RefreshCw, BarChart2, Archive,
   Thermometer, ShoppingBag, Filter, TruckIcon, ArrowUpCircle,
-  ArrowDownCircle, Hash, Users, Calculator, Layers, LayoutGrid,
-  History, ChevronUp, AlertTriangle,
+  ArrowDownCircle, Hash, Calculator, Layers, LayoutGrid,
+  History, ChevronUp,
 } from 'lucide-react';
 import ModalHeader from '../components/common/ModalHeader';
 import { productosService, Producto, ProductoCreateDTO, ProductoUpdateDTO } from '../services/productos.service';
@@ -226,7 +226,7 @@ const DisponibilidadModal: React.FC<DisponibilidadModalProps> = ({ producto, onC
 interface MovimientoModalProps {
   producto: Producto;
   onClose: () => void;
-  onSave: (loteGenerado?: string) => void;
+  onSave: () => void;
 }
 
 const TIPOS_MOVIMIENTO = [
@@ -323,39 +323,37 @@ const fechaRelativa = (fecha: string) => {
 };
 
 const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, onSave }) => {
-  const [tipo, setTipo]                       = useState<string>('entrada');
+  // Los productos que se almacenan (es_vendible=false) solo hacen conteo/ajuste o devolución
+  // en Inventario — toda entrada o merma real se justifica en Lotes (ver más abajo).
+  const esAlmacenable  = !producto.es_vendible;
+  const tiposVisibles  = esAlmacenable
+    ? TIPOS_MOVIMIENTO.filter(t => t.value === 'ajuste' || t.value === 'devolucion')
+    : TIPOS_MOVIMIENTO;
+
+  const [tipo, setTipo]                       = useState<string>(esAlmacenable ? 'ajuste' : 'entrada');
   const [cantidad, setCantidad]               = useState('');
   const [motivo, setMotivo]                   = useState('');
   const [referencia, setReferencia]           = useState('');
   const [idProveedor, setIdProveedor]         = useState<number | null>(null);
-  const [fechaVenc, setFechaVenc]             = useState('');
-  const [costoProd, setCostoProd]             = useState('');
-  const [idResponsable, setIdResponsable]     = useState<number | null>(null);
-  const [vidaUtil, setVidaUtil]               = useState('');
-  const [observacionesLote, setObsLote]       = useState('');
-  const [mermaCantidad, setMermaCantidad]     = useState('');
-  const [mermaPorcentaje, setMermaPorcentaje] = useState('');
   const [proveedores, setProveedores]         = useState<Proveedor[]>([]);
-  const [usuarios, setUsuarios]               = useState<any[]>([]);
   const [historial, setHistorial]             = useState<any[]>([]);
   const [showHistorial, setShowHistorial]     = useState(false);
   const [loadingProvs, setLoadingProvs]       = useState(false);
   const [saving, setSaving]                   = useState(false);
   const [error, setError]                     = useState<string | null>(null);
-  const [loteCreado, setLoteCreado]           = useState<string | null>(null);
-  // Registrar lote es opcional: solo aplica a productos que se almacenan (no ensamblados al vender)
-  const [registrarLote, setRegistrarLote]     = useState(false);
+
+  // ── Justificación del conteo (solo Ajuste sobre productos almacenables) ──
+  const [fechaVenc, setFechaVenc]             = useState('');
+  const [vidaUtil, setVidaUtil]               = useState('');
+  const [costoProd, setCostoProd]             = useState('');
+  const [idResponsable, setIdResponsable]     = useState<number | null>(null);
+  const [observacionesLote, setObsLote]       = useState('');
+  const [usuarios, setUsuarios]               = useState<any[]>([]);
   const [lotesActivos, setLotesActivos]       = useState<any[]>([]);
   const [idLoteAfectado, setIdLoteAfectado]   = useState<number | null>(null);
 
   const esEntrada      = tipo === 'entrada';
   const esProduccion   = tipo === 'produccion';
-  const esSalidaOMerma = tipo === 'salida' || tipo === 'merma';
-  const esAlmacenable  = !producto.es_vendible;
-  // Sección "Datos del Lote": visible solo si aplica; se envía al backend solo si el usuario la activa
-  const mostrarSeccionLote = esAlmacenable && (esEntrada || esProduccion);
-  const generarLote    = mostrarSeccionLote && registrarLote;
-  const mostrarSelectorLote = esAlmacenable && esSalidaOMerma && lotesActivos.length > 0;
   const tipoActual     = TIPOS_MOVIMIENTO.find(t => t.value === tipo)!;
   const cantidadNum    = parseFloat(cantidad) || 0;
   const stockActual    = Number(producto.stock_actual);
@@ -367,93 +365,89 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
   const deltaStock     = nuevoStock - stockActual;
   const showImpacto    = cantidadNum > 0;
 
+  // Conteo con diferencia: solo aplica a Ajuste sobre productos almacenables
+  const esAjusteConteo = tipo === 'ajuste' && esAlmacenable;
+  const conteoIngresado = esAjusteConteo && cantidad !== '';
+  const haySobrante    = esAjusteConteo && conteoIngresado && deltaStock > 0;
+  const hayFaltante    = esAjusteConteo && conteoIngresado && deltaStock < 0;
+
   useEffect(() => {
     const load = async () => {
       setLoadingProvs(true);
       try {
-        const [provRes, userRes, histRes] = await Promise.all([
+        const [provRes, histRes, userRes] = await Promise.all([
           proveedorService.getAll({ estado: 'activo', limit: 100 }),
-          usuariosService.listar({ estado: 'activo', limit: 100 }),
           api.get(`/inventario/movimientos?id_producto=${producto.id}&limit=5`),
+          esAlmacenable ? usuariosService.listar({ estado: 'activo', limit: 100 }) : Promise.resolve(null),
         ]);
         setProveedores(provRes.data);
-        setUsuarios(userRes.data ?? []);
         setHistorial(histRes.data?.data ?? []);
+        if (userRes) setUsuarios(userRes.data ?? []);
       } catch { /* silencioso */ }
       finally { setLoadingProvs(false); }
     };
     load();
+    if (esAlmacenable) {
+      inventarioService.getLotesActivos(producto.id).then(setLotesActivos).catch(() => setLotesActivos([]));
+    }
   }, []);
 
-  useEffect(() => {
-    setRegistrarLote(false);
-    setIdLoteAfectado(null);
-    if (esAlmacenable && esSalidaOMerma) {
-      inventarioService.getLotesActivos(producto.id)
-        .then(setLotesActivos)
-        .catch(() => setLotesActivos([]));
-    } else {
-      setLotesActivos([]);
-    }
-  }, [tipo]);
-
   const handleSubmit = async () => {
-    if (!cantidad || parseFloat(cantidad) <= 0) { setError('La cantidad debe ser mayor a 0'); return; }
-    if (!motivo.trim()) { setError('El motivo es obligatorio'); return; }
+    if (cantidad === '' || cantidadNum < 0) { setError('Ingresa una cantidad válida'); return; }
+    if (!esAjusteConteo && cantidadNum <= 0) { setError('La cantidad debe ser mayor a 0'); return; }
+
+    // ── Conteo sin diferencia: solo confirma, no registra movimiento ──
+    if (esAjusteConteo && deltaStock === 0) {
+      onSave();
+      return;
+    }
+
+    if (!motivo.trim() && !esAjusteConteo) { setError('El motivo es obligatorio'); return; }
 
     setSaving(true); setError(null);
     try {
-      const data: MovimientoCreateDTO = {
-        id_producto:     producto.id,
-        tipo_movimiento: tipo as MovimientoCreateDTO['tipo_movimiento'],
-        cantidad:        parseFloat(cantidad),
-        motivo:          motivo.trim(),
-        id_proveedor:    idProveedor ?? undefined,
-        referencia:      referencia || undefined,
-        ...(generarLote && { generar_lote: true }),
-        ...(generarLote && fechaVenc        && { fecha_vencimiento:       new Date(fechaVenc).toISOString() }),
-        ...(generarLote && costoProd        && { costo_produccion:        parseFloat(costoProd) }),
-        ...(generarLote && idResponsable    && { id_usuario_responsable:  idResponsable }),
-        ...(generarLote && vidaUtil         && { vida_util_dias:          parseInt(vidaUtil) }),
-        ...(generarLote && observacionesLote && { observaciones_lote:    observacionesLote }),
-        ...(generarLote && esProduccion && mermaCantidad   && { merma_cantidad:   parseFloat(mermaCantidad) }),
-        ...(generarLote && esProduccion && mermaPorcentaje && { merma_porcentaje: parseFloat(mermaPorcentaje) }),
-        ...(mostrarSelectorLote && idLoteAfectado && { id_lote: idLoteAfectado }),
-      };
-
-      const resultado = await inventarioService.registrarMovimiento(data);
-      const numeroLote = resultado?.data?.lote_generado?.numero_lote ?? resultado?.lote_generado?.numero_lote ?? null;
-      setLoteCreado(numeroLote);
-      if (!numeroLote) { onSave(); }
+      if (haySobrante) {
+        // Sobrante encontrado en el conteo → se registra como entrada + lote nuevo en Lotes
+        await inventarioService.registrarMovimiento({
+          id_producto:      producto.id,
+          tipo_movimiento:  'entrada',
+          cantidad:         deltaStock,
+          motivo:           motivo.trim() || 'Sobrante detectado en conteo de inventario',
+          generar_lote:     true,
+          ...(fechaVenc          && { fecha_vencimiento: new Date(fechaVenc).toISOString() }),
+          ...(vidaUtil           && { vida_util_dias: parseInt(vidaUtil) }),
+          ...(costoProd          && { costo_produccion: parseFloat(costoProd) }),
+          ...(idResponsable      && { id_usuario_responsable: idResponsable }),
+          ...(observacionesLote  && { observaciones_lote: observacionesLote }),
+        });
+      } else if (hayFaltante) {
+        // Faltante detectado en el conteo → se registra como merma, ligada a un lote si se identifica
+        await inventarioService.registrarMovimiento({
+          id_producto:      producto.id,
+          tipo_movimiento:  'merma',
+          cantidad:         Math.abs(deltaStock),
+          motivo:           motivo.trim() || 'Faltante detectado en conteo de inventario',
+          ...(idLoteAfectado && { id_lote: idLoteAfectado }),
+        });
+      } else {
+        if (!motivo.trim()) { setError('El motivo es obligatorio'); setSaving(false); return; }
+        const data: MovimientoCreateDTO = {
+          id_producto:     producto.id,
+          tipo_movimiento: tipo as MovimientoCreateDTO['tipo_movimiento'],
+          cantidad:        parseFloat(cantidad),
+          motivo:          motivo.trim(),
+          id_proveedor:    idProveedor ?? undefined,
+          referencia:      referencia || undefined,
+        };
+        await inventarioService.registrarMovimiento(data);
+      }
+      onSave();
     } catch (e: any) {
       setError(e.message || 'Error al registrar movimiento');
     } finally {
       setSaving(false);
     }
   };
-
-  if (loteCreado) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-        <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
-          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Check className="w-8 h-8 text-emerald-600" />
-          </div>
-          <h3 className="text-lg font-bold text-slate-800 mb-1">Movimiento registrado</h3>
-          <p className="text-slate-500 text-sm mb-4">Se registró el lote:</p>
-          <div className="bg-slate-100 rounded-xl px-4 py-3 font-mono font-bold text-slate-700 text-lg mb-6">
-            {loteCreado}
-          </div>
-          <p className="text-xs text-slate-400 mb-6">Puedes consultar este lote en la sección <strong>Lotes</strong> del menú lateral</p>
-          <button onClick={() => onSave(loteCreado)}
-            className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold text-sm hover:from-emerald-700 hover:to-teal-700 transition-all">
-            Entendido
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
@@ -505,6 +499,14 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             </div>
           )}
 
+          {esAlmacenable && (
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 text-xs text-indigo-700">
+              Este producto se almacena: aquí solo se hace <strong>conteo/ajuste</strong> o se
+              justifica una <strong>devolución</strong>. Toda entrada o merma real que resulte del
+              conteo queda registrada en <strong>Lotes</strong> automáticamente.
+            </div>
+          )}
+
           {/* ── Historial reciente (colapsable) ── */}
           {historial.length > 0 && (
             <div className="rounded-xl border border-slate-200 overflow-hidden">
@@ -549,8 +551,8 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
           {/* ── Selector de tipo ── */}
           <div>
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tipo de movimiento</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {TIPOS_MOVIMIENTO.map(t => {
+            <div className={`grid gap-1.5 ${tiposVisibles.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+              {tiposVisibles.map(t => {
                 const isActive = tipo === t.value;
                 return (
                   <button key={t.value} onClick={() => setTipo(t.value)}
@@ -568,14 +570,14 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
           {/* ── Cantidad ── */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              {tipo === 'ajuste' ? 'Nuevo stock total' : 'Cantidad'}
+              {tipo === 'ajuste' ? 'Cantidad contada' : 'Cantidad'}
               <span className="text-slate-400 font-normal ml-1">({producto.unidad_medida})</span>
             </label>
             <input type="number" value={cantidad} onChange={e => setCantidad(e.target.value)}
               placeholder={tipo === 'ajuste' ? `Stock actual: ${stockActual}` : 'Ej: 5'}
               min="0" step="0.01"
               className={`w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 ${tipoActual.ring}`} />
-            {tipo === 'ajuste' && cantidadNum > 0 && (
+            {tipo === 'ajuste' && !esAlmacenable && cantidadNum > 0 && (
               <p className="text-xs mt-1 text-blue-600">
                 {deltaStock >= 0 ? `↑ Aumenta ${deltaStock.toFixed(2)} ${producto.unidad_medida}` : `↓ Reduce ${Math.abs(deltaStock).toFixed(2)} ${producto.unidad_medida}`}
               </p>
@@ -584,6 +586,95 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
               <p className="text-xs mt-1 text-red-600 font-medium">⚠ La cantidad supera el stock disponible</p>
             )}
           </div>
+
+          {/* ── Conteo sin diferencia ── */}
+          {conteoIngresado && deltaStock === 0 && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-2.5 text-sm text-emerald-700 flex items-center gap-2">
+              <Check className="w-4 h-4 flex-shrink-0" /> El conteo coincide con el sistema — no hay nada que justificar.
+            </div>
+          )}
+
+          {/* ── Sobrante encontrado: justificar como lote nuevo ── */}
+          {haySobrante && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 space-y-3">
+              <p className="text-xs font-bold uppercase tracking-wider text-emerald-700 flex items-center gap-1.5">
+                <ArrowUpCircle className="w-3.5 h-3.5" /> Sobrante de +{deltaStock.toFixed(2)} {producto.unidad_medida} — se registrará como lote nuevo en Lotes
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Responsable</label>
+                  <select value={idResponsable ?? ''} onChange={e => setIdResponsable(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full px-3 py-2 border border-white/80 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-emerald-400">
+                    <option value="">— Seleccionar —</option>
+                    {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre_completo ?? u.usuario}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Vida útil (días)</label>
+                  <input type="number" value={vidaUtil} onChange={e => setVidaUtil(e.target.value)}
+                    placeholder="Ej: 7" min="1"
+                    className="w-full px-3 py-2 border border-white/80 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-400" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Fecha Vencimiento <span className="text-slate-400 font-normal">(recomendado)</span>
+                  </label>
+                  <input type="date" value={fechaVenc} onChange={e => setFechaVenc(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-white/80 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-emerald-400" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Costo</label>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-medium">$</span>
+                    <input type="number" value={costoProd} onChange={e => setCostoProd(e.target.value)}
+                      placeholder="0" min="0"
+                      className="w-full pl-6 pr-2 py-2 border border-white/80 rounded-lg text-xs outline-none focus:ring-2 focus:ring-emerald-400" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Observaciones del lote</label>
+                <textarea rows={2} value={observacionesLote} onChange={e => setObsLote(e.target.value)}
+                  placeholder="Notas adicionales del lote..."
+                  className="w-full px-3 py-2 border border-white/80 rounded-lg text-xs outline-none resize-none focus:ring-2 focus:ring-emerald-400" />
+              </div>
+            </div>
+          )}
+
+          {/* ── Faltante detectado: justificar como pérdida, opcionalmente ligada a un lote ── */}
+          {hayFaltante && (
+            <div className="rounded-xl border border-red-200 bg-red-50/40 p-3.5 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-wider text-red-700 flex items-center gap-1.5">
+                <ArrowDownCircle className="w-3.5 h-3.5" /> Faltante de {Math.abs(deltaStock).toFixed(2)} {producto.unidad_medida} — se registrará como pérdida
+              </p>
+              {lotesActivos.length > 0 ? (
+                <>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                    Lote afectado <span className="text-slate-400 font-normal">(opcional, recomendado)</span>
+                  </label>
+                  <select value={idLoteAfectado ?? ''} onChange={e => setIdLoteAfectado(e.target.value ? Number(e.target.value) : null)}
+                    className="w-full px-3 py-2.5 border border-red-200 rounded-xl text-sm bg-white outline-none focus:ring-2 focus:ring-red-400">
+                    <option value="">— No sé de cuál lote —</option>
+                    {lotesActivos.map((l: any) => (
+                      <option key={l.id} value={l.id}>
+                        {l.numero_lote}{l.fecha_vencimiento ? ` · vence ${new Date(l.fecha_vencimiento).toLocaleDateString('es-CO')}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">Este producto no tiene lotes activos registrados.</p>
+              )}
+              <p className="text-xs text-red-600">
+                {idLoteAfectado
+                  ? 'Se acumulará como merma real de ese lote.'
+                  : 'Si no identificas el lote, se registra igual como pérdida y se genera una alerta para revisarla.'}
+              </p>
+            </div>
+          )}
 
           {/* ── Proveedor (solo Entrada, opcional) ── */}
           {esEntrada && (
@@ -612,138 +703,36 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             </div>
           )}
 
-          {/* ── Datos del Lote (Entrada / Producción, opcional, solo productos almacenables) ── */}
-          {mostrarSeccionLote && (
-            <div className={`rounded-xl border p-3.5 space-y-3 ${tipoActual.lote}`}>
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${tipoActual.loteTit}`}>
-                  <Hash className="w-3.5 h-3.5" /> Registrar lote (fecha de caducidad, merma esperada)
-                </span>
-                <input type="checkbox" checked={registrarLote} onChange={e => setRegistrarLote(e.target.checked)}
-                  className="w-4 h-4 rounded accent-current" />
-              </label>
-              {!registrarLote && (
-                <p className="text-xs text-slate-500">
-                  Recomendado si este producto puede dañarse — recibirás alertas de reconteo antes de que caduque.
-                </p>
-              )}
-              {registrarLote && (
-              <>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1 flex items-center gap-1">
-                    <Users className="w-3 h-3" /> Responsable
-                  </label>
-                  <select value={idResponsable ?? ''} onChange={e => setIdResponsable(e.target.value ? Number(e.target.value) : null)}
-                    className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs bg-white outline-none focus:ring-2 ${tipoActual.ring}`}>
-                    <option value="">— Seleccionar —</option>
-                    {usuarios.map(u => <option key={u.id} value={u.id}>{u.nombre_completo ?? u.usuario}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Vida útil (días)</label>
-                  <input type="number" value={vidaUtil} onChange={e => setVidaUtil(e.target.value)}
-                    placeholder="Ej: 7" min="1"
-                    className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs outline-none focus:ring-2 ${tipoActual.ring}`} />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Fecha Vencimiento <span className="text-slate-400 font-normal">(recomendado)</span></label>
-                  <input type="date" value={fechaVenc} onChange={e => setFechaVenc(e.target.value)}
-                    min={new Date().toISOString().split('T')[0]}
-                    className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs bg-white outline-none focus:ring-2 ${tipoActual.ring}`} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Costo Producción</label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-medium">$</span>
-                    <input type="number" value={costoProd} onChange={e => setCostoProd(e.target.value)}
-                      placeholder="0" min="0"
-                      className={`w-full pl-6 pr-2 py-2 border border-white/80 rounded-lg text-xs outline-none focus:ring-2 ${tipoActual.ring}`} />
-                  </div>
-                </div>
-              </div>
-              {/* Observaciones del lote */}
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Observaciones del lote</label>
-                <textarea rows={2} value={observacionesLote} onChange={e => setObsLote(e.target.value)}
-                  placeholder="Notas adicionales del lote..."
-                  className={`w-full px-3 py-2 border border-white/80 rounded-lg text-xs outline-none resize-none focus:ring-2 ${tipoActual.ring}`} />
-              </div>
-              </>
-              )}
-            </div>
-          )}
-
-          {/* ── Merma esperada del lote (solo si se está registrando un lote de Producción) ── */}
-          {generarLote && esProduccion && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3.5 space-y-3">
-              <p className="text-xs font-bold uppercase tracking-wider text-amber-700 flex items-center gap-1.5">
-                <AlertTriangle className="w-3.5 h-3.5" /> Merma de Producción
-                <span className="text-amber-500 font-normal normal-case">(opcional)</span>
-              </p>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Cantidad ({producto.unidad_medida})
-                  </label>
-                  <input type="number" value={mermaCantidad} onChange={e => setMermaCantidad(e.target.value)}
-                    placeholder="0" min="0" step="0.01"
-                    className="w-full px-3 py-2 border border-amber-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-amber-400" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Porcentaje (%)</label>
-                  <input type="number" value={mermaPorcentaje} onChange={e => setMermaPorcentaje(e.target.value)}
-                    placeholder="0" min="0" max="100" step="0.1"
-                    className="w-full px-3 py-2 border border-amber-200 rounded-lg text-xs bg-white outline-none focus:ring-2 focus:ring-amber-400" />
-                </div>
-              </div>
-              <p className="text-xs text-amber-600">
-                La merma registrada se descuenta automáticamente del lote producido.
-              </p>
-            </div>
-          )}
-
-          {/* ── Lote afectado (Salida / Merma sobre productos almacenables) ── */}
-          {mostrarSelectorLote && (
-            <div className="rounded-xl border border-slate-200 p-3.5 space-y-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                <Hash className="w-3.5 h-3.5" /> Lote afectado
-                <span className="text-slate-400 font-normal normal-case">(opcional)</span>
-              </label>
-              <select value={idLoteAfectado ?? ''} onChange={e => setIdLoteAfectado(e.target.value ? Number(e.target.value) : null)}
-                className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white outline-none focus:ring-2 focus:ring-slate-400">
-                <option value="">— No indicar lote —</option>
-                {lotesActivos.map((l: any) => (
-                  <option key={l.id} value={l.id}>
-                    {l.numero_lote}{l.fecha_vencimiento ? ` · vence ${new Date(l.fecha_vencimiento).toLocaleDateString('es-CO')}` : ''}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500">Indica de qué lote salió este producto, por ejemplo si se dañó.</p>
-            </div>
-          )}
-
           {/* ── Motivo ── */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Motivo <span className="text-red-500">*</span>
-            </label>
-            <textarea rows={2} value={motivo} onChange={e => setMotivo(e.target.value)}
-              placeholder={esEntrada ? 'Ej: Compra semanal, Reposición de stock...' : esProduccion ? 'Ej: Producción del día, Lote matutino...' : tipo === 'merma' ? 'Ej: Producto caducado, Derrame...' : 'Ej: Uso en preparación, Ajuste de inventario...'}
-              className={`w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none resize-none focus:ring-2 ${tipoActual.ring}`} />
-          </div>
+          {!(esAjusteConteo && deltaStock === 0) && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Motivo {esAjusteConteo ? <span className="text-slate-400 font-normal">(opcional)</span> : <span className="text-red-500">*</span>}
+              </label>
+              <textarea rows={2} value={motivo} onChange={e => setMotivo(e.target.value)}
+                placeholder={
+                  haySobrante ? 'Ej: Se encontró producto adicional al contar...'
+                  : hayFaltante ? 'Ej: No aparece al contar, posible daño o vencimiento...'
+                  : esEntrada ? 'Ej: Compra semanal, Reposición de stock...'
+                  : esProduccion ? 'Ej: Producción del día, Lote matutino...'
+                  : tipo === 'merma' ? 'Ej: Producto caducado, Derrame...'
+                  : 'Ej: Uso en preparación, Ajuste de inventario...'
+                }
+                className={`w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none resize-none focus:ring-2 ${tipoActual.ring}`} />
+            </div>
+          )}
 
-          {/* ── Referencia ── */}
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-              Referencia <span className="text-slate-400 font-normal">(opcional)</span>
-            </label>
-            <input value={referencia} onChange={e => setReferencia(e.target.value)}
-              placeholder="Número de factura, orden de compra..."
-              className={`w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 ${tipoActual.ring}`} />
-          </div>
+          {/* ── Referencia (no aplica al conteo/ajuste de almacenables) ── */}
+          {!esAjusteConteo && (
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">
+                Referencia <span className="text-slate-400 font-normal">(opcional)</span>
+              </label>
+              <input value={referencia} onChange={e => setReferencia(e.target.value)}
+                placeholder="Número de factura, orden de compra..."
+                className={`w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 ${tipoActual.ring}`} />
+            </div>
+          )}
         </div>
 
         {/* ── Footer ── */}
@@ -752,10 +741,14 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-100 transition-colors">
             Cancelar
           </button>
-          <button onClick={handleSubmit} disabled={saving}
+          <button onClick={handleSubmit} disabled={saving || (esAjusteConteo && cantidad === '')}
             className={`flex-2 flex-[2] py-2.5 bg-gradient-to-r ${tipoActual.btn} text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 hover:opacity-90 transition-all disabled:opacity-50 shadow-sm`}>
             {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            {saving ? 'Registrando...' : `Registrar ${tipoActual.label}`}
+            {saving ? 'Registrando...'
+              : haySobrante ? `Registrar entrada en Lotes (+${deltaStock.toFixed(2)})`
+              : hayFaltante ? `Registrar pérdida (-${Math.abs(deltaStock).toFixed(2)})`
+              : esAjusteConteo ? 'Confirmar conteo'
+              : `Registrar ${tipoActual.label}`}
           </button>
         </div>
       </div>

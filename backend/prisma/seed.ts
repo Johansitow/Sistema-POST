@@ -384,8 +384,9 @@ async function main() {
     prisma.tipoAlerta.create({ data: { nombre: 'Vencimiento',        codigo: 'VENCIMIENTO',      descripcion: 'Lote próximo a vencer (≤ 7 días)',             icono: 'calendar',    color: '#FF5722', prioridad_default: 'alta',    es_sistema: true } }),
     prisma.tipoAlerta.create({ data: { nombre: 'Lista de Compras',   codigo: 'LISTA_COMPRA',     descripcion: 'Lista de compras generada automáticamente',    icono: 'shopping_cart', color: '#FF9800', prioridad_default: 'alta',  es_sistema: true } }),
     prisma.tipoAlerta.create({ data: { nombre: 'Ajuste Stock',       codigo: 'AJUSTE_STOCK',     descripcion: 'Stock mínimo/máximo ajustado por tendencias',  icono: 'tune',        color: '#2196F3', prioridad_default: 'media' } }),
+    prisma.tipoAlerta.create({ data: { nombre: 'Pérdida sin justificar', codigo: 'PERDIDA_SIN_LOTE', descripcion: 'Faltante de conteo registrado como merma sin poder atribuirlo a un lote', icono: 'report_problem', color: '#D32F2F', prioridad_default: 'alta', es_sistema: true } }),
   ]);
-  console.log('✅ 5 tipos de alerta creados');
+  console.log('✅ 6 tipos de alerta creados');
 
   // ============================================================
   // CATEGORÍAS

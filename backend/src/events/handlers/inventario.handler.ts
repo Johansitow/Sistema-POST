@@ -1,8 +1,11 @@
 /**
  * inventario.handler.ts
- * Reacciona a eventos de órdenes para:
+ * Reacciona a eventos de órdenes e inventario para:
  *   1. Descontar stock por receta al completar una orden.
  *   2. Emitir STOCK_BAJO si algún producto queda bajo el mínimo.
+ *   3. Alertar cuando una merma de un producto almacenable queda sin lote asociado
+ *      (faltante de conteo que no se pudo justificar) — para poder sumarlas después
+ *      como pérdida de capital no identificada.
  */
 
 import prisma from '../../config/database';
@@ -11,6 +14,7 @@ import {
   EVENTS,
   OrdenCompletadaPayload,
   StockBajoPayload,
+  MovimientoRegistradoPayload,
 } from '../events';
 
 export function registerInventarioHandlers(): void {
@@ -114,5 +118,37 @@ export function registerInventarioHandlers(): void {
         }
       }
     }
+  );
+
+  // ── MOVIMIENTO_REGISTRADO: merma de un producto almacenable sin lote asociado ──
+  // Ocurre cuando un faltante de conteo (Inventario → Ajuste) no se pudo atribuir a
+  // ningún lote. Se deja registrada como pérdida (ya ocurrió al crear el movimiento)
+  // y además se alerta para poder revisarla y sumarla como pérdida de capital.
+  eventBus.on<MovimientoRegistradoPayload>(
+    EVENTS.MOVIMIENTO_REGISTRADO,
+    async ({ idMovimiento, tipoMovimiento, idRestaurante }) => {
+      if (tipoMovimiento !== 'merma' || !idRestaurante) return;
+
+      const movimiento = await prisma.movimiento.findUnique({
+        where: { id: idMovimiento },
+        include: { producto: { select: { nombre: true, es_vendible: true } } },
+      });
+      if (!movimiento || movimiento.id_lote) return;       // ya quedó vinculada a un lote
+      if (movimiento.producto.es_vendible) return;         // productos vendibles no usan lotes
+
+      const tipoAlerta = await prisma.tipoAlerta.findUnique({ where: { codigo: 'PERDIDA_SIN_LOTE' } });
+      if (!tipoAlerta) return; // seed no aplicado aún — no bloquear el movimiento por esto
+
+      await prisma.alerta.create({
+        data: {
+          id_tipo_alerta:  tipoAlerta.id,
+          id_producto:     movimiento.id_producto,
+          id_restaurante:  idRestaurante,
+          mensaje: `Pérdida sin justificar: "${movimiento.producto.nombre}" — ` +
+                   `${Number(movimiento.cantidad).toFixed(3)} sin lote identificado. ${movimiento.motivo}`,
+          nivel_prioridad: tipoAlerta.prioridad_default,
+        },
+      });
+    },
   );
 }
