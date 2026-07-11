@@ -948,13 +948,13 @@ model Cliente {
 
   // Datos personales
   nombre_completo    String        @db.VarChar(200)
-  email              String?       @unique @db.VarChar(150)
+  email              String?       @db.VarChar(150)
   telefono           String?       @db.VarChar(20)
   telefono_alterno   String?       @db.VarChar(20)
 
   // Identificación (opcional — útil para facturación electrónica)
   tipo_documento     TipoDocumento @default(cc)
-  numero_documento   String?       @unique @db.VarChar(50)
+  numero_documento   String?       @db.VarChar(50)
 
   // Dirección
   direccion          String?       @db.VarChar(255)
@@ -990,6 +990,10 @@ model Cliente {
   puntos             ClientePunto[]
   grupo              GrupoNegocio      @relation(fields: [id_grupo], references: [id])
 
+  // Únicos por grupo de negocio — un mismo email/documento puede repetirse entre
+  // grupos distintos, pero no dos veces dentro del mismo grupo.
+  @@unique([id_grupo, email])
+  @@unique([id_grupo, numero_documento])
   @@index([email])
   @@index([telefono])
   @@index([numero_documento])

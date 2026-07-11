@@ -153,6 +153,17 @@ describe('clienteService.crear — tenant guard', () => {
     expect(repo.create).not.toHaveBeenCalled();
   });
 
+  it('busca email duplicado únicamente dentro del grupo del contexto (no globalmente)', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 2 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 2 });
+
+    await clienteService.crear(makeCreateDTO({ email: 'nuevo@test.com' }), CTX_GRUPO_1);
+
+    expect(repo.findByEmail).toHaveBeenCalledWith('nuevo@test.com', 1);
+  });
+
   it('lanza ConflictError si el número de documento ya está registrado', async () => {
     repo.findByEmail.mockResolvedValue(null);
     repo.findByDocumento.mockResolvedValue(mockCliente);
@@ -160,6 +171,17 @@ describe('clienteService.crear — tenant guard', () => {
     await expect(clienteService.crear(makeCreateDTO({ numero_documento: '12345678' }), CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
     expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('busca documento duplicado únicamente dentro del grupo del contexto (no globalmente)', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByDocumento.mockResolvedValue(null);
+    repo.create.mockResolvedValue({ id: 2 });
+    repo.findById.mockResolvedValue({ ...mockCliente, id: 2 });
+
+    await clienteService.crear(makeCreateDTO({ numero_documento: '99999999' }), CTX_GRUPO_1);
+
+    expect(repo.findByDocumento).toHaveBeenCalledWith('99999999', 1);
   });
 
   it('superadmin puede crear clientes', async () => {
@@ -192,6 +214,17 @@ describe('clienteService.actualizar — tenant guard', () => {
     await expect(clienteService.actualizar(1, { email: 'otro@test.com' }, CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
     expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  it('busca email duplicado en actualizar únicamente dentro del grupo del contexto', async () => {
+    repo.findByIdScoped.mockResolvedValueOnce(mockCliente);
+    repo.findByEmail.mockResolvedValue(null);
+    repo.update.mockResolvedValue({});
+    repo.findById.mockResolvedValue(mockCliente);
+
+    await clienteService.actualizar(1, { email: 'otro@test.com' }, CTX_GRUPO_1);
+
+    expect(repo.findByEmail).toHaveBeenCalledWith('otro@test.com', 1, 1);
   });
 
   it('happy path: dueño legítimo actualiza su cliente', async () => {

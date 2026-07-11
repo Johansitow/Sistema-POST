@@ -18,9 +18,12 @@ import {
 } from 'lucide-react';
 import { clienteService } from '../services/cliente.service';
 import ModalHeader from '../components/common/ModalHeader';
-import api from '../services/api';
+import api, { getErrorMessage } from '../services/api';
 import { formatCurrency, formatDateTime, formatDateShort } from '../utils';
-import { LoadingScreen, EmptyState } from '../components/common';
+import { LoadingScreen, EmptyState, ConfirmDialog, ErrorAlert } from '../components/common';
+import { toast } from '../store/uiStore';
+import { Z_INDEX } from '../lib/zIndex';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 
@@ -106,9 +109,8 @@ const getAvatarGradient = (tipo: string) => {
 
 const FORM_INITIAL = {
   nombre_completo: '', email: '', telefono: '', telefono_alterno: '',
-  tipo_documento: 'cc', numero_documento: '', direccion: '',
-  ciudad: '', barrio: '', tipo_cliente: 'regular', notas: '',
-  canal_adquisicion: '', fecha_nacimiento: '', puntos_bienvenida: false,
+  direccion: '', ciudad: '', barrio: '', tipo_cliente: 'regular', notas: '',
+  canal_adquisicion: '', puntos_bienvenida: false,
 };
 
 const Field: React.FC<{
@@ -137,6 +139,7 @@ const FormCliente: React.FC<{
   onClose: () => void;
   onSaved: () => void;
 }> = ({ cliente, onClose, onSaved }) => {
+  useEscapeKey(onClose);
   const [form, setForm]     = useState({ ...FORM_INITIAL, ...(cliente || {}) });
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -163,21 +166,24 @@ const FormCliente: React.FC<{
     try {
       if (isEdit) {
         await clienteService.update(cliente!.id, form as any);
+        toast.success('Cliente actualizado');
       } else {
         await clienteService.create(form as any);
+        toast.success('Cliente creado');
       }
       onSaved();
       onClose();
     } catch (err: any) {
-      const msg = err.message || 'Error al guardar';
+      const msg = getErrorMessage(err);
       setErrors({ _general: msg });
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
 
@@ -191,11 +197,7 @@ const FormCliente: React.FC<{
 
         {/* Body */}
         <div className="overflow-y-auto p-6 space-y-5">
-          {errors._general && (
-            <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl">
-              {errors._general}
-            </div>
-          )}
+          {errors._general && <ErrorAlert message={errors._general} />}
 
           {/* Datos personales */}
           <div>
@@ -207,29 +209,6 @@ const FormCliente: React.FC<{
               <Field label="Email" name="email" type="email" placeholder="cliente@email.com" form={form} errors={errors} set={set} />
               <Field label="Teléfono" name="telefono" placeholder="+57 300 000 0000" form={form} errors={errors} set={set} />
               <Field label="Teléfono alterno" name="telefono_alterno" placeholder="Opcional" form={form} errors={errors} set={set} />
-              <Field label="Fecha de nacimiento" name="fecha_nacimiento" type="date" form={form} errors={errors} set={set} />
-            </div>
-          </div>
-
-          {/* Documento */}
-          <div>
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Identificación</p>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 mb-1.5">Tipo documento</label>
-                <select
-                  value={form.tipo_documento}
-                  onChange={e => set('tipo_documento', e.target.value)}
-                  className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-teal-500 outline-none"
-                >
-                  <option value="cc">Cédula (CC)</option>
-                  <option value="ce">Cédula Extranjería</option>
-                  <option value="nit">NIT</option>
-                  <option value="pasaporte">Pasaporte</option>
-                  <option value="sin_documento">Sin documento</option>
-                </select>
-              </div>
-              <Field label="Número de documento" name="numero_documento" placeholder="Ej: 1023456789" form={form} errors={errors} set={set} />
             </div>
           </div>
 
@@ -348,6 +327,9 @@ const DetalleCliente: React.FC<{ cliente: Cliente; onClose: () => void; onEdit: 
   const [puntosACanjear, setPuntosACanjear] = useState('');
   const [ordenDetalle, setOrdenDetalle]   = useState<any | null>(null);
   const [loadingOrden, setLoadingOrden]   = useState(false);
+  // ESC cierra el panel de orden si está abierto; si no, cierra el detalle del cliente
+  useEscapeKey(() => setOrdenDetalle(null), ordenDetalle !== null);
+  useEscapeKey(onClose, ordenDetalle === null);
 
   const cfg = TIPO_CFG[cliente.tipo_cliente] || TIPO_CFG.regular;
 
@@ -391,14 +373,15 @@ const DetalleCliente: React.FC<{ cliente: Cliente; onClose: () => void; onEdit: 
       await clienteService.canjearPuntos(cliente.id, n);
       setPuntosACanjear('');
       loadPuntos();
+      toast.success('Puntos canjeados correctamente');
     } catch (err: any) {
-      alert(err.message || 'Error al canjear');
+      toast.error(getErrorMessage(err));
     } finally { setCanjeando(false); }
   };
 
   return (
     <>
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
 
@@ -619,8 +602,8 @@ const DetalleCliente: React.FC<{ cliente: Cliente; onClose: () => void; onEdit: 
 
     {/* ── Mini-modal detalle de orden ── */}
     {ordenDetalle && (
-      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setOrdenDetalle(null)} />
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_NESTED }}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOrdenDetalle(null)} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col overflow-hidden">
 
           {/* Header */}
@@ -716,6 +699,7 @@ export const Clientes: React.FC = () => {
   const [formOpen, setFormOpen]       = useState(false);
   const [editCliente, setEditCliente] = useState<Cliente | null>(null);
   const [detalle, setDetalle]         = useState<Cliente | null>(null);
+  const [confirmToggle, setConfirmToggle] = useState<Cliente | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -744,9 +728,13 @@ export const Clientes: React.FC = () => {
 
   const handleToggleEstado = async (c: Cliente) => {
     try {
-      await clienteService.cambiarEstado(c.id, c.estado === 'activo' ? 'inactivo' : 'activo');
+      const nuevoEstado = c.estado === 'activo' ? 'inactivo' : 'activo';
+      await clienteService.cambiarEstado(c.id, nuevoEstado);
+      toast.success(nuevoEstado === 'activo' ? 'Cliente activado' : 'Cliente desactivado');
       loadData();
-    } catch (err: any) { alert(err.message || 'Error'); }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err));
+    }
   };
 
   const openEdit = (c: Cliente) => { setEditCliente(c); setFormOpen(true); setDetalle(null); };
@@ -825,7 +813,7 @@ export const Clientes: React.FC = () => {
               <input
                 value={search}
                 onChange={e => { setSearch(e.target.value); setPage(1); }}
-                placeholder="Buscar por nombre, email, teléfono o documento..."
+                placeholder="Buscar por nombre, email o teléfono..."
                 className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-400"
               />
             </div>
@@ -900,9 +888,6 @@ export const Clientes: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-slate-800">{c.nombre_completo}</p>
-                            {c.numero_documento && (
-                              <p className="text-xs text-slate-400 font-mono">{c.tipo_documento?.toUpperCase()} {c.numero_documento}</p>
-                            )}
                           </div>
                         </div>
                       </td>
@@ -954,7 +939,7 @@ export const Clientes: React.FC = () => {
                           <button onClick={() => openEdit(c)} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
                             <Edit2 className="w-4 h-4" />
                           </button>
-                          <button onClick={() => handleToggleEstado(c)} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title={c.estado === 'activo' ? 'Desactivar' : 'Activar'}>
+                          <button onClick={() => c.estado === 'activo' ? setConfirmToggle(c) : handleToggleEstado(c)} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors" title={c.estado === 'activo' ? 'Desactivar' : 'Activar'}>
                             {c.estado === 'activo'
                               ? <ToggleRight className="w-4 h-4 text-emerald-500" />
                               : <ToggleLeft  className="w-4 h-4 text-slate-400"   />}
@@ -1007,6 +992,16 @@ export const Clientes: React.FC = () => {
           onEdit={() => openEdit(detalle)}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmToggle !== null}
+        title="Desactivar cliente"
+        message={confirmToggle ? `¿Desactivar a "${confirmToggle.nombre_completo}"? No podrá usarse en nuevas órdenes hasta reactivarlo.` : ''}
+        confirmText="Desactivar"
+        confirmColor="warning"
+        onConfirm={() => { if (confirmToggle) handleToggleEstado(confirmToggle); }}
+        onClose={() => setConfirmToggle(null)}
+      />
     </div>
   );
 };

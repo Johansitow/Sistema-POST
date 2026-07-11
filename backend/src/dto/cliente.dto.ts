@@ -7,13 +7,28 @@ import { TipoDocumento, TipoCliente, EstadoGeneral } from '@prisma/client';
 
 // ── Crear cliente ─────────────────────────────────────────────────────────────
 
+// Campos opcionales que además son @unique en la base de datos (email, numero_documento):
+// deben normalizar '' → undefined, para que nunca lleguen a Prisma como cadena vacía (dos
+// clientes con el campo en blanco violarían la restricción única).
+const emailOptional = z.string().email('Email inválido').max(150).optional().or(z.literal(''))
+  .transform(v => (v === '' ? undefined : v));
+
+const numeroDocumentoOptional = z.string().max(50).optional().or(z.literal(''))
+  .transform(v => (v === '' ? undefined : v));
+
+// Acepta cualquier string de fecha razonable (fecha sola, datetime con o sin offset/segundos)
+// en vez de exigir un formato ISO exacto — y normaliza '' → undefined.
+const fechaNacimientoOptional = z.string().optional().or(z.literal(''))
+  .transform(v => (v === '' || v == null ? undefined : v))
+  .refine(v => v === undefined || !isNaN(Date.parse(v)), { message: 'Fecha de nacimiento inválida' });
+
 export const createClienteSchema = z.object({
   nombre_completo:   z.string().min(2, 'El nombre debe tener al menos 2 caracteres').max(200),
-  email:             z.string().email('Email inválido').max(150).optional(),
+  email:             emailOptional,
   telefono:          z.string().max(20).optional(),
   telefono_alterno:  z.string().max(20).optional(),
   tipo_documento:    z.nativeEnum(TipoDocumento).default(TipoDocumento.cc),
-  numero_documento:  z.string().max(50).optional(),
+  numero_documento:  numeroDocumentoOptional,
   direccion:         z.string().max(255).optional(),
   ciudad:            z.string().max(100).optional(),
   barrio:            z.string().max(100).optional(),
@@ -21,7 +36,7 @@ export const createClienteSchema = z.object({
   notas:             z.string().max(2000).optional(),
   preferencias:      z.record(z.any()).optional(),
   canal_adquisicion: z.string().max(50).optional(),
-  fecha_nacimiento:  z.string().datetime({ offset: true }).optional().or(z.string().date().optional()),
+  fecha_nacimiento:  fechaNacimientoOptional,
   puntos_bienvenida: z.boolean().default(false),
 });
 
@@ -29,11 +44,11 @@ export const createClienteSchema = z.object({
 
 export const updateClienteSchema = z.object({
   nombre_completo:   z.string().min(2).max(200).optional(),
-  email:             z.string().email('Email inválido').max(150).optional(),
+  email:             emailOptional,
   telefono:          z.string().max(20).optional(),
   telefono_alterno:  z.string().max(20).optional(),
   tipo_documento:    z.nativeEnum(TipoDocumento).optional(),
-  numero_documento:  z.string().max(50).optional(),
+  numero_documento:  numeroDocumentoOptional,
   direccion:         z.string().max(255).optional(),
   ciudad:            z.string().max(100).optional(),
   barrio:            z.string().max(100).optional(),
@@ -41,7 +56,7 @@ export const updateClienteSchema = z.object({
   notas:             z.string().max(2000).optional(),
   preferencias:      z.record(z.any()).optional(),
   canal_adquisicion: z.string().max(50).optional(),
-  fecha_nacimiento:  z.string().datetime({ offset: true }).optional().or(z.string().date().optional()),
+  fecha_nacimiento:  fechaNacimientoOptional,
 });
 
 // ── Cambiar estado ────────────────────────────────────────────────────────────

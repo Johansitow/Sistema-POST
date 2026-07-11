@@ -51,12 +51,12 @@ export const clienteService = {
     assertGrupoCtx(ctx);
 
     if (data.email) {
-      const existe = await clienteRepository.findByEmail(data.email);
+      const existe = await clienteRepository.findByEmail(data.email, ctx.grupoId);
       if (existe) throw new ConflictError('Ya existe un cliente con ese email');
     }
 
     if (data.numero_documento) {
-      const existe = await clienteRepository.findByDocumento(data.numero_documento);
+      const existe = await clienteRepository.findByDocumento(data.numero_documento, ctx.grupoId);
       if (existe) throw new ConflictError('Ya existe un cliente con ese número de documento');
     }
 
@@ -92,12 +92,12 @@ export const clienteService = {
     await clienteRepository.findByIdScoped(id, ctx);
 
     if (data.email) {
-      const existe = await clienteRepository.findByEmail(data.email, id);
+      const existe = await clienteRepository.findByEmail(data.email, ctx.grupoId, id);
       if (existe) throw new ConflictError('Ya existe un cliente con ese email');
     }
 
     if (data.numero_documento) {
-      const existe = await clienteRepository.findByDocumento(data.numero_documento, id);
+      const existe = await clienteRepository.findByDocumento(data.numero_documento, ctx.grupoId, id);
       if (existe) throw new ConflictError('Ya existe un cliente con ese número de documento');
     }
 

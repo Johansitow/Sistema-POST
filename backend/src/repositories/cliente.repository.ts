@@ -89,20 +89,24 @@ class ClienteRepositoryImpl extends TenantRepository {
     );
   }
 
-  findByEmail(email: string, excludeId?: number) {
+  /** Únicos por grupo de negocio — el mismo email puede repetirse en otro grupo. */
+  findByEmail(email: string, id_grupo: number | null | undefined, excludeId?: number) {
     return prisma.cliente.findFirst({
       where: {
         email,
+        ...(id_grupo != null ? { id_grupo } : {}),
         estado: { not: EstadoGeneral.eliminado },
         ...(excludeId ? { NOT: { id: excludeId } } : {}),
       },
     });
   }
 
-  findByDocumento(numero_documento: string, excludeId?: number) {
+  /** Únicos por grupo de negocio — el mismo documento puede repetirse en otro grupo. */
+  findByDocumento(numero_documento: string, id_grupo: number | null | undefined, excludeId?: number) {
     return prisma.cliente.findFirst({
       where: {
         numero_documento,
+        ...(id_grupo != null ? { id_grupo } : {}),
         estado: { not: EstadoGeneral.eliminado },
         ...(excludeId ? { NOT: { id: excludeId } } : {}),
       },

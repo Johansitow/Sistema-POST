@@ -277,10 +277,17 @@ export const clearAuth = () => {
 
 /**
  * getErrorMessage — extrae el mensaje de error de una respuesta axios.
+ *
+ * Los errores de validación Zod llegan como { error: 'Error de validación',
+ * details: [{ campo, mensaje }] } (ver backend/src/middlewares/error.middleware.ts) —
+ * en ese caso se unen los mensajes por campo en vez de mostrar el genérico "Error de validación".
  */
 export const getErrorMessage = (error: any): string => {
   if (error.response) {
     const data = error.response.data;
+    if (Array.isArray(data?.details) && data.details.length > 0) {
+      return data.details.map((d: { campo?: string; mensaje: string }) => d.mensaje).join(' · ');
+    }
     return data?.error || data?.message || 'Error en el servidor';
   } else if (error.request) {
     return 'No se pudo conectar con el servidor. Verifique su conexión.';
