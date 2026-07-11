@@ -29,6 +29,21 @@ const recetaFullInclude = {
   fases:          { orderBy: { numero_fase: 'asc' as const }, where: { estado: 'activo' } },
 } as const;
 
+// Include reutilizado en findRecetaConStock y findRecetasVendiblesConStock
+const disponibilidadInclude = {
+  producto_final: {
+    select: { id: true, nombre: true, sku: true, unidad_medida: true, stock_actual: true, es_vendible: true },
+  },
+  ingredientes: {
+    include: {
+      producto: {
+        select: { id: true, nombre: true, sku: true, stock_actual: true, unidad_medida: true },
+      },
+    },
+    orderBy: { orden: 'asc' as const },
+  },
+} as const;
+
 class RecetaRepositoryImpl extends TenantRepository {
   constructor() {
     super(prisma);
@@ -320,19 +335,19 @@ class RecetaRepositoryImpl extends TenantRepository {
   findRecetaConStock(id_receta: number) {
     return prisma.receta.findUnique({
       where: { id: id_receta },
-      include: {
-        producto_final: {
-          select: { id: true, nombre: true, sku: true, unidad_medida: true },
-        },
-        ingredientes: {
-          include: {
-            producto: {
-              select: { id: true, nombre: true, sku: true, stock_actual: true, unidad_medida: true },
-            },
-          },
-          orderBy: { orden: 'asc' },
-        },
+      include: disponibilidadInclude,
+    });
+  }
+
+  /** Recetas de productos vendibles de una sede, con stock — usado para el catálogo de disponibilidad. */
+  findRecetasVendiblesConStock(id_restaurante: number) {
+    return prisma.receta.findMany({
+      where: {
+        id_restaurante,
+        estado: 'activo' as never,
+        producto_final: { es_vendible: true },
       },
+      include: disponibilidadInclude,
     });
   }
 }

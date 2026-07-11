@@ -20,6 +20,7 @@ vi.mock('../../repositories/receta.repository', () => ({
     findByIdScoped:         vi.fn(),   // guarded lookup (IDOR fix)
     findFaseById:           vi.fn(),   // lookup de fase por id
     findRecetaConStock:     vi.fn(),
+    findRecetasVendiblesConStock: vi.fn(),
     create:                 vi.fn(),
     update:                 vi.fn(),
     reemplazarIngredientes: vi.fn(),
@@ -186,6 +187,89 @@ describe('recetaService.verificarDisponibilidadParaDetalles', () => {
     await expect(
       recetaService.verificarDisponibilidadParaDetalles([{ id_producto: 1, cantidad: 4 }])
     ).rejects.toThrow(BadRequestError);
+  });
+});
+
+// ── recetaService.calcularDisponibilidad ─────────────────────────────────────
+
+describe('recetaService.calcularDisponibilidad', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('suma el stock ya producido del producto final a lo calculado desde ingredientes', async () => {
+    // Puede prepararse 1 unidad más desde ingredientes crudos, y ya hay 5 producidas y listas.
+    (recetaRepository.findRecetaConStock as any).mockResolvedValue({
+      id: 1,
+      nombre_receta: 'Hamburguesa',
+      cantidad_producida: new Decimal(1),
+      unidad_produccion: 'unidad',
+      producto_final: { id: 10, nombre: 'Hamburguesa', stock_actual: new Decimal(5) },
+      ingredientes: [
+        makeIngrediente(2, 'Carne', 100, 'gramo', 100, 'gramo'), // alcanza para 1 más
+      ],
+    });
+
+    const result = await recetaService.calcularDisponibilidad(1);
+
+    expect(result.stock_producido).toBe(5);
+    expect(result.disponibilidad_por_receta).toBe(1);
+    expect(result.disponibilidad).toBe(6);
+  });
+
+  it('sin stock producido, la disponibilidad es solo lo calculado desde ingredientes', async () => {
+    (recetaRepository.findRecetaConStock as any).mockResolvedValue({
+      id: 1,
+      nombre_receta: 'Hamburguesa',
+      cantidad_producida: new Decimal(1),
+      unidad_produccion: 'unidad',
+      producto_final: { id: 10, nombre: 'Hamburguesa', stock_actual: new Decimal(0) },
+      ingredientes: [
+        makeIngrediente(2, 'Carne', 100, 'gramo', 300, 'gramo'), // alcanza para 3
+      ],
+    });
+
+    const result = await recetaService.calcularDisponibilidad(1);
+
+    expect(result.stock_producido).toBe(0);
+    expect(result.disponibilidad_por_receta).toBe(3);
+    expect(result.disponibilidad).toBe(3);
+  });
+
+  it('lanza NotFoundError si la receta no existe', async () => {
+    (recetaRepository.findRecetaConStock as any).mockResolvedValue(null);
+    await expect(recetaService.calcularDisponibilidad(999)).rejects.toThrow(NotFoundError);
+  });
+});
+
+// ── recetaService.calcularDisponibilidadCatalogo ─────────────────────────────
+
+describe('recetaService.calcularDisponibilidadCatalogo', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('calcula disponibilidad (producido + por receta) para cada receta vendible de la sede', async () => {
+    (recetaRepository.findRecetasVendiblesConStock as any).mockResolvedValue([
+      {
+        id_producto_final: 10,
+        cantidad_producida: new Decimal(1),
+        unidad_produccion: 'unidad',
+        producto_final: { id: 10, stock_actual: new Decimal(5) },
+        ingredientes: [makeIngrediente(2, 'Carne', 100, 'gramo', 100, 'gramo')],
+      },
+      {
+        id_producto_final: 11,
+        cantidad_producida: new Decimal(1),
+        unidad_produccion: 'unidad',
+        producto_final: { id: 11, stock_actual: new Decimal(0) },
+        ingredientes: [makeIngrediente(3, 'Pollo', 100, 'gramo', 0, 'gramo')],
+      },
+    ]);
+
+    const result = await recetaService.calcularDisponibilidadCatalogo(1);
+
+    expect(result).toEqual([
+      { id_producto: 10, disponibilidad: 6, unidad_produccion: 'unidad' },
+      { id_producto: 11, disponibilidad: 0, unidad_produccion: 'unidad' },
+    ]);
+    expect(recetaRepository.findRecetasVendiblesConStock).toHaveBeenCalledWith(1);
   });
 });
 

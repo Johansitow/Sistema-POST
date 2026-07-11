@@ -57,6 +57,17 @@ router.get('/',
   }
 );
 
+// Debe declararse ANTES de '/:id' — de lo contrario Express la matchea como
+// GET /:id con id="disponibilidad-catalogo" y nunca llega hasta acá.
+router.get('/disponibilidad-catalogo',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = await recetaService.calcularDisponibilidadCatalogo(req.restauranteId!);
+      res.json(successResponse(data));
+    } catch (e) { next(e); }
+  }
+);
+
 router.get('/:id',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
