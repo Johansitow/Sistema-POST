@@ -14,6 +14,7 @@
 
 export { ConfirmDialog  } from './ConfirmDialog';
 export { EmptyState     } from './EmptyState';
+export { ErrorAlert     } from './ErrorAlert';
 export { ErrorBoundary  } from './ErrorBoundary';
 export { GlobalSnackbar } from './GlobalSnackbar';
 export { LoadingScreen  } from './LoadingScreen';

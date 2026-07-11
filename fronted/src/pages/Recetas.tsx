@@ -17,6 +17,9 @@ import api from '../services/api';
 import { socket } from '../lib/socket';
 import { useFeatureFlag } from '../store/featureFlagStore';
 import TablaDesgloseRentabilidad, { type DesgloseRentabilidad } from '../components/recetas/TablaDesgloseRentabilidad';
+import { ConfirmDialog } from '../components/common/ConfirmDialog';
+import { LoadingScreen, EmptyState } from '../components/common';
+import { toast } from '../store/uiStore';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -463,8 +466,25 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
   const removeFase = (i: number) => setFases(p => p.filter((_, n) => n !== i).map((f, n) => ({ ...f, numero_fase: n + 1 })));
   const updateFase = (i: number, f: string, v: any) => setFases(p => p.map((x, n) => n === i ? { ...x, [f]: v } : x));
 
+  // Confirmación antes de borrar — solo si la fase/ingrediente ya tiene algo configurado
+  // (una fila recién agregada y vacía se puede quitar directo, no hay nada que perder)
+  const [confirmRemoveFase, setConfirmRemoveFase] = useState<number | null>(null);
+  const [confirmRemoveIng, setConfirmRemoveIng]   = useState<{ fi: number; ii: number } | null>(null);
+
+  const handleRemoveFase = (i: number) => {
+    const fase = fases[i];
+    if (!fase.nombre.trim() && fase.ingredientes.length === 0) { removeFase(i); return; }
+    setConfirmRemoveFase(i);
+  };
+
   const addIngFase    = (fi: number) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: [...f.ingredientes, { id_producto: 0, nombre: '', cantidad: '1', unidad: 'kilogramo', precio_unitario: 0, es_opcional: false, tipo_formula: '', factor_formula: '', formula_descripcion: '' }] } : f));
   const removeIngFase = (fi: number, ii: number) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.filter((_, m) => m !== ii) } : f));
+
+  const handleRemoveIngFase = (fi: number, ii: number) => {
+    const ing = fases[fi]?.ingredientes[ii];
+    if (!ing?.nombre) { removeIngFase(fi, ii); return; }
+    setConfirmRemoveIng({ fi, ii });
+  };
   const updateIngFase = (fi: number, ii: number, field: string, v: any) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.map((x, m) => m === ii ? { ...x, [field]: v } : x) } : f));
   const selectProdFase = (fi: number, ii: number, prod: ProductoOpt | null) => {
     if (!prod) return;
@@ -515,15 +535,22 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
       if (receta) {
         await recetaService.update(receta.id, payload as any);
         await recetaService.updateIngredientes(receta.id, payload.ingredientes);
+        toast.success('Receta actualizada');
       } else {
         await recetaService.create(payload as any);
+        toast.success('Receta creada');
       }
       onSaved(); onClose();
-    } catch (e: any) { setError(e.response?.data?.error || 'Error al guardar'); }
+    } catch (e: any) {
+      const msg = e.response?.data?.error || 'Error al guardar';
+      setError(msg);
+      toast.error(msg);
+    }
     finally { setSaving(false); }
   };
 
   return (
+    <>
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pb: 1 }}>
         <Box>
@@ -687,7 +714,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
                   {/* Header de la fase */}
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                     <Chip label={`Fase ${fase.numero_fase}`} size="small" color="primary" />
-                    <IconButton size="small" color="error" onClick={() => removeFase(fi)}>
+                    <IconButton size="small" color="error" onClick={() => handleRemoveFase(fi)} title="Eliminar fase">
                       <Delete fontSize="small" />
                     </IconButton>
                   </Box>
@@ -780,7 +807,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
                                 </FormControl>
                               </Grid>
                               <Grid size={{ xs: 12, sm: 2 }} sx={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
-                                <IconButton size="small" color="error" onClick={() => removeIngFase(fi, ii)}>
+                                <IconButton size="small" color="error" onClick={() => handleRemoveIngFase(fi, ii)} title="Quitar ingrediente">
                                   <Delete fontSize="small" />
                                 </IconButton>
                               </Grid>
@@ -877,6 +904,35 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
         }
       </DialogActions>
     </Dialog>
+
+    <ConfirmDialog
+      open={confirmRemoveFase !== null}
+      title="Eliminar fase"
+      message={
+        confirmRemoveFase !== null
+          ? `¿Eliminar la fase "${fases[confirmRemoveFase]?.nombre || `Fase ${fases[confirmRemoveFase]?.numero_fase}`}"? Se perderán sus ${fases[confirmRemoveFase]?.ingredientes.length ?? 0} ingredientes configurados.`
+          : ''
+      }
+      confirmText="Eliminar"
+      confirmColor="error"
+      onConfirm={() => { if (confirmRemoveFase !== null) removeFase(confirmRemoveFase); }}
+      onClose={() => setConfirmRemoveFase(null)}
+    />
+
+    <ConfirmDialog
+      open={confirmRemoveIng !== null}
+      title="Quitar ingrediente"
+      message={
+        confirmRemoveIng
+          ? `¿Quitar "${fases[confirmRemoveIng.fi]?.ingredientes[confirmRemoveIng.ii]?.nombre}" de esta fase?`
+          : ''
+      }
+      confirmText="Quitar"
+      confirmColor="error"
+      onConfirm={() => { if (confirmRemoveIng) removeIngFase(confirmRemoveIng.fi, confirmRemoveIng.ii); }}
+      onClose={() => setConfirmRemoveIng(null)}
+    />
+    </>
   );
 }
 
@@ -1026,7 +1082,7 @@ export function Recetas() {
         ))}
       </Grid>
 
-      {loading ? <LinearProgress sx={{ borderRadius: 1 }} /> : (
+      {loading ? <LoadingScreen variant="inline" message="Cargando recetas..." /> : (
         <Grid container spacing={3}>
           {/* Lista de recetas */}
           <Grid size={{ xs: 12, md: 4 }}>
@@ -1104,15 +1160,12 @@ export function Recetas() {
               </Box>
 
               {recetas.length === 0 ? (
-                <Box sx={{ p: 4, textAlign: 'center' }}>
-                  <MenuBook sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
-                  <Typography color="text.secondary" variant="body2" sx={{ mb: 1 }}>
-                    No hay recetas creadas aún
-                  </Typography>
-                  <Button size="small" variant="outlined" onClick={() => { setRecetaEdit(null); setModal(true); }}>
-                    Crear primera receta
-                  </Button>
-                </Box>
+                <EmptyState
+                  message="No hay recetas creadas aún"
+                  icon={<MenuBook sx={{ fontSize: 48, color: 'text.disabled' }} />}
+                  actionLabel="Crear primera receta"
+                  onAction={() => { setRecetaEdit(null); setModal(true); }}
+                />
               ) : recetasFiltradas.length === 0 ? (
                 <Box sx={{ p: 4, textAlign: 'center' }}>
                   <Search sx={{ fontSize: 40, color: 'text.disabled', mb: 1 }} />

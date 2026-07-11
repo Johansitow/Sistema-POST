@@ -26,6 +26,7 @@ import {
 } from '../../services/plantillas.service';
 import { PlantillaPreview } from '../../components/plantillas/PlantillaPreview';
 import { uiConfigService } from '../../services/ui-config.service';
+import { LoadingScreen, EmptyState, ConfirmDialog } from '../../components/common';
 
 // ── Impresión defaults ────────────────────────────────────────────────────────
 
@@ -453,6 +454,7 @@ export function Plantillas() {
   const [editItem, setEditItem] = useState<PlantillaImpresion | null>(null);
   const [toast,    setToast]    = useState('');
   const [toastErr, setToastErr] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<PlantillaImpresion | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -468,7 +470,6 @@ export function Plantillas() {
   const filtered    = tipoActual ? items.filter(p => p.tipo === tipoActual) : [];
 
   const handleDelete = async (p: PlantillaImpresion) => {
-    if (!window.confirm(`¿Eliminar la plantilla "${p.nombre}"?`)) return;
     try {
       await plantillasService.eliminar(p.id);
       setItems(prev => prev.filter(x => x.id !== p.id));
@@ -554,17 +555,15 @@ export function Plantillas() {
 
       {/* Lista de plantillas */}
       {!isConfigTab && loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', pt: 6 }}><CircularProgress /></Box>
+        <LoadingScreen variant="inline" message="Cargando plantillas..." />
       ) : !isConfigTab && filtered.length === 0 ? (
-        <Card sx={{ p: 6, textAlign: 'center' }}>
-          <Print sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography color="text.secondary" gutterBottom>
-            No hay plantillas de tipo {TIPOS[tab]?.label}.
-          </Typography>
-          <Button variant="contained" startIcon={<Add />}
-            onClick={() => { setEditItem(null); setFormOpen(true); }}>
-            Crear plantilla {TIPOS[tab]?.label}
-          </Button>
+        <Card sx={{ borderRadius: 2 }}>
+          <EmptyState
+            message={`No hay plantillas de tipo ${TIPOS[tab]?.label}`}
+            icon={<Print sx={{ fontSize: 48, color: 'text.disabled' }} />}
+            actionLabel={`Crear plantilla ${TIPOS[tab]?.label}`}
+            onAction={() => { setEditItem(null); setFormOpen(true); }}
+          />
         </Card>
       ) : !isConfigTab ? (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -627,7 +626,7 @@ export function Plantillas() {
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Eliminar">
-                    <IconButton size="small" color="error" onClick={() => handleDelete(p)}>
+                    <IconButton size="small" color="error" onClick={() => setConfirmDelete(p)}>
                       <Delete fontSize="small" />
                     </IconButton>
                   </Tooltip>
@@ -653,6 +652,16 @@ export function Plantillas() {
       >
         <Alert severity={toastErr ? 'error' : 'success'} onClose={() => setToast('')}>{toast}</Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Eliminar plantilla"
+        message={`¿Eliminar la plantilla "${confirmDelete?.nombre}"?`}
+        confirmText="Eliminar"
+        confirmColor="error"
+        onConfirm={async () => { if (confirmDelete) await handleDelete(confirmDelete); }}
+        onClose={() => setConfirmDelete(null)}
+      />
     </Box>
   );
 }

@@ -16,6 +16,7 @@ import { ordenesService, type OrdenSede } from '../services/ordenes.service';
 import { formatDateTime, formatCurrency } from '../utils';
 import { LoadingScreen } from '../components/common';
 import { useSocket } from '../hooks/useSocket';
+import { toast } from '../store/uiStore';
 
 // ─── Helpers visuales ────────────────────────────────────────────────────────
 
@@ -200,8 +201,12 @@ export const Cocina: React.FC = () => {
   });
 
   const handleAvanzar = async (id: number) => {
-    await ordenesService.avanzarSede(id);
-    await cargar();
+    try {
+      await ordenesService.avanzarSede(id);
+      await cargar();
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo avanzar el estado de la orden');
+    }
   };
 
   const totalActivas = sedes.filter(s => s.estado !== 'LISTA').length;

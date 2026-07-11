@@ -25,6 +25,7 @@ import {
   type Categoria,
   type CreateCategoriaDto,
 } from '../../services/categorias.service';
+import { LoadingScreen, EmptyState, ConfirmDialog } from '../../components/common';
 
 // ── Paleta de colores rápidos ─────────────────────────────────────────────────
 const COLORES = [
@@ -195,6 +196,7 @@ export function Categorias() {
   const [editItem, setEditItem] = useState<Categoria | null>(null);
   const [toast,    setToast]    = useState('');
   const [toastErr, setToastErr] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<Categoria | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,11 +251,6 @@ export function Categorias() {
 
   // ── Eliminar ───────────────────────────────────────────────────────────────
   const handleDelete = async (c: Categoria) => {
-    const count = c._count?.productos ?? 0;
-    const msg = count > 0
-      ? `La categoría "${c.nombre}" tiene ${count} producto(s). ¿Eliminar de todas formas?`
-      : `¿Eliminar la categoría "${c.nombre}"?`;
-    if (!window.confirm(msg)) return;
     try {
       await categoriasService.eliminar(c.id);
       setItems(prev => prev.filter(x => x.id !== c.id));
@@ -320,17 +317,15 @@ export function Categorias() {
 
       {/* Lista */}
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', pt: 6 }}>
-          <CircularProgress />
-        </Box>
+        <LoadingScreen variant="inline" message="Cargando categorías..." />
       ) : items.length === 0 ? (
-        <Card sx={{ p: 6, textAlign: 'center' }}>
-          <Category sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
-          <Typography color="text.secondary" gutterBottom>No hay categorías creadas.</Typography>
-          <Button variant="contained" startIcon={<Add />}
-            onClick={() => { setEditItem(null); setFormOpen(true); }}>
-            Crear primera categoría
-          </Button>
+        <Card sx={{ borderRadius: 2 }}>
+          <EmptyState
+            message="No hay categorías creadas"
+            icon={<Category sx={{ fontSize: 48, color: 'text.disabled' }} />}
+            actionLabel="Crear primera categoría"
+            onAction={() => { setEditItem(null); setFormOpen(true); }}
+          />
         </Card>
       ) : (
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
@@ -412,7 +407,7 @@ export function Categorias() {
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Eliminar">
-                    <IconButton size="small" color="error" onClick={() => handleDelete(c)}>
+                    <IconButton size="small" color="error" onClick={() => setConfirmDelete(c)}>
                       <Delete fontSize="small" />
                     </IconButton>
                   </Tooltip>
@@ -423,6 +418,22 @@ export function Categorias() {
           })}
         </Box>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Eliminar categoría"
+        message={
+          confirmDelete
+            ? (confirmDelete._count?.productos ?? 0) > 0
+              ? `La categoría "${confirmDelete.nombre}" tiene ${confirmDelete._count!.productos} producto(s). ¿Eliminar de todas formas?`
+              : `¿Eliminar la categoría "${confirmDelete.nombre}"?`
+            : ''
+        }
+        confirmText="Eliminar"
+        confirmColor="error"
+        onConfirm={async () => { if (confirmDelete) await handleDelete(confirmDelete); }}
+        onClose={() => setConfirmDelete(null)}
+      />
 
       {/* Nota de ayuda */}
       {items.length > 1 && (

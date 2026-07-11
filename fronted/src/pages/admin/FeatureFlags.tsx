@@ -21,6 +21,7 @@ import {
   type CreateFeatureFlagDto,
 } from '../../services/feature-flags.service';
 import { useFeatureFlagStore } from '../../store/featureFlagStore';
+import { LoadingScreen, EmptyState, ConfirmDialog } from '../../components/common';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -180,6 +181,7 @@ export function FeatureFlags() {
   const [editFlag,   setEditFlag]   = useState<FeatureFlag | null>(null);
   const [toast,      setToast]      = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [toggling,   setToggling]   = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<FeatureFlag | null>(null);
 
   const { loadFlags } = useFeatureFlagStore();
 
@@ -215,7 +217,6 @@ export function FeatureFlags() {
   };
 
   const handleDelete = async (flag: FeatureFlag) => {
-    if (!window.confirm(`¿Eliminar el flag "${flag.nombre}"? Esta acción no se puede deshacer.`)) return;
     try {
       await featureFlagsService.eliminar(flag.id);
       await fetchFlags();
@@ -282,19 +283,16 @@ export function FeatureFlags() {
 
       {/* Tabla */}
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
-        </Box>
+        <LoadingScreen variant="inline" message="Cargando feature flags..." />
       ) : flags.length === 0 ? (
-        <Paper sx={{ p: 6, textAlign: 'center' }}>
-          <Flag sx={{ fontSize: 48, color: 'text.disabled', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary">No hay feature flags creados</Typography>
-          <Typography variant="body2" color="text.disabled" sx={{ mb: 3 }}>
-            Crea el primero para empezar a controlar funcionalidades
-          </Typography>
-          <Button variant="contained" startIcon={<Add />} onClick={openCreate}>
-            Crear primer flag
-          </Button>
+        <Paper sx={{ borderRadius: 2 }}>
+          <EmptyState
+            message="No hay feature flags creados"
+            description="Crea el primero para empezar a controlar funcionalidades"
+            icon={<Flag sx={{ fontSize: 48, color: 'text.disabled' }} />}
+            actionLabel="Crear primer flag"
+            onAction={openCreate}
+          />
         </Paper>
       ) : (
         <TableContainer component={Paper} sx={{ borderRadius: 2 }}>
@@ -384,7 +382,7 @@ export function FeatureFlags() {
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Eliminar">
-                        <IconButton size="small" color="error" onClick={() => handleDelete(flag)}>
+                        <IconButton size="small" color="error" onClick={() => setConfirmDelete(flag)}>
                           <Delete fontSize="small" />
                         </IconButton>
                       </Tooltip>
@@ -440,6 +438,16 @@ function MiComponente() {
           {toast?.msg}
         </Alert>
       </Snackbar>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Eliminar feature flag"
+        message={`¿Eliminar el flag "${confirmDelete?.nombre}"? Esta acción no se puede deshacer.`}
+        confirmText="Eliminar"
+        confirmColor="error"
+        onConfirm={async () => { if (confirmDelete) await handleDelete(confirmDelete); }}
+        onClose={() => setConfirmDelete(null)}
+      />
     </Box>
   );
 }

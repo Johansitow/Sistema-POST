@@ -11,6 +11,7 @@ import {
   type GrupoNegocio, type GrupoMiembro, type CreateGrupoDto,
 } from '../../services/grupo-negocio.service';
 import { usuariosService } from '../../services/usuarios.service';
+import { LoadingScreen, EmptyState } from '../../components/common';
 
 const PLAN_LABELS: Record<string, string> = {
   starter:    'Starter',
@@ -314,18 +315,14 @@ export default function GruposNegocio() {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
 
       {/* Loading */}
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}>
-          <CircularProgress />
-        </Box>
-      )}
+      {loading && <LoadingScreen variant="inline" message="Cargando grupos de negocio..." />}
 
       {/* Lista */}
       {!loading && grupos.length === 0 && (
-        <Box sx={{ textAlign: 'center', py: 8, color: 'text.secondary' }}>
-          <AccountTree sx={{ fontSize: 48, mb: 1, opacity: 0.3 }} />
-          <Typography>No hay grupos de negocio registrados.</Typography>
-        </Box>
+        <EmptyState
+          message="No hay grupos de negocio registrados"
+          icon={<AccountTree sx={{ fontSize: 48, color: 'text.disabled' }} />}
+        />
       )}
 
       {!loading && grupos.map(g => (

@@ -17,6 +17,7 @@ import {
   type UsuarioAsignado, type UsuarioItem,
 } from '../../services/restaurantes.service';
 import { grupoNegocioService, type GrupoNegocio } from '../../services/grupo-negocio.service';
+import { LoadingScreen, EmptyState } from '../../components/common';
 
 const FieldRow = ({ children }: { children: React.ReactNode }) => (
   <Box sx={{ display: 'flex', gap: 2 }}>{children}</Box>
@@ -697,19 +698,20 @@ export function Restaurantes() {
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       {loading ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', pt: 6 }}><CircularProgress /></Box>
+        <LoadingScreen variant="inline" message="Cargando restaurantes..." />
       ) : items.length === 0 ? (
-        <Card sx={{ p: 6, textAlign: 'center', borderRadius: 3, border: '2px dashed', borderColor: 'divider' }}>
-          <Avatar sx={{ width: 72, height: 72, bgcolor: 'grey.100', mx: 'auto', mb: 2 }}>
-            <Business sx={{ fontSize: 40, color: 'text.disabled' }} />
-          </Avatar>
-          <Typography fontWeight={600} gutterBottom>No hay restaurantes registrados</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Crea tu primer restaurante para empezar a gestionar tu negocio.
-          </Typography>
-          <Button variant="contained" startIcon={<Add />} onClick={() => setWizardOpen(true)} sx={{ borderRadius: 2 }}>
-            Crear primer restaurante
-          </Button>
+        <Card sx={{ borderRadius: 3, border: '2px dashed', borderColor: 'divider' }}>
+          <EmptyState
+            message="No hay restaurantes registrados"
+            description="Crea tu primer restaurante para empezar a gestionar tu negocio."
+            icon={
+              <Avatar sx={{ width: 72, height: 72, bgcolor: 'grey.100' }}>
+                <Business sx={{ fontSize: 40, color: 'text.disabled' }} />
+              </Avatar>
+            }
+            actionLabel="Crear primer restaurante"
+            onAction={() => setWizardOpen(true)}
+          />
         </Card>
       ) : (
         <Grid container spacing={2.5}>

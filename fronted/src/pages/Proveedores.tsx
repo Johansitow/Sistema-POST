@@ -9,7 +9,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Plus, Search, Edit2, X, Check, RefreshCw, AlertCircle,
+  Plus, Search, Edit2, X, Check, RefreshCw,
   Building2, Phone, Mail, MapPin, Star, Clock, Package,
   ToggleLeft, ToggleRight, Eye, Globe, MessageCircle, ShoppingCart,
   Home, Calendar, History,
@@ -18,8 +18,10 @@ import { proveedorService, Proveedor, ProveedorCreateDTO, ProveedorProducto } fr
 import { productosService } from '../services/productos.service';
 import { listaComprasService, ListaCompras } from '../services/lista-compras.service';
 import { formatCurrency } from '../utils';
-import { EmptyState, LoadingScreen, EstadoListaBadge } from '../components/common';
+import { EmptyState, LoadingScreen, EstadoListaBadge, ConfirmDialog, ErrorAlert } from '../components/common';
 import { Z_INDEX } from '../lib/zIndex';
+import { toast } from '../store/uiStore';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 // ============================================================================
 // HELPERS
@@ -48,6 +50,7 @@ const ProveedorModal: React.FC<{
   });
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState<string | null>(null);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     if (proveedor) {
@@ -76,16 +79,23 @@ const ProveedorModal: React.FC<{
         calificacion: form.calificacion ? Number(form.calificacion) : undefined,
         tiempo_entrega_promedio: form.tiempo_entrega_promedio ? Number(form.tiempo_entrega_promedio) : undefined,
       };
-      if (isEdit && proveedor) await proveedorService.update(proveedor.id, data);
-      else await proveedorService.create(data);
+      if (isEdit && proveedor) {
+        await proveedorService.update(proveedor.id, data);
+        toast.success('Proveedor actualizado');
+      } else {
+        await proveedorService.create(data);
+        toast.success('Proveedor creado');
+      }
       onSave();
     } catch (e: any) {
-      setError(e.message || 'Error al guardar');
+      const msg = e.message || 'Error al guardar';
+      setError(msg);
+      toast.error(msg);
     } finally { setSaving(false); }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
         <div className={`px-6 py-4 flex items-center justify-between ${isEdit ? 'bg-gradient-to-r from-violet-600 to-purple-600' : 'bg-gradient-to-r from-blue-600 to-indigo-600'}`}>
@@ -97,7 +107,7 @@ const ProveedorModal: React.FC<{
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[75vh]">
-          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0" />{error}</div>}
+          {error && <ErrorAlert message={error} />}
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1.5">Razón Social <span className="text-red-500">*</span></label>
@@ -200,6 +210,7 @@ const AsociarProductoModal: React.FC<{
   const [preferido, setPreferido]         = useState(false);
   const [saving, setSaving]               = useState(false);
   const [error, setError]                 = useState<string | null>(null);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     productosService.getAll({ limit: 200, estado: 'activo' })
@@ -218,9 +229,12 @@ const AsociarProductoModal: React.FC<{
         calidad_calificacion: calidad ? parseFloat(calidad) : undefined,
         es_proveedor_preferido: preferido,
       });
+      toast.success('Producto asociado al proveedor');
       onSave();
     } catch (e: any) {
-      setError(e.message || 'Error al asociar producto');
+      const msg = e.message || 'Error al asociar producto';
+      setError(msg);
+      toast.error(msg);
     } finally { setSaving(false); }
   };
 
@@ -233,7 +247,7 @@ const AsociarProductoModal: React.FC<{
           <button onClick={onClose} className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-5 space-y-3">
-          {error && <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-xl flex items-center gap-2 text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0" />{error}</div>}
+          {error && <ErrorAlert message={error} />}
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Producto *</label>
             <select value={idProducto} onChange={e => setIdProducto(e.target.value)}
@@ -319,11 +333,13 @@ const DetalleProveedorPanel: React.FC<{
   const tieneCalificacion = proveedor.calificacion != null;
   const calScore = Number(proveedor.calificacion ?? 0);
   const esPreferido = productos.some(p => p.es_proveedor_preferido);
+  // ESC cierra el modal de asociar producto si está abierto; si no, cierra el panel de detalle
+  useEscapeKey(onClose, !showAsociar);
 
   return (
     <>
       <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
         <div className="relative bg-white w-full max-w-md max-h-[90vh] rounded-2xl flex flex-col shadow-2xl overflow-hidden">
           <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5 flex-shrink-0">
             <div className="flex items-start justify-between">
@@ -561,6 +577,7 @@ export const Proveedores: React.FC = () => {
   const [detalleTarget, setDetalleTarget]   = useState<Proveedor | null>(null);
   const [meta, setMeta]                     = useState<any>(null);
   const [page, setPage]                     = useState(1);
+  const [confirmToggle, setConfirmToggle]   = useState<Proveedor | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -576,9 +593,13 @@ export const Proveedores: React.FC = () => {
 
   const handleToggleEstado = async (p: Proveedor) => {
     try {
-      await proveedorService.cambiarEstado(p.id, p.estado === 'activo' ? 'inactivo' : 'activo');
+      const nuevoEstado = p.estado === 'activo' ? 'inactivo' : 'activo';
+      await proveedorService.cambiarEstado(p.id, nuevoEstado);
+      toast.success(nuevoEstado === 'activo' ? 'Proveedor activado' : 'Proveedor desactivado');
       loadData();
-    } catch (e) { console.error(e); }
+    } catch (e: any) {
+      toast.error(e.message || 'Error al cambiar el estado del proveedor');
+    }
   };
 
   if (loading && proveedores.length === 0) return <LoadingScreen message="Cargando proveedores..." />;
@@ -696,7 +717,7 @@ export const Proveedores: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-5 py-4">
-                      <button onClick={() => handleToggleEstado(p)} className="flex items-center gap-1.5 text-xs font-semibold transition-colors">
+                      <button onClick={() => p.estado === 'activo' ? setConfirmToggle(p) : handleToggleEstado(p)} className="flex items-center gap-1.5 text-xs font-semibold transition-colors" title={p.estado === 'activo' ? 'Desactivar proveedor' : 'Activar proveedor'}>
                         {p.estado === 'activo'
                           ? <><ToggleRight className="w-5 h-5 text-emerald-500" /><span className="text-emerald-600">Activo</span></>
                           : <><ToggleLeft  className="w-5 h-5 text-slate-400"   /><span className="text-slate-500">Inactivo</span></>}
@@ -745,6 +766,16 @@ export const Proveedores: React.FC = () => {
           onRefresh={loadData}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmToggle !== null}
+        title="Desactivar proveedor"
+        message={confirmToggle ? `¿Desactivar a "${confirmToggle.razon_social}"? No aparecerá disponible para nuevas compras hasta reactivarlo.` : ''}
+        confirmText="Desactivar"
+        confirmColor="warning"
+        onConfirm={() => { if (confirmToggle) handleToggleEstado(confirmToggle); }}
+        onClose={() => setConfirmToggle(null)}
+      />
     </div>
   );
 };

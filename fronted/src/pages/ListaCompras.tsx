@@ -17,7 +17,10 @@ import {
 import { listaComprasService, type ListaCompras as ListaComprasData, EstadoListaCompras } from '../services/lista-compras.service';
 import { useRestauranteActivo } from '../store/restauranteStore';
 import { formatCurrency } from '../utils';
-import { EmptyState, LoadingScreen, EstadoListaBadge as EstadoBadge, ESTADO_LISTA_CFG as ESTADO_CFG } from '../components/common';
+import { EmptyState, LoadingScreen, EstadoListaBadge as EstadoBadge, ESTADO_LISTA_CFG as ESTADO_CFG, ConfirmDialog, ErrorAlert } from '../components/common';
+import { toast } from '../store/uiStore';
+import { Z_INDEX } from '../lib/zIndex';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const fmt = (d?: string) => d ? new Date(d).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
@@ -34,6 +37,8 @@ const DetalleModal: React.FC<{
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [cantidades, setCantidades] = useState<Record<number, string>>({});
+  const [confirmCancelar, setConfirmCancelar] = useState(false);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     // Cargar detalle completo con items
@@ -49,8 +54,17 @@ const DetalleModal: React.FC<{
     try {
       const updated = await listaComprasService.cambiarEstado(lista.id, estado);
       setLista(updated);
+      toast.success(
+        estado === 'enviada' ? 'Lista marcada como enviada'
+        : estado === 'cancelada' ? 'Lista cancelada'
+        : 'Estado actualizado'
+      );
       onRefresh();
-    } catch (e: any) { setError(e.message || 'Error al cambiar estado'); }
+    } catch (e: any) {
+      const msg = e.message || 'Error al cambiar estado';
+      setError(msg);
+      toast.error(msg);
+    }
     finally { setSaving(false); }
   };
 
@@ -68,14 +82,18 @@ const DetalleModal: React.FC<{
         return rec && parseFloat(rec) >= item.cantidad_sugerida;
       });
       await cambiarEstado(todosCompletos ? 'recibida' : 'parcial');
-    } catch (e: any) { setError(e.message || 'Error al registrar recepción'); }
+    } catch (e: any) {
+      const msg = e.message || 'Error al registrar recepción';
+      setError(msg);
+      toast.error(msg);
+    }
     finally { setSaving(false); }
   };
 
   const esEditable = lista.estado === 'generada' || lista.estado === 'enviada';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -100,11 +118,7 @@ const DetalleModal: React.FC<{
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
-          )}
+          {error && <ErrorAlert message={error} />}
 
           {/* Meta info */}
           <div className="grid grid-cols-3 gap-3">
@@ -219,7 +233,7 @@ const DetalleModal: React.FC<{
               </button>
             )}
             {esEditable && (
-              <button onClick={() => cambiarEstado('cancelada')} disabled={saving}
+              <button onClick={() => setConfirmCancelar(true)} disabled={saving}
                 className="flex items-center gap-1.5 px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-sm font-semibold transition-colors disabled:opacity-50">
                 <Ban className="w-4 h-4" /> Cancelar lista
               </button>
@@ -227,6 +241,17 @@ const DetalleModal: React.FC<{
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancelar}
+        title="Cancelar lista de compras"
+        message={`¿Cancelar la lista ${lista.numero_lista}? No podrás enviarla ni recibirla después.`}
+        confirmText="Sí, cancelar"
+        cancelText="No, volver"
+        confirmColor="error"
+        onConfirm={() => cambiarEstado('cancelada')}
+        onClose={() => setConfirmCancelar(false)}
+      />
     </div>
   );
 };
@@ -442,8 +467,11 @@ export const ListaCompras: React.FC = () => {
                         {lista.estado === 'generada' && (
                           <button
                             onClick={async () => {
-                              try { await listaComprasService.cambiarEstado(lista.id, 'enviada'); loadData(); }
-                              catch (e) { console.error(e); }
+                              try {
+                                await listaComprasService.cambiarEstado(lista.id, 'enviada');
+                                toast.success('Lista marcada como enviada');
+                                loadData();
+                              } catch (e: any) { toast.error(e.message || 'Error al cambiar estado'); }
                             }}
                             className="flex items-center gap-1 p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
                             title="Marcar enviada">
