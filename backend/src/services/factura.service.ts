@@ -78,4 +78,28 @@ export const facturaService = {
       },
     });
   },
+
+  /**
+   * garantizarPagada — asegura que la orden quede registrada en Facturas al entregarse.
+   *
+   * Si la factura ya existe, solo la marca pagada. Si nunca se generó (p. ej. la orden
+   * saltó el paso EN_PREPARACION por una reconfiguración de transiciones, o fue creada
+   * directo en un estado posterior), la crea antes de marcarla pagada. Debe llamarse
+   * siempre dentro de la misma transacción (`tx`) que marca la orden como ENTREGADA.
+   */
+  async garantizarPagada(id_orden: number, tx: any): Promise<void> {
+    const factura = await tx.factura.findUnique({ where: { id_orden } });
+    if (factura) {
+      await tx.factura.update({
+        where: { id: factura.id },
+        data: { estado_factura: 'pagada', fecha_pago: new Date() },
+      });
+    } else {
+      await this.generarDesdeOrden(id_orden, tx);
+      await tx.factura.updateMany({
+        where: { id_orden },
+        data: { estado_factura: 'pagada', fecha_pago: new Date() },
+      });
+    }
+  },
 };

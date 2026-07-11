@@ -486,6 +486,7 @@ export const recetaService = {
         await tx.movimiento.create({
           data: {
             id_producto:     ing.id_producto,
+            id_restaurante:  orden.id_restaurante,
             tipo_movimiento: 'salida',
             cantidad:        toDecimal(cantidadDescontar),
             stock_anterior:  toDecimal(Number(producto.stock_actual)),

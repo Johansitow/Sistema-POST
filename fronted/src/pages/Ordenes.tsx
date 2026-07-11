@@ -16,12 +16,13 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom';
 import {
   Plus, Search, MapPin, Store, Clock, X, RefreshCw, Eye,
-  Check, AlertCircle, ShoppingCart, DollarSign, Package,
+  Check, ShoppingCart, DollarSign, Package,
   ArrowRight, CreditCard, Banknote, Smartphone, ChevronRight,
   Trash2, PlusCircle, User, UserPlus, Printer,
 } from 'lucide-react';
 import { printComanda, printFactura, PrintOrden, type PrintTemplateConfig } from '../utils/print';
 import ModalHeader from '../components/common/ModalHeader';
+import { Z_INDEX } from '../lib/zIndex';
 import { plantillasService } from '../services/plantillas.service';
 import { ordenesService, Orden, OrdenCreateDTO, OrdenCreateV2DTO, OrdenSede, EstadoOrdenGlobal, PagoInput } from '../services/ordenes.service';
 import { productosService, Producto } from '../services/productos.service';
@@ -31,9 +32,11 @@ import {
 } from '../services/servicios-gestion';
 import { formatCurrency, formatDateTime, TIPOS_ORDEN as _TIPOS_ORDEN } from '../utils';
 import { configuracionService } from '../services/servicios-operacion';
-import { useUIStore }           from '../store/uiStore';
+import { useUIStore, toast }    from '../store/uiStore';
+import { ConfirmDialog }        from '../components/common/ConfirmDialog';
+import { useEscapeKey }         from '../hooks/useEscapeKey';
 import { useAuthStore }         from '../store/useStore';
-import { EmptyState, LoadingScreen } from '../components/common';
+import { EmptyState, LoadingScreen, ErrorAlert } from '../components/common';
 import { clienteService } from '../services/cliente.service';
 import { categoriasService, type Categoria } from '../services/categorias.service';
 import { useRestauranteActivo, useRestauranteStore } from '../store/restauranteStore';
@@ -60,7 +63,6 @@ const getEstadoConfig = (codigo?: string) => {
 /** Config visual para estado_global (nueva arquitectura) */
 const getEstadoGlobalConfig = (eg?: EstadoOrdenGlobal) => {
   const map: Record<string, { cls: string; label: string }> = {
-    BORRADOR:   { cls: 'bg-slate-100 text-slate-500',        label: 'Borrador'       },
     RECIBIDA:   { cls: 'bg-amber-100 text-amber-700',        label: 'Recibida'       },
     EN_PROCESO: { cls: 'bg-blue-100 text-blue-700',          label: 'En proceso'     },
     LISTA:      { cls: 'bg-emerald-100 text-emerald-700',    label: 'Lista p/ cobro' },
@@ -115,6 +117,7 @@ const ModalPago: React.FC<{
   onConfirm: (pagos: { id_metodo_pago: number; monto: number; referencia?: string }[]) => Promise<void>;
   onClose: () => void;
 }> = ({ orden, metodos, onConfirm, onClose }) => {
+  useEscapeKey(onClose);
   const [lineas, setLineas] = useState<PagoLine[]>([
     { id_metodo_pago: metodos[0]?.id || 0, monto: orden.total.toString(), referencia: '' },
   ]);
@@ -161,8 +164,8 @@ const ModalPago: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_NESTED }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
 
         {/* Header */}
@@ -181,9 +184,7 @@ const ModalPago: React.FC<{
 
         <div className="p-5 space-y-4 overflow-y-auto max-h-[60vh]">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           {/* Resumen */}
@@ -294,13 +295,20 @@ const DetalleModal: React.FC<{
   const [changingEstado, setChangingEstado] = useState(false);
   const [showPago, setShowPago]             = useState(false);
   const [estadoPendiente, setEstadoPendiente] = useState<EstadoOrdenFull | null>(null);
+  const [confirmCancelar, setConfirmCancelar] = useState<EstadoOrdenFull | null>(null);
+  // ESC cierra el modal de pago si está abierto; si no, cierra el detalle de la orden
+  useEscapeKey(onClose, !showPago);
 
   const estadoActual = estados.find(e => e.id === orden.id_estado);
   const esNuevaArq   = orden.sedes && orden.sedes.length > 0;
   const egCfg        = getEstadoGlobalConfig(orden.estado_global);
 
   // Nueva arquitectura: solo mostrar ENTREGADA (cobro) cuando estado_global === LISTA
-  // y CANCELADA cuando no está entregada aún. Legado: mostrar ambas siempre.
+  // y CANCELADA cuando no está entregada aún.
+  // Legado: usar las transiciones reales del estado actual (estadoActual.transiciones_desde),
+  // en vez de ofrecer ENTREGADA/CANCELADA sin importar el estado — el backend valida la
+  // transición contra la tabla estadoTransicion y rechaza cualquier salto no permitido
+  // (ej. En Preparación → Entregada, que debe pasar primero por Lista).
   const transicionesDisponibles = esNuevaArq
     ? [
         ...(orden.estado_global === 'LISTA'
@@ -310,9 +318,7 @@ const DetalleModal: React.FC<{
           ? estados.filter(e => e.codigo === 'CANCELADA')
           : []),
       ]
-    : estados.filter(e =>
-        (e.codigo === 'CANCELADA' || e.codigo === 'ENTREGADA') && e.id !== orden.id_estado
-      );
+    : (estadoActual?.transiciones_desde ?? []).map(t => t.estado_hacia);
 
   const handleCambiarEstado = async (estado: EstadoOrdenFull) => {
     // Si el estado destino es ENTREGADA, abrimos el modal de pago
@@ -321,17 +327,36 @@ const DetalleModal: React.FC<{
       setShowPago(true);
       return;
     }
+    // Cancelar una orden es irreversible — pedir confirmación antes de ejecutar
+    if (estado.codigo === 'CANCELADA') {
+      setConfirmCancelar(estado);
+      return;
+    }
     setChangingEstado(true);
     try {
-      if (estado.codigo === 'CANCELADA' && orden.sedes && orden.sedes.length > 0) {
+      await ordenesService.updateEstado(orden.id, estado.id);
+      toast.success(`Orden marcada como "${estado.nombre}"`);
+      onEstadoChange();
+    } catch (e: any) {
+      toast.error(e.message || 'Error al cambiar el estado de la orden');
+    } finally {
+      setChangingEstado(false);
+    }
+  };
+
+  const handleConfirmarCancelacion = async () => {
+    setChangingEstado(true);
+    try {
+      if (orden.sedes && orden.sedes.length > 0) {
         // Nueva arquitectura: cancelar la orden completa
         await ordenesService.cancelar(orden.id);
-      } else {
-        await ordenesService.updateEstado(orden.id, estado.id);
+      } else if (confirmCancelar) {
+        await ordenesService.updateEstado(orden.id, confirmCancelar.id);
       }
+      toast.success('Orden cancelada');
       onEstadoChange();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      toast.error(e.message || 'Error al cancelar la orden');
     } finally {
       setChangingEstado(false);
     }
@@ -347,6 +372,7 @@ const DetalleModal: React.FC<{
       await ordenesService.updateEstado(orden.id, estadoPendiente.id, pagos as PagoInput[]);
     }
     setShowPago(false);
+    toast.success('Pago registrado — orden entregada');
     onEstadoChange();
   };
 
@@ -402,7 +428,7 @@ const DetalleModal: React.FC<{
 
   return (
     <>
-      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -601,6 +627,17 @@ const DetalleModal: React.FC<{
           onClose={() => { setShowPago(false); setEstadoPendiente(null); }}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmCancelar !== null}
+        title="Cancelar orden"
+        message={`¿Cancelar la orden ${orden.numero_orden}? Esta acción no se puede deshacer.`}
+        confirmText="Sí, cancelar orden"
+        cancelText="No, volver"
+        confirmColor="error"
+        onConfirm={handleConfirmarCancelacion}
+        onClose={() => setConfirmCancelar(null)}
+      />
     </>
   );
 };
@@ -714,6 +751,9 @@ const CrearOrdenModal: React.FC<{
     variantes: ProductoVariante[];
   } | null>(null);
   const [loadingVariantes, setLoadingVariantes] = useState(false);
+  // ESC cierra el picker de variantes si está abierto; si no, cierra el modal de creación
+  useEscapeKey(() => setVariantePicker(null), variantePicker !== null);
+  useEscapeKey(onClose, variantePicker === null);
 
   // --- Estado del formulario ---
   const [saving, setSaving]                 = useState(false);
@@ -1001,9 +1041,12 @@ const CrearOrdenModal: React.FC<{
         };
         await ordenesService.create(data);
       }
+      toast.success('Orden creada correctamente');
       onSave();
     } catch (err: any) {
-      setError(err.message || 'Error al crear orden');
+      const msg = err.message || 'Error al crear orden';
+      setError(msg);
+      toast.error(msg);
     } finally { setSaving(false); }
   };
 
@@ -1015,9 +1058,9 @@ const CrearOrdenModal: React.FC<{
 
   return (
     <>
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col">
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="bg-gradient-to-r from-emerald-600 to-teal-600 flex-shrink-0">
@@ -1085,9 +1128,7 @@ const CrearOrdenModal: React.FC<{
 
         {/* ── Error ──────────────────────────────────────────────── */}
         {error && (
-          <div className="mx-6 mt-3 bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm flex-shrink-0">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-          </div>
+          <ErrorAlert message={error} className="mx-6 mt-3 flex-shrink-0" />
         )}
 
         {/* ── Body: catálogo | carrito ────────────────────────────── */}
@@ -1475,8 +1516,8 @@ const CrearOrdenModal: React.FC<{
 
     {/* ── Picker de variantes ────────────────────────────────────────── */}
     {variantePicker && (
-      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1500 }}>
-        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+      <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_NESTED }}>
+        <div className="absolute inset-0 bg-black/60 backdrop-blur-sm"
           onClick={() => setVariantePicker(null)} />
         <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
           {/* Header */}
@@ -1587,8 +1628,19 @@ export const Ordenes: React.FC = () => {
     o.nombre_contacto?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const estadoCodigo = (o: Orden): string =>
-    o.estado_global ?? o.estado?.codigo?.toUpperCase() ?? '';
+  // Traduce el código legado (estado.codigo, el que sí cambia en órdenes sin sedes) a la
+  // misma clave de columna que usa estado_global, para que el tablero no dependa de que
+  // estado_global se actualice en el flujo legado (nunca lo hace).
+  const LEGACY_TO_GLOBAL: Record<string, string> = {
+    PENDIENTE: 'RECIBIDA', EN_PREPARACION: 'EN_PROCESO', LISTA: 'LISTA',
+    ENTREGADA: 'ENTREGADA', CANCELADA: 'CANCELADA',
+  };
+
+  const estadoCodigo = (o: Orden): string => {
+    if (o.sedes && o.sedes.length > 0) return o.estado_global ?? 'OTRO';
+    const codigoLegado = o.estado?.codigo?.toUpperCase() ?? '';
+    return LEGACY_TO_GLOBAL[codigoLegado] ?? codigoLegado ?? 'OTRO';
+  };
 
   const statsOrdenes = {
     pendientes:  ordenes.filter(o => estadoCodigo(o) === 'PENDIENTE' || estadoCodigo(o) === 'RECIBIDA').length,
@@ -1598,20 +1650,18 @@ export const Ordenes: React.FC = () => {
   };
 
   // Orden de secciones: activas primero, finales al fondo (legado + nueva arch)
-  const ESTADO_PRIORIDAD = ['EN_PROCESO', 'EN_PREPARACION', 'LISTA', 'RECIBIDA', 'PENDIENTE', 'BORRADOR', 'ENTREGADA', 'CANCELADA'];
+  const ESTADO_PRIORIDAD = ['EN_PROCESO', 'EN_PREPARACION', 'LISTA', 'RECIBIDA', 'PENDIENTE', 'ENTREGADA', 'CANCELADA'];
 
   const ESTADO_GLOBAL_LABELS: Partial<Record<string, string>> = {
-    BORRADOR: 'Borrador', RECIBIDA: 'Recibida', EN_PROCESO: 'En proceso',
+    RECIBIDA: 'Recibida', EN_PROCESO: 'En proceso',
     LISTA: 'Lista', ENTREGADA: 'Entregada', CANCELADA: 'Cancelada',
   };
 
   const ordenesPorEstado = useMemo(() => {
     const grupos: Record<string, { nombre: string; ordenes: Orden[] }> = {};
     filtered.forEach(o => {
-      const codigo = o.estado_global ?? o.estado?.codigo?.toUpperCase() ?? 'OTRO';
-      const nombre = o.estado_global
-        ? (ESTADO_GLOBAL_LABELS[o.estado_global] ?? o.estado_global)
-        : (o.estado?.nombre ?? codigo);
+      const codigo = estadoCodigo(o);
+      const nombre = ESTADO_GLOBAL_LABELS[codigo] ?? o.estado?.nombre ?? codigo;
       if (!grupos[codigo]) grupos[codigo] = { nombre, ordenes: [] };
       grupos[codigo].ordenes.push(o);
     });
@@ -1716,7 +1766,8 @@ export const Ordenes: React.FC = () => {
                   {/* ── Cards ── */}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {ords.map(orden => {
-                      const c = getEstadoConfig(orden.estado_global ?? orden.estado?.codigo);
+                      const codigoOrden = estadoCodigo(orden);
+                      const c = getEstadoConfig(codigoOrden);
                       return (
                         <div key={orden.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-all overflow-hidden">
                           <div className={`h-1 w-full ${c.dot}`} />
@@ -1729,9 +1780,9 @@ export const Ordenes: React.FC = () => {
                                 </div>
                                 <p className="text-xs text-slate-400 mt-0.5">{formatDateTime(orden.fecha_apertura)}</p>
                               </div>
-                              {orden.estado_global && (
-                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getEstadoGlobalConfig(orden.estado_global).cls}`}>
-                                  {getEstadoGlobalConfig(orden.estado_global).label}
+                              {codigoOrden && (
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getEstadoGlobalConfig(codigoOrden as EstadoOrdenGlobal).cls}`}>
+                                  {getEstadoGlobalConfig(codigoOrden as EstadoOrdenGlobal).label}
                                 </span>
                               )}
                             </div>

@@ -6,6 +6,15 @@ import { EstadoFactura } from '@prisma/client';
 import prisma from '../config/database';
 import { PaginationParams, getSkip } from '../lib/pagination';
 
+// Misma forma que includeSedes.sedes.items en orden.repository.ts — reutilizada para que
+// el detalle de factura muestre los productos también en órdenes de arquitectura nueva.
+const includeItemsSede = {
+  include: {
+    producto: { select: { id: true, nombre: true, sku: true } },
+    variante: { select: { id: true, nombre: true } },
+  },
+};
+
 export const facturaRepository = {
 
   findAll: (
@@ -51,6 +60,7 @@ export const facturaRepository = {
             usuario:  { select: { id: true, nombre_completo: true } },
             detalles: { include: { producto: true } },
             pagos:    { include: { metodo_pago: true } },
+            sedes:    { include: { items: includeItemsSede } },
           },
         },
       },
@@ -64,6 +74,7 @@ export const facturaRepository = {
           include: {
             detalles: { include: { producto: true } },
             pagos:    { include: { metodo_pago: true } },
+            sedes:    { include: { items: includeItemsSede } },
           },
         },
       },

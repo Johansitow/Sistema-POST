@@ -10,6 +10,8 @@ import api from '../services/api';
 import { formatCurrency, formatDateTime } from '../utils';
 import { EmptyState, LoadingScreen } from '../components/common';
 import { printFactura } from '../utils/print';
+import { Z_INDEX } from '../lib/zIndex';
+import { useEscapeKey } from '../hooks/useEscapeKey';
 
 const ESTADO_CFG: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
   pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700 border border-amber-200',      icon: <Clock       className="w-3.5 h-3.5" /> },
@@ -17,10 +19,30 @@ const ESTADO_CFG: Record<string, { label: string; cls: string; icon: React.React
   anulada:   { label: 'Anulada',   cls: 'bg-red-100 text-red-700 border border-red-200',             icon: <XCircle     className="w-3.5 h-3.5" /> },
 };
 
+// Resuelve las líneas de producto de una orden, sin importar si es legado (orden.detalles)
+// o de arquitectura nueva (orden.sedes[].items) — misma forma en ambos casos.
+const resolverItemsFactura = (ordenFull: any): Array<{ nombre: string; cantidad: number; precio_unitario: number; notas?: string }> => {
+  if (ordenFull?.sedes?.length) {
+    return ordenFull.sedes.flatMap((s: any) => s.items ?? []).map((i: any) => ({
+      nombre:          i.producto?.nombre ?? 'Producto',
+      cantidad:        i.cantidad,
+      precio_unitario: i.precio_unitario,
+      notas:           i.notas,
+    }));
+  }
+  return (ordenFull?.detalles ?? []).map((d: any) => ({
+    nombre:          d.producto?.nombre ?? 'Producto',
+    cantidad:        d.cantidad,
+    precio_unitario: d.precio_unitario,
+    notas:           d.notas,
+  }));
+};
+
 // Modal detalle factura
 const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ factura, onClose }) => {
   const cfg = ESTADO_CFG[factura.estado_factura] || ESTADO_CFG.pendiente;
   const [ordenFull, setOrdenFull] = useState<any | null>(null);
+  useEscapeKey(onClose);
 
   useEffect(() => {
     api.get(`/ordenes/${factura.id_orden}`)
@@ -28,13 +50,10 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
       .catch(() => {});
   }, [factura.id_orden]);
 
+  const items = resolverItemsFactura(ordenFull);
+
   const handlePrint = () => {
-    const detalles = (ordenFull?.detalles ?? []).map((d: any) => ({
-      nombre:          d.producto?.nombre ?? 'Producto',
-      cantidad:        d.cantidad,
-      precio_unitario: d.precio_unitario,
-      notas:           d.notas,
-    }));
+    const detalles = items;
     const pagos = (ordenFull?.pagos ?? []).map((p: any) => ({
       metodo: p.metodo_pago?.nombre ?? 'Pago',
       monto:  p.monto,
@@ -62,7 +81,7 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
         <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 flex items-center justify-between">
@@ -91,6 +110,17 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
           </div>
           {factura.fecha_pago && (
             <div className="bg-emerald-50 rounded-xl p-3"><p className="text-xs text-emerald-600 mb-1">Fecha de Pago</p><p className="font-semibold text-emerald-700 text-sm">{formatDateTime(factura.fecha_pago)}</p></div>
+          )}
+          {items.length > 0 && (
+            <div className="bg-slate-50 rounded-xl p-3 space-y-1.5">
+              <p className="text-xs text-slate-500 mb-1">Productos</p>
+              {items.map((it, idx) => (
+                <div key={idx} className="flex justify-between text-sm text-slate-700">
+                  <span>{it.cantidad}× {it.nombre}</span>
+                  <span>{formatCurrency(it.cantidad * it.precio_unitario)}</span>
+                </div>
+              ))}
+            </div>
           )}
           <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm text-slate-600"><span>Subtotal</span><span>{formatCurrency(factura.subtotal)}</span></div>

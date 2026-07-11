@@ -79,6 +79,7 @@ vi.mock('../receta.service', () => ({
 vi.mock('../factura.service', () => ({
   facturaService: {
     generarDesdeOrden: vi.fn(),
+    garantizarPagada:  vi.fn(),
   },
 }));
 
@@ -470,15 +471,32 @@ describe('ordenService.actualizarEstado', () => {
     (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
     (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
     (recetaService.descontarIngredientesOrden as any).mockResolvedValue(undefined);
+    (facturaService.garantizarPagada as any).mockResolvedValue(undefined);
 
     mockTx.pago.create.mockResolvedValue({});
-    mockTx.factura.findUnique.mockResolvedValue({ id: 1 });
-    mockTx.factura.update.mockResolvedValue({});
     mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
 
     await ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [{ id_metodo_pago: 1, monto: 10000 }]);
 
     expect(recetaService.descontarIngredientesOrden).toHaveBeenCalledWith(1, mockTx);
+  });
+
+  it('garantiza la factura (crea si falta) al pasar a ENTREGADA, incluso si se saltó EN_PREPARACION', async () => {
+    (ordenRepository.findByIdScoped as any).mockResolvedValueOnce({ ...mockOrdenBase, total: new Decimal('10000') });
+    (estadoRepository.findTransicion as any).mockResolvedValue({ id: 1 });
+    (estadoRepository.findById as any).mockResolvedValue({ id: 4, codigo: 'ENTREGADA' });
+    (recetaService.verificarStockParaOrden as any).mockResolvedValue({ ok: true });
+    (recetaService.descontarIngredientesOrden as any).mockResolvedValue(undefined);
+    (facturaService.garantizarPagada as any).mockResolvedValue(undefined);
+
+    mockTx.pago.create.mockResolvedValue({});
+    mockTx.orden.update.mockResolvedValue({ ...mockOrdenBase, id_estado: 4 });
+
+    await ordenService.actualizarEstado(1, 4, CTX_SUPERADMIN, [{ id_metodo_pago: 1, monto: 10000 }]);
+
+    // No importa si la orden nunca pasó por EN_PREPARACION (facturaExistente): garantizarPagada
+    // se encarga de crear la factura si falta antes de marcarla pagada.
+    expect(facturaService.garantizarPagada).toHaveBeenCalledWith(1, mockTx);
   });
 });
 

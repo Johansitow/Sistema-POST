@@ -407,19 +407,7 @@ export const ordenService = {
       }
 
       // 2. Generar/cerrar factura global
-      const facturaExistente = await tx.factura.findUnique({ where: { id_orden: id } });
-      if (facturaExistente) {
-        await tx.factura.update({
-          where: { id: facturaExistente.id },
-          data: { estado_factura: 'pagada', fecha_pago: new Date() },
-        });
-      } else {
-        await facturaService.generarDesdeOrden(id, tx);
-        await tx.factura.updateMany({
-          where: { id_orden: id },
-          data: { estado_factura: 'pagada', fecha_pago: new Date() },
-        });
-      }
+      await facturaService.garantizarPagada(id, tx);
 
       // 3. Actualizar estado global → ENTREGADA y registrar fecha
       await tx.orden.update({
@@ -592,8 +580,7 @@ export const ordenService = {
             data: { id_orden: id, id_metodo_pago: p.id_metodo_pago, monto: toDecimal(p.monto), referencia: p.referencia, notas: p.notas },
           });
         }
-        const factura = await tx.factura.findUnique({ where: { id_orden: id } });
-        if (factura) await tx.factura.update({ where: { id: factura.id }, data: { estado_factura: 'pagada', fecha_pago: new Date() } });
+        await facturaService.garantizarPagada(id, tx);
         await tx.orden.update({ where: { id }, data: { fecha_entrega: new Date(), estado_global: EstadoOrdenGlobal.ENTREGADA } });
         await recetaService.descontarIngredientesOrden(id, tx);
         return tx.orden.findUnique({ where: { id }, include: { estado: true, detalles: { include: { producto: true } }, pagos: { include: { metodo_pago: true } } } });
@@ -642,8 +629,7 @@ export const ordenService = {
           data: { id_orden: id, id_metodo_pago: p.id_metodo_pago, monto: toDecimal(p.monto), referencia: p.referencia, notas: p.notas },
         })));
 
-        const factura = await tx.factura.findUnique({ where: { id_orden: id } });
-        if (factura) await tx.factura.update({ where: { id: factura.id }, data: { estado_factura: 'pagada', fecha_pago: new Date() } });
+        await facturaService.garantizarPagada(id, tx);
         await tx.orden.update({ where: { id }, data: { fecha_entrega: new Date() } });
         await recetaService.descontarIngredientesOrden(id, tx);
       }
