@@ -25,7 +25,7 @@ import {
   Assessment, AdminPanelSettings, Logout, Person, KeyboardArrowDown,
   NotificationsOutlined, LocalShipping, Receipt, ManageSearch,
   MenuBook, PointOfSale, Settings, ChevronLeft, PlaylistAdd,
-  Inventory2, Category, Flag, Print, Lock, Palette,
+  Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount, RestaurantMenu,
   PlayCircleOutline,
 } from '@mui/icons-material';
@@ -67,7 +67,6 @@ const menuGroups = [
     label: 'Inventario',
     items: [
       { text: 'Inventario',    icon: <Inventory />,   path: '/inventario'     },
-      { text: 'Lotes',         icon: <Inventory2 />,  path: '/lotes'          },
       { text: 'Recetas',       icon: <MenuBook />,    path: '/recetas'        },
       { text: 'Lista Compras', icon: <PlaylistAdd />, path: '/listas-compras' },
     ],

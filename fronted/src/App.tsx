@@ -42,7 +42,6 @@ import { Facturas }     from './pages/Facturas';
 import { Recetas }      from './pages/Recetas';
 import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
-import { Lotes }        from './pages/Lotes';
 import { Cocina }       from './pages/Cocina';
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
@@ -129,7 +128,8 @@ export default function App() {
 
               {/* Sistema principal */}
               <Route path="/dashboard"     element={<Dashboard   />} />
-              <Route path="/inventario"    element={<RequireRestaurante><Inventario  /></RequireRestaurante>} />
+              <Route path="/inventario"      element={<RequireRestaurante><Inventario /></RequireRestaurante>} />
+              <Route path="/inventario/:tab" element={<RequireRestaurante><Inventario /></RequireRestaurante>} />
               <Route path="/ordenes"       element={<RequireRestaurante><Ordenes     /></RequireRestaurante>} />
               <Route path="/reportes"      element={<Reportes    />} />
               <Route path="/proveedores"   element={<Proveedores />} />
@@ -138,7 +138,8 @@ export default function App() {
               <Route path="/clientes"      element={<Clientes    />} />
               <Route path="/caja"          element={<RequireRestaurante><CierreCaja  /></RequireRestaurante>} />
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
-              <Route path="/lotes"         element={<RequireRestaurante><Lotes         /></RequireRestaurante>} />
+              {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
+              <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
               <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}

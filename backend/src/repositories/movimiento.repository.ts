@@ -44,7 +44,7 @@ export const movimientoRepository = {
     return Promise.all([
       prisma.movimiento.findMany({
         where,
-        include: { producto: { include: { categoria: true } } },
+        include: { producto: { include: { categoria: true } }, lote: { select: { numero_lote: true } } },
         orderBy: { fecha_movimiento: 'desc' },
         skip: getSkip(pagination),
         take: pagination.limit,

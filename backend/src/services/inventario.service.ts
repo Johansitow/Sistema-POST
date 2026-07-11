@@ -5,8 +5,9 @@
  * siempre opcionales). El lote es un registro aparte y explícito:
  * - `generar_lote: true` en una entrada/producción crea un lote nuevo (solo
  *   para productos que se almacenan, es_vendible = false) y lo asocia al movimiento.
- * - `id_lote` en una salida/merma vincula el movimiento a un lote existente
- *   (para saber qué lote se dañó) y actualiza su merma acumulada.
+ * - `id_lote` en una salida/merma/devolución vincula el movimiento a un lote
+ *   existente (para saber qué lote se dañó o de cuál se descontó una
+ *   devolución). Solo 'merma' actualiza la merma acumulada del lote.
  */
 
 import { TipoMovimiento, EstadoLote, Prisma } from '@prisma/client';
@@ -24,14 +25,19 @@ import { generarNumeroLote } from '../lib/numero-generator';
 const TIPOS_ENTRADA = new Set<TipoMovimiento>([
   TipoMovimiento.entrada,
   TipoMovimiento.produccion,
-  TipoMovimiento.devolucion,
 ]);
 
-/** Tipos de movimiento que decrementan stock */
+/**
+ * Tipos de movimiento que decrementan stock.
+ * `devolucion`: se entrega un producto nuevo al cliente y el devuelto se
+ * descarta — es una pérdida ligada a un lote, igual que merma pero
+ * contabilizada aparte (no se acumula en `Lote.merma_cantidad`).
+ */
 const TIPOS_SALIDA = new Set<TipoMovimiento>([
   TipoMovimiento.salida,
   TipoMovimiento.merma,
   TipoMovimiento.venta,
+  TipoMovimiento.devolucion,
 ]);
 
 /** Tipos de movimiento que admiten generar un lote nuevo (generar_lote: true) */
@@ -73,9 +79,9 @@ async function vincularLoteASalida(
     );
   }
 
-  // ¿Se agotó el lote? (merma acumulada + salidas previas vinculadas a este lote)
+  // ¿Se agotó el lote? (merma + salidas + devoluciones previas vinculadas a este lote)
   const salidasPrevias = await tx.movimiento.aggregate({
-    where: { id_lote, tipo_movimiento: { in: [TipoMovimiento.salida, TipoMovimiento.merma] } },
+    where: { id_lote, tipo_movimiento: { in: [TipoMovimiento.salida, TipoMovimiento.merma, TipoMovimiento.devolucion] } },
     _sum: { cantidad: true },
   });
   const totalConsumido = Number(salidasPrevias._sum.cantidad ?? 0) + cantidad;
@@ -153,7 +159,7 @@ export const inventarioService = {
         throw new BadRequestError('Los lotes solo aplican a productos que se almacenan, no a productos vendibles ensamblados al momento de la venta');
       }
       if (data.id_lote && !TIPOS_SALIDA.has(data.tipo_movimiento)) {
-        throw new BadRequestError('Solo se puede vincular un lote existente en movimientos de salida o merma');
+        throw new BadRequestError('Solo se puede vincular un lote existente en movimientos de salida, merma o devolución');
       }
 
       // Stock POR RESTAURANTE — fuente autoritativa para multi-tenant.

@@ -27,6 +27,7 @@ export interface Movimiento {
   motivo: string;
   id_proveedor?: number;
   id_lote?: number;
+  lote?: { numero_lote: string } | null;
   referencia?: string;
   fecha_movimiento: string;
 }
@@ -155,7 +156,7 @@ class InventarioService {
       
       return {
         data: response.data.data.map((m: any) => this.parseMovimiento(m)),
-        pagination: response.data.pagination,
+        pagination: response.data.meta,
       };
     } catch (error) {
       console.error('Error al obtener movimientos:', error);

@@ -254,6 +254,78 @@ describe('registrarMovimiento', () => {
     expect(result.movimiento).toBeTruthy();
     expect(mockTx.lote.create).not.toHaveBeenCalled();
   });
+
+  it('devolucion resta stock (es una pérdida, no un reingreso)', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce(mockProducto); // stock_actual: 100
+    mockTx.productoStock.findUnique.mockResolvedValueOnce(null);
+    mockTx.productoStock.upsert.mockResolvedValueOnce({});
+    mockTx.producto.update.mockResolvedValueOnce({});
+    mockTx.movimiento.create.mockResolvedValueOnce({
+      ...mockMovimiento, tipo_movimiento: TipoMovimiento.devolucion,
+    });
+
+    await inventarioService.registrarMovimiento({
+      id_producto:     1,
+      id_restaurante:  1,
+      tipo_movimiento: TipoMovimiento.devolucion,
+      cantidad:        5,
+      motivo:          'Devolución cliente',
+    });
+
+    expect(mockTx.productoStock.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ stock_actual: expect.anything() }),
+      })
+    );
+    const stockEscrito = Number(mockTx.productoStock.upsert.mock.calls[0][0].update.stock_actual);
+    expect(stockEscrito).toBe(95); // 100 - 5, no 105
+  });
+
+  it('lanza BadRequestError si no hay stock suficiente para una devolucion', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce({ ...mockProducto, stock_actual: 2 });
+    mockTx.productoStock.findUnique.mockResolvedValueOnce(null);
+
+    await expect(inventarioService.registrarMovimiento({
+      id_producto:     1,
+      id_restaurante:  1,
+      tipo_movimiento: TipoMovimiento.devolucion,
+      cantidad:        5,
+      motivo:          'Devolución cliente',
+    })).rejects.toThrow('Stock insuficiente');
+  });
+
+  it('devolucion con id_lote existente se vincula al lote y lo cierra si se agota', async () => {
+    mockTx.producto.findUnique.mockResolvedValueOnce(mockProducto);
+    mockTx.productoStock.findUnique.mockResolvedValueOnce({ stock_actual: 100 });
+    mockTx.lote.findUnique.mockResolvedValueOnce({
+      id: 10, id_producto: 1, id_restaurante: 1,
+      cantidad_producida: '5', merma_cantidad: '0', fecha_cierre: null,
+    });
+    mockTx.movimiento.aggregate.mockResolvedValueOnce({ _sum: { cantidad: null } }); // sin salidas previas
+    mockTx.lote.update.mockResolvedValueOnce({});
+    mockTx.productoStock.upsert.mockResolvedValueOnce({});
+    mockTx.producto.update.mockResolvedValueOnce({});
+    mockTx.movimiento.create.mockResolvedValueOnce({ ...mockMovimiento, tipo_movimiento: TipoMovimiento.devolucion });
+
+    await inventarioService.registrarMovimiento({
+      id_producto:     1,
+      id_restaurante:  1,
+      tipo_movimiento: TipoMovimiento.devolucion,
+      cantidad:        5, // agota toda la cantidad producida del lote
+      motivo:          'Devolución cliente',
+      id_lote:         10,
+    });
+
+    // La devolución NO acumula merma_cantidad (eso solo aplica a tipo 'merma')
+    expect(mockTx.lote.update).toHaveBeenCalledWith({
+      where: { id: 10 },
+      data: expect.objectContaining({
+        estado_lote:  'agotado',
+        fecha_cierre: expect.any(Date),
+      }),
+    });
+    expect(mockTx.lote.update.mock.calls[0][0].data.merma_cantidad).toBeUndefined();
+  });
 });
 
 // ── actualizarEstadoLote ──────────────────────────────────────────────────────

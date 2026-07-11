@@ -1,107 +1,36 @@
 /**
- * Lotes — Gestión de lotes de producción y entradas de inventario
+ * LotesTab — vistas "Lotes" y "Producción" del módulo Inventario.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   AlertCircle, RefreshCw, Search, Filter, ChevronDown,
   ChevronLeft, ChevronRight, Hash, Calendar, Users, DollarSign,
-  AlertTriangle, CheckCircle2, Archive, Layers, Clock, BarChart2, X,
+  AlertTriangle, CheckCircle2, Layers, Clock, BarChart2, X,
   Plus, ClipboardCheck, Trash2, RotateCcw, Check,
 } from 'lucide-react';
-import api from '../services/api';
-import { useRestauranteActivo } from '../store/restauranteStore';
-import { formatCurrency } from '../utils';
-import { LoadingScreen, EmptyState } from '../components/common';
-import LoteRentabilidad from '../components/lotes/LoteRentabilidad';
-import { Z_INDEX } from '../lib/zIndex';
-import { inventarioService, type VidaUtilPromedio } from '../services/inventario.service';
-import { productosService, type Producto } from '../services/productos.service';
-import { proveedorService, type Proveedor } from '../services/servicios-gestion';
-import { usuariosService } from '../services/usuarios.service';
+import api from '../../services/api';
+import { useRestauranteActivo } from '../../store/restauranteStore';
+import { formatCurrency } from '../../utils';
+import { LoadingScreen, EmptyState, ErrorAlert } from '../../components/common';
+import LoteRentabilidad from '../../components/lotes/LoteRentabilidad';
+import { Z_INDEX } from '../../lib/zIndex';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { inventarioService, type VidaUtilPromedio } from '../../services/inventario.service';
+import { productosService, type Producto } from '../../services/productos.service';
+import { proveedorService, type Proveedor } from '../../services/servicios-gestion';
+import { usuariosService } from '../../services/usuarios.service';
+import { type Lote, type EstadoLote, ESTADO_CONFIG, diasHastaVencer, formatFecha } from './shared';
+import { DevolucionModal } from './DevolucionModal';
 
-// ── Tipos ────────────────────────────────────────────────────────────────────
-
-type EstadoLote = 'activo' | 'vencido' | 'agotado' | 'en_produccion';
-
-interface Lote {
-  id:                     number;
-  numero_lote:            string;
-  id_producto:            number;
-  id_usuario_responsable: number | null;
-  cantidad_producida:     number | string;
-  merma_cantidad:         number | string;
-  merma_porcentaje:       number | string;
-  fecha_produccion:       string;
-  fecha_vencimiento:      string | null;
-  fecha_cierre:           string | null;
-  vida_util_dias:         number | null;
-  estado_lote:            EstadoLote;
-  costo_produccion:       number | string | null;
-  observaciones:          string | null;
-  producto: {
-    id:           number;
-    nombre:       string;
-    sku:          string;
-    unidad_medida: string;
-    tipo_materia: string;
-  };
-  responsable: {
-    id:             number;
-    nombre_completo: string | null;
-    usuario:         string;
-  } | null;
-}
-
-// ── Configuración por estado ──────────────────────────────────────────────────
-
-const ESTADO_CONFIG: Record<EstadoLote, {
-  label: string; icon: React.ReactNode;
-  badge: string; row: string;
-}> = {
-  activo: {
-    label: 'Activo',
-    icon:  <CheckCircle2 className="w-3.5 h-3.5" />,
-    badge: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    row:   '',
-  },
-  vencido: {
-    label: 'Vencido',
-    icon:  <AlertTriangle className="w-3.5 h-3.5" />,
-    badge: 'bg-red-100 text-red-700 border border-red-200',
-    row:   'bg-red-50/40',
-  },
-  agotado: {
-    label: 'Agotado',
-    icon:  <Archive className="w-3.5 h-3.5" />,
-    badge: 'bg-slate-100 text-slate-600 border border-slate-200',
-    row:   'opacity-60',
-  },
-  en_produccion: {
-    label: 'En producción',
-    icon:  <Layers className="w-3.5 h-3.5" />,
-    badge: 'bg-blue-100 text-blue-700 border border-blue-200',
-    row:   '',
-  },
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function diasHastaVencer(fecha: string | null): number | null {
-  if (!fecha) return null;
-  return Math.ceil((new Date(fecha).getTime() - Date.now()) / 86400000);
-}
-
-function formatFecha(fecha: string | null): string {
-  if (!fecha) return '—';
-  return new Date(fecha).toLocaleDateString('es-CO', {
-    day: '2-digit', month: 'short', year: '2-digit',
-  });
+interface LotesTabProps {
+  /** true = pestaña "Producción" (solo productos elaborados con receta interna) */
+  soloProduccion: boolean;
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
 
-export const Lotes: React.FC = () => {
+export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
   const idRestaurante               = useRestauranteActivo();
   const [lotes, setLotes]           = useState<Lote[]>([]);
   const [meta, setMeta]             = useState<any>(null);
@@ -115,7 +44,10 @@ export const Lotes: React.FC = () => {
   const [showNuevoLote, setShowNuevoLote]       = useState(false);
   const [reconteoLote, setReconteoLote]         = useState<Lote | null>(null);
   const [mermaLote, setMermaLote]               = useState<Lote | null>(null);
-  const [vista, setVista]                       = useState<'lotes' | 'produccion'>('lotes');
+  // Devolución: acción rápida por lote (lote preseleccionado)
+  const [devolucionLote, setDevolucionLote]     = useState<Lote | null>(null);
+
+  useEscapeKey(() => setRentabilidadLote(null), rentabilidadLote !== null);
 
   const LIMIT = 20;
 
@@ -180,7 +112,7 @@ export const Lotes: React.FC = () => {
   const vencidos       = lotes.filter(l => l.estado_lote === 'vencido').length;
 
   // La pestaña Producción solo muestra lotes de productos que se elaboran con receta interna
-  const lotesVista = vista === 'produccion'
+  const lotesVista = soloProduccion
     ? lotes.filter(l => l.producto?.tipo_materia === 'procesada')
     : lotes;
 
@@ -194,37 +126,25 @@ export const Lotes: React.FC = () => {
   if (loading && lotes.length === 0) return <LoadingScreen message="Cargando lotes..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-100">
-
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <Hash className="w-6 h-6 text-indigo-600" /> Lotes
-            </h1>
-            <p className="text-slate-500 text-sm mt-0.5">Control de fechas de caducidad y reconteo de productos almacenados</p>
-          </div>
+    <>
+      {/* Sub-header: subtítulo + acción principal de esta pestaña */}
+      <div className="bg-white border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <p className="text-slate-500 text-sm">
+            {soloProduccion
+              ? 'Registra qué elaboraste internamente (con receta), su caducidad y su merma esperada'
+              : 'Control de fechas de caducidad y reconteo de productos almacenados'}
+          </p>
           <div className="flex items-center gap-2">
             <button onClick={() => setShowNuevoLote(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl text-sm font-semibold hover:from-indigo-700 hover:to-blue-700 transition-all shadow-sm">
-              <Plus className="w-4 h-4" /> {vista === 'produccion' ? 'Nueva Producción' : 'Nuevo Lote'}
+              <Plus className="w-4 h-4" /> {soloProduccion ? 'Nueva Producción' : 'Nuevo Lote'}
             </button>
             <button onClick={refrescarTodo}
               className="p-2.5 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-colors" title="Actualizar">
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
-        </div>
-        <div className="max-w-7xl mx-auto px-6 flex gap-1">
-          <button onClick={() => setVista('lotes')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${vista === 'lotes' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            <Hash className="w-3.5 h-3.5" /> Lotes
-          </button>
-          <button onClick={() => setVista('produccion')}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors ${vista === 'produccion' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-            <Layers className="w-3.5 h-3.5" /> Producción
-          </button>
         </div>
       </div>
 
@@ -320,11 +240,11 @@ export const Lotes: React.FC = () => {
         {lotesVista.length === 0 ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
             <EmptyState
-              message={vista === 'produccion' ? 'No hay producciones registradas' : 'No se encontraron lotes'}
-              description={vista === 'produccion'
+              message={soloProduccion ? 'No hay producciones registradas' : 'No se encontraron lotes'}
+              description={soloProduccion
                 ? 'Registra una producción para llevar el lote, la caducidad y la merma de un producto elaborado internamente'
                 : "Crea un lote para llevar control de fecha de caducidad y reconteo de un producto que se almacena"}
-              actionLabel={vista === 'produccion' ? 'Nueva Producción' : 'Nuevo Lote'}
+              actionLabel={soloProduccion ? 'Nueva Producción' : 'Nuevo Lote'}
               onAction={() => setShowNuevoLote(true)}
             />
           </div>
@@ -467,6 +387,15 @@ export const Lotes: React.FC = () => {
                                 <Trash2 className="w-3.5 h-3.5" /> Merma
                               </button>
                             )}
+                            {(lote.estado_lote === 'activo' || lote.estado_lote === 'en_produccion') && (
+                              <button
+                                onClick={() => setDevolucionLote(lote)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-violet-50 text-violet-700 text-xs font-medium hover:bg-violet-100 transition-colors"
+                                title="Registrar devolución de este lote"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" /> Devolución
+                              </button>
+                            )}
                             <button
                               onClick={() => setRentabilidadLote(lote)}
                               className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-xs font-medium hover:bg-indigo-100 transition-colors"
@@ -512,6 +441,7 @@ export const Lotes: React.FC = () => {
           <p className="text-xs text-blue-700">
             Pestaña <strong>Lotes</strong>: entradas de proveedor, reconteo y merma de cualquier producto almacenado.
             Pestaña <strong>Producción</strong>: registra qué elaboraste internamente (con receta), su caducidad y su merma esperada.
+            Pestaña <strong>Devoluciones</strong>: pérdida ligada a un lote cuando se le entrega un producto nuevo al cliente.
             En Inventario solo se hace conteo/ajuste — si el conteo no coincide, se justifica aquí como entrada nueva o como pérdida.
           </p>
         </div>
@@ -529,7 +459,7 @@ export const Lotes: React.FC = () => {
       {/* Modal rentabilidad */}
       {rentabilidadLote && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center p-4"
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
           style={{ zIndex: Z_INDEX.MODAL_BASE }}
           onClick={() => setRentabilidadLote(null)}
         >
@@ -562,7 +492,7 @@ export const Lotes: React.FC = () => {
       {/* Modal Nuevo Lote / Nueva Producción */}
       {showNuevoLote && (
         <NuevoLoteModal
-          soloProduccion={vista === 'produccion'}
+          soloProduccion={soloProduccion}
           onClose={() => setShowNuevoLote(false)}
           onSaved={() => { setShowNuevoLote(false); refrescarTodo(); }}
         />
@@ -585,7 +515,16 @@ export const Lotes: React.FC = () => {
           onSaved={() => { setMermaLote(null); refrescarTodo(); }}
         />
       )}
-    </div>
+
+      {/* Modal Devolución — acción rápida desde la fila de un lote (lote fijo) */}
+      {devolucionLote && (
+        <DevolucionModal
+          lote={devolucionLote}
+          onClose={() => setDevolucionLote(null)}
+          onSaved={() => { setDevolucionLote(null); refrescarTodo(); }}
+        />
+      )}
+    </>
   );
 };
 
@@ -601,6 +540,7 @@ interface NuevoLoteModalProps {
 }
 
 const NuevoLoteModal: React.FC<NuevoLoteModalProps> = ({ onClose, onSaved, soloProduccion }) => {
+  useEscapeKey(onClose);
   const [productos, setProductos]           = useState<Producto[]>([]);
   const [loadingDatos, setLoadingDatos]      = useState(true);
   const [idProducto, setIdProducto]         = useState<number | null>(null);
@@ -688,9 +628,7 @@ const NuevoLoteModal: React.FC<NuevoLoteModalProps> = ({ onClose, onSaved, soloP
 
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           <div>
@@ -855,6 +793,7 @@ interface ReconteoModalProps {
 }
 
 const ReconteoModal: React.FC<ReconteoModalProps> = ({ lote, onClose, onSaved }) => {
+  useEscapeKey(onClose);
   const [estado, setEstado]             = useState<EstadoLote>(lote.estado_lote);
   const [fechaVenc, setFechaVenc]       = useState(lote.fecha_vencimiento ? lote.fecha_vencimiento.split('T')[0] : '');
   const [observaciones, setObservaciones] = useState(lote.observaciones ?? '');
@@ -893,9 +832,7 @@ const ReconteoModal: React.FC<ReconteoModalProps> = ({ lote, onClose, onSaved })
 
         <div className="p-5 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           <div>
@@ -954,6 +891,7 @@ interface MermaLoteModalProps {
 }
 
 const MermaLoteModal: React.FC<MermaLoteModalProps> = ({ lote, onClose, onSaved }) => {
+  useEscapeKey(onClose);
   const [cantidad, setCantidad] = useState('');
   const [motivo, setMotivo]     = useState('');
   const [saving, setSaving]     = useState(false);
@@ -998,9 +936,7 @@ const MermaLoteModal: React.FC<MermaLoteModalProps> = ({ lote, onClose, onSaved 
 
         <div className="p-5 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           <p className="text-xs text-slate-500">

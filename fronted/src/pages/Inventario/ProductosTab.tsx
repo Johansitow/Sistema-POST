@@ -20,18 +20,20 @@ import {
   ArrowDownCircle, Hash, Calculator, Layers, LayoutGrid,
   History, ChevronUp,
 } from 'lucide-react';
-import ModalHeader from '../components/common/ModalHeader';
-import { productosService, Producto, ProductoCreateDTO, ProductoUpdateDTO } from '../services/productos.service';
-import { categoriasService, Categoria } from '../services/categorias.service';
-import { inventarioService, MovimientoCreateDTO } from '../services/inventario.service';
-import { proveedorService, Proveedor } from '../services/servicios-gestion';
-import { usuariosService } from '../services/usuarios.service';
-import { variantesService, type ProductoVariante, type CreateVarianteDto } from '../services/variantes.service';
-import api from '../services/api';
-import { formatCurrency, ESTADOS } from '../utils';
-import { ConfirmDialog, EmptyState, TableSkeleton } from '../components/common';
-import { useUIStore } from '../store/uiStore';
-import { useFeatureFlag } from '../store/featureFlagStore';
+import ModalHeader from '../../components/common/ModalHeader';
+import { productosService, Producto, ProductoCreateDTO, ProductoUpdateDTO } from '../../services/productos.service';
+import { categoriasService, Categoria } from '../../services/categorias.service';
+import { inventarioService, MovimientoCreateDTO } from '../../services/inventario.service';
+import { proveedorService, Proveedor } from '../../services/servicios-gestion';
+import { usuariosService } from '../../services/usuarios.service';
+import { variantesService, type ProductoVariante, type CreateVarianteDto } from '../../services/variantes.service';
+import api from '../../services/api';
+import { formatCurrency, ESTADOS } from '../../utils';
+import { ConfirmDialog, EmptyState, TableSkeleton, ErrorAlert } from '../../components/common';
+import { useUIStore, toast } from '../../store/uiStore';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { Z_INDEX } from '../../lib/zIndex';
+import { useFeatureFlag } from '../../store/featureFlagStore';
 
 type ModalMode = 'create' | 'edit' | null;
 
@@ -125,6 +127,7 @@ interface DisponibilidadModalProps {
 }
 
 const DisponibilidadModal: React.FC<DisponibilidadModalProps> = ({ producto, onClose }) => {
+  useEscapeKey(onClose);
   const [loading, setLoading] = useState(true);
   const [data, setData]       = useState<any>(null);
   const [error, setError]     = useState<string | null>(null);
@@ -150,7 +153,7 @@ const DisponibilidadModal: React.FC<DisponibilidadModalProps> = ({ producto, onC
   }, [producto.id]);
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
         <ModalHeader
@@ -295,19 +298,6 @@ const TIPOS_MOVIMIENTO = [
     lote:       '',
     loteTit:    '',
   },
-  {
-    value: 'devolucion', label: 'Devolución', requiereProveedor: false, esPositivo: true,
-    icon:       <RefreshCw       className="w-4 h-4" />,
-    iconBig:    <RefreshCw       className="w-5 h-5 text-white" />,
-    active:     'border-violet-500 bg-violet-50 text-violet-700',
-    iconBg:     'bg-violet-100 text-violet-600',
-    iconBgActive:'bg-white/25',
-    header:     'from-violet-600 to-purple-600',
-    btn:        'from-violet-600 to-purple-600',
-    ring:       'focus:ring-violet-400',
-    lote:       '',
-    loteTit:    '',
-  },
 ];
 
 // Helper: fecha relativa compacta
@@ -323,12 +313,11 @@ const fechaRelativa = (fecha: string) => {
 };
 
 const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, onSave }) => {
-  // Los productos que se almacenan (es_vendible=false) solo hacen conteo/ajuste o devolución
-  // en Inventario — toda entrada o merma real se justifica en Lotes (ver más abajo).
+  useEscapeKey(onClose);
+  // Los productos que se almacenan (es_vendible=false) solo hacen conteo/ajuste en
+  // Inventario — toda entrada, producción, merma o devolución se justifica en Lotes.
   const esAlmacenable  = !producto.es_vendible;
-  const tiposVisibles  = esAlmacenable
-    ? TIPOS_MOVIMIENTO.filter(t => t.value === 'ajuste' || t.value === 'devolucion')
-    : TIPOS_MOVIMIENTO;
+  const tiposVisibles  = TIPOS_MOVIMIENTO;
 
   const [tipo, setTipo]                       = useState<string>(esAlmacenable ? 'ajuste' : 'entrada');
   const [cantidad, setCantidad]               = useState('');
@@ -450,7 +439,7 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -462,7 +451,9 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
                 {tipoActual.iconBig}
               </div>
               <div>
-                <p className="text-white/70 text-xs font-medium uppercase tracking-wider">Registrar movimiento</p>
+                <p className="text-white/70 text-xs font-medium uppercase tracking-wider">
+                  {esAlmacenable ? 'Registrar conteo' : 'Registrar movimiento'}
+                </p>
                 <h2 className="text-white font-bold text-base leading-tight mt-0.5">{producto.nombre}</h2>
                 <p className="text-xs text-white/70 mt-0.5">{producto.sku} · {producto.unidad_medida}</p>
               </div>
@@ -494,16 +485,14 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
 
         <div className="p-5 space-y-4 overflow-y-auto flex-1">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           {esAlmacenable && (
             <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-3.5 py-2.5 text-xs text-indigo-700">
-              Este producto se almacena: aquí solo se hace <strong>conteo/ajuste</strong> o se
-              justifica una <strong>devolución</strong>. Toda entrada o merma real que resulte del
-              conteo queda registrada en <strong>Lotes</strong> automáticamente.
+              Este producto se almacena: aquí solo se hace <strong>conteo/ajuste</strong>. Toda
+              entrada, merma o devolución real que resulte del conteo queda registrada en{' '}
+              <strong>Lotes</strong> automáticamente.
             </div>
           )}
 
@@ -548,24 +537,27 @@ const MovimientoModal: React.FC<MovimientoModalProps> = ({ producto, onClose, on
             </div>
           )}
 
-          {/* ── Selector de tipo ── */}
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tipo de movimiento</p>
-            <div className={`grid gap-1.5 ${tiposVisibles.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-              {tiposVisibles.map(t => {
-                const isActive = tipo === t.value;
-                return (
-                  <button key={t.value} onClick={() => setTipo(t.value)}
-                    className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-semibold transition-all ${isActive ? t.active + ' shadow-sm' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'}`}>
-                    <div className={`p-1.5 rounded-lg transition-colors ${isActive ? t.iconBg : 'bg-slate-100 text-slate-400'}`}>
-                      {t.icon}
-                    </div>
-                    {t.label}
-                  </button>
-                );
-              })}
+          {/* ── Selector de tipo — solo aplica a productos no almacenables (esAlmacenable
+               siempre usa 'ajuste', no hay nada entre qué elegir) ── */}
+          {!esAlmacenable && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tipo de movimiento</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {tiposVisibles.map(t => {
+                  const isActive = tipo === t.value;
+                  return (
+                    <button key={t.value} onClick={() => setTipo(t.value)}
+                      className={`flex flex-col items-center gap-1.5 py-3 px-2 rounded-xl border-2 text-xs font-semibold transition-all ${isActive ? t.active + ' shadow-sm' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'}`}>
+                      <div className={`p-1.5 rounded-lg transition-colors ${isActive ? t.iconBg : 'bg-slate-100 text-slate-400'}`}>
+                        {t.icon}
+                      </div>
+                      {t.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ── Cantidad ── */}
           <div>
@@ -766,6 +758,7 @@ interface PrecioVentaModalProps {
 }
 
 const PrecioVentaModal: React.FC<PrecioVentaModalProps> = ({ producto, onClose, onSave }) => {
+  useEscapeKey(onClose);
   const tipoP = inferirTipo(producto);
 
   const [costoBase, setCostoBase]         = useState<number>(0);
@@ -838,7 +831,7 @@ const PrecioVentaModal: React.FC<PrecioVentaModalProps> = ({ producto, onClose, 
   const tipoCfg = TIPO_PRODUCTO_CONFIG[tipoP];
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
 
@@ -858,9 +851,7 @@ const PrecioVentaModal: React.FC<PrecioVentaModalProps> = ({ producto, onClose, 
 
         <div className="p-6 space-y-5 overflow-y-auto">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-            </div>
+            <ErrorAlert message={error} />
           )}
 
           {loading ? (
@@ -1039,6 +1030,7 @@ interface ProductoModalProps {
 }
 
 const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categorias, onClose, onSave }) => {
+  useEscapeKey(onClose);
   const [tipoProducto, setTipoProducto] = useState<TipoProducto | null>(null);
   const [form, setForm]                 = useState<FormData>(FORM_DEFAULTS);
   const [skuManual, setSkuManual]       = useState(false);
@@ -1168,7 +1160,7 @@ const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categoria
   const tipoCfg = tipoProducto ? TIPO_PRODUCTO_CONFIG[tipoProducto] : null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: 1400 }}>
+    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
 
@@ -1233,9 +1225,7 @@ const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categoria
           {tipoProducto && (
             <div className="p-6 space-y-5">
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl flex items-center gap-2 text-sm">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
-                </div>
+                <ErrorAlert message={error} />
               )}
 
               {/* Badge tipo en edición */}
@@ -1511,6 +1501,7 @@ const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categoria
 interface VariantesDrawerProps { producto: Producto; onClose: () => void; }
 
 function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
+  useEscapeKey(onClose);
   const [variantes, setVariantes] = useState<ProductoVariante[]>([]);
   const [loading, setLoading]     = useState(true);
   const [formOpen, setFormOpen]   = useState(false);
@@ -1518,6 +1509,7 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
   const [form, setForm]           = useState<CreateVarianteDto>({ nombre: '', precio: 0, sku: '', orden: 0 });
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<ProductoVariante | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1545,9 +1537,13 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
   };
 
   const handleDelete = async (v: ProductoVariante) => {
-    if (!window.confirm(`Eliminar la variante "${v.nombre}"?`)) return;
-    try { await variantesService.eliminar(producto.id, v.id); load(); }
-    catch { /* ignore */ }
+    try {
+      await variantesService.eliminar(producto.id, v.id);
+      toast.success('Variante eliminada');
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Error al eliminar la variante');
+    }
   };
 
   const moveVariante = async (v: ProductoVariante, dir: -1 | 1) => {
@@ -1564,8 +1560,8 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="absolute inset-0 bg-black/30" onClick={onClose} />
+    <div className="fixed inset-0 flex justify-end" style={{ zIndex: Z_INDEX.MODAL_BASE }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-md bg-white dark:bg-gray-800 h-full shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
@@ -1617,7 +1613,7 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
                     <button onClick={() => openEdit(v)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded">
                       <Edit2 className="w-3 h-3" />
                     </button>
-                    <button onClick={() => handleDelete(v)} className="p-1.5 text-red-400 hover:bg-red-50 rounded">
+                    <button onClick={() => setConfirmDelete(v)} className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Eliminar variante">
                       <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
@@ -1656,6 +1652,16 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Eliminar variante"
+        message={confirmDelete ? `¿Eliminar la variante "${confirmDelete.nombre}"?` : ''}
+        confirmText="Eliminar"
+        confirmColor="error"
+        onConfirm={() => { if (confirmDelete) handleDelete(confirmDelete); }}
+        onClose={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }
@@ -1663,7 +1669,7 @@ function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
 // ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
-export const Inventario: React.FC = () => {
+export const ProductosTab: React.FC = () => {
   const navigate = useNavigate();
   const { setSidebarCollapsed } = useUIStore();
   const [productos, setProductos]               = useState<Producto[]>([]);
@@ -1743,8 +1749,14 @@ export const Inventario: React.FC = () => {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
-    try { await productosService.delete(deleteTarget.id); setDeleteTarget(null); loadData(); }
-    catch (err) { console.error('Error al eliminar:', err); }
+    try {
+      await productosService.delete(deleteTarget.id);
+      toast.success('Producto eliminado');
+      setDeleteTarget(null);
+      loadData();
+    } catch (err: any) {
+      toast.error(err.message || 'Error al eliminar el producto');
+    }
     finally { setDeleting(false); }
   };
 
@@ -1925,15 +1937,11 @@ export const Inventario: React.FC = () => {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/30 to-slate-100">
-
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Inventario</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Gestión de productos y control de stock</p>
-          </div>
+    <>
+      {/* Sub-header: subtítulo + acción principal de esta pestaña */}
+      <div className="bg-white border-b border-slate-100">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <p className="text-slate-500 text-sm">Gestión de productos y control de stock</p>
           <button
             onClick={() => { setSelectedProducto(null); setModalMode('create'); }}
             className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg text-sm">
@@ -2130,6 +2138,6 @@ export const Inventario: React.FC = () => {
           onClose={() => setVariantesTarget(null)}
         />
       )}
-    </div>
+    </>
   );
 };

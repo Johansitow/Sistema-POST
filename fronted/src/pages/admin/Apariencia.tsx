@@ -24,7 +24,6 @@ const NAV_CATALOG = [
   { grupo: 'Ventas',     label: 'Clientes',      path: '/clientes'       },
   { grupo: 'Ventas',     label: 'Proveedores',   path: '/proveedores'    },
   { grupo: 'Inventario', label: 'Inventario',    path: '/inventario'     },
-  { grupo: 'Inventario', label: 'Lotes',         path: '/lotes'          },
   { grupo: 'Inventario', label: 'Recetas',       path: '/recetas'        },
   { grupo: 'Inventario', label: 'Lista Compras', path: '/listas-compras' },
   { grupo: 'Finanzas',   label: 'Facturas',      path: '/facturas'       },

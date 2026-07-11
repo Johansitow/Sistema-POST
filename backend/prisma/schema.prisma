@@ -512,11 +512,13 @@ model Movimiento {
 
   producto    Producto    @relation(fields: [id_producto],    references: [id])
   restaurante Restaurante @relation(fields: [id_restaurante], references: [id])
+  lote        Lote?       @relation(fields: [id_lote], references: [id])
 
   @@index([id_producto])
   @@index([id_restaurante])
   @@index([fecha_movimiento])
   @@index([tipo_movimiento])
+  @@index([id_lote])
   @@map("movimientos")
 }
 
@@ -766,9 +768,10 @@ model Lote {
   costo_produccion        Decimal?   @db.Decimal(12, 2)
   observaciones           String?    @db.Text
 
-  producto      Producto    @relation(fields: [id_producto],    references: [id])
-  responsable   Usuario?    @relation("LoteResponsable", fields: [id_usuario_responsable], references: [id])
-  restaurante   Restaurante @relation(fields: [id_restaurante], references: [id])
+  producto      Producto     @relation(fields: [id_producto],    references: [id])
+  responsable   Usuario?     @relation("LoteResponsable", fields: [id_usuario_responsable], references: [id])
+  restaurante   Restaurante  @relation(fields: [id_restaurante], references: [id])
+  movimientos   Movimiento[]
 
   @@index([numero_lote])
   @@index([id_producto])

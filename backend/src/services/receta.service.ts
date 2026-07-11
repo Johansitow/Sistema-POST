@@ -139,6 +139,44 @@ export const recetaService = {
     const receta = await recetaRepository.findRecetaConStock(id_receta);
     if (!receta) throw new NotFoundError('Receta');
 
+    const { disponibilidad, disponibilidadPorReceta, stockProducido, ingredienteLimitante, detalleIngredientes } =
+      this._calcularDisponibilidadDeReceta(receta);
+
+    return {
+      id_receta,
+      nombre_receta:      receta.nombre_receta,
+      producto_final:     receta.producto_final,
+      disponibilidad:     disponibilidad,
+      stock_producido:    stockProducido,
+      disponibilidad_por_receta: disponibilidadPorReceta,
+      unidad_produccion:  receta.unidad_produccion,
+      ingrediente_limitante: ingredienteLimitante,
+      detalle_ingredientes:  detalleIngredientes,
+    };
+  },
+
+  /** Disponibilidad de todos los productos vendibles de una sede — usado por Inventario. */
+  async calcularDisponibilidadCatalogo(id_restaurante: number) {
+    const recetas = await recetaRepository.findRecetasVendiblesConStock(id_restaurante);
+    return recetas.map(receta => {
+      const { disponibilidad } = this._calcularDisponibilidadDeReceta(receta);
+      return {
+        id_producto:       receta.id_producto_final,
+        disponibilidad,
+        unidad_produccion: receta.unidad_produccion,
+      };
+    });
+  },
+
+  /** Lógica compartida por calcularDisponibilidad y calcularDisponibilidadCatalogo. */
+  _calcularDisponibilidadDeReceta(receta: {
+    cantidad_producida: unknown;
+    producto_final: { stock_actual: unknown };
+    ingredientes: Array<{
+      id_producto: number; cantidad: unknown; unidad: string; es_opcional: boolean;
+      producto: { id: number; nombre: string; stock_actual: unknown; unidad_medida: string };
+    }>;
+  }) {
     const cantidadProducida = Number(receta.cantidad_producida);
     let disponibilidadMinima = Infinity;
     let ingredienteLimitante: any = null;
@@ -169,17 +207,15 @@ export const recetaService = {
       };
     });
 
-    const disponibilidad = disponibilidadMinima === Infinity ? 0 : disponibilidadMinima;
+    // Disponibilidad por receta: lo que se podría preparar desde cero con los
+    // ingredientes crudos restantes (no incluye lo que ya está producido y listo).
+    const disponibilidadPorReceta = disponibilidadMinima === Infinity ? 0 : disponibilidadMinima;
+    // Stock ya producido y listo para vender (ej. lotes hechos por adelantado en Lotes → Producción).
+    const stockProducido = Number(receta.producto_final.stock_actual ?? 0);
+    // Disponibilidad total = lo ya producido + lo que aún se puede preparar.
+    const disponibilidad = stockProducido + disponibilidadPorReceta;
 
-    return {
-      id_receta,
-      nombre_receta:      receta.nombre_receta,
-      producto_final:     receta.producto_final,
-      disponibilidad:     disponibilidad,
-      unidad_produccion:  receta.unidad_produccion,
-      ingrediente_limitante: ingredienteLimitante,
-      detalle_ingredientes:  detalleIngredientes,
-    };
+    return { disponibilidad, disponibilidadPorReceta, stockProducido, ingredienteLimitante, detalleIngredientes };
   },
 
   // ─── Rentabilidad ────────────────────────────────────────────────────────────
