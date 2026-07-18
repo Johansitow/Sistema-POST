@@ -18,70 +18,41 @@ import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   AppBar, Box, Drawer, IconButton, List, ListItem,
   ListItemButton, ListItemIcon, ListItemText, Toolbar,
-  Typography, Avatar, Menu, MenuItem, Divider, Tooltip, Chip, Badge,
+  Typography, Avatar, Menu, MenuItem, Divider, Tooltip, Chip,
 } from '@mui/material';
+import { useTheme, alpha } from '@mui/material/styles';
 import {
-  Menu as MenuIcon, Dashboard, Inventory, ShoppingCart,
-  Assessment, AdminPanelSettings, Logout, Person, KeyboardArrowDown,
-  NotificationsOutlined, LocalShipping, Receipt, ManageSearch,
-  MenuBook, PointOfSale, Settings, ChevronLeft, PlaylistAdd,
+  Menu as MenuIcon, AdminPanelSettings, Logout, Person, KeyboardArrowDown,
+  ManageSearch, Settings, ChevronLeft,
   Category, Flag, Print, Lock, Palette,
-  ArrowBack, AccountTree, SupervisorAccount, RestaurantMenu,
+  ArrowBack, AccountTree, SupervisorAccount,
   PlayCircleOutline,
 } from '@mui/icons-material';
 import { useAuthStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
 import { authService }  from '../../services/auth.service';
-import { alertaService } from '../../services/alerta.service';
 import { People, Business } from '@mui/icons-material';
 import { useFeatureFlagStore, useFeatureFlag } from '../../store/featureFlagStore';
-import { uiConfigService } from '../../services/ui-config.service';
+import { useBrandingStore } from '../../store/brandingStore';
+import { useMenuStore } from '../../store/menuStore';
+import type { MenuGrupoDTO } from '../../services/menu.service';
+import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS, type ModuloMenu } from '../../config/menuCatalog';
 import { useRestauranteStore, type RestauranteMini, type GrupoMini } from '../../store/restauranteStore';
 import { gruposNegocioService, type GrupoNegocio } from '../../services/grupos-negocio.service';
 import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
+import NotificationsMenu from './NotificationsMenu';
 
 const DRAWER_WIDTH    = 248;
 const COLLAPSED_WIDTH = 64;
 
-// ── Configuración del menú principal ─────────────────────────────────────────
+// ── Menú principal ────────────────────────────────────────────────────────────
+// Las subdivisiones (grupo, orden, visibilidad) vienen de la API /menu — editables
+// desde Personalización → Menú lateral. MODULE_CATALOG solo resuelve texto/ícono
+// por path. Ver buildEffectiveGroups() más abajo.
 
-const menuGroups = [
-  {
-    label: 'Principal',
-    items: [
-      { text: 'Dashboard', icon: <Dashboard />, path: '/dashboard' },
-    ],
-  },
-  {
-    label: 'Ventas',
-    items: [
-      { text: 'Órdenes',        icon: <ShoppingCart />,    path: '/ordenes'       },
-      { text: 'Cocina (KDS)',   icon: <RestaurantMenu />, path: '/cocina'         },
-      { text: 'Clientes',       icon: <People />,         path: '/clientes'      },
-      { text: 'Proveedores',    icon: <LocalShipping />,  path: '/proveedores'   },
-    ],
-  },
-  {
-    label: 'Inventario',
-    items: [
-      { text: 'Inventario',    icon: <Inventory />,   path: '/inventario'     },
-      { text: 'Recetas',       icon: <MenuBook />,    path: '/recetas'        },
-      { text: 'Lista Compras', icon: <PlaylistAdd />, path: '/listas-compras' },
-    ],
-  },
-  {
-    label: 'Finanzas',
-    items: [
-      { text: 'Facturas', icon: <Receipt />,     path: '/facturas' },
-      { text: 'Caja',     icon: <PointOfSale />, path: '/caja'     },
-      { text: 'Reportes', icon: <Assessment />,  path: '/reportes' },
-    ],
-  },
-];
-
-const menuItems = menuGroups.flatMap(g => g.items);
+const menuItems = MODULE_CATALOG;
 
 // ── Grupos del panel de administración (estáticos) ────────────────────────────
 
@@ -123,31 +94,38 @@ const adminAllItems = [
   ...ADMIN_STANDALONE,
 ];
 
-// ── Helper: applyNavConfig ────────────────────────────────────────────────────
+// ── Helper: buildEffectiveGroups ──────────────────────────────────────────────
+//
+// Construye los grupos a renderizar a partir de la API /menu (menuStore).
+// Si no hay datos (falla de red, o tabla vacía) cae a DEFAULT_GROUPS para que
+// el sidebar nunca quede en blanco. `ocultosExtra` son paths escondidos por
+// feature flags (no por configuración del admin).
 
-type MenuGroup = { label: string; items: { text: string; icon: JSX.Element; path: string }[] };
+type MenuGroup = { label: string; items: ModuloMenu[] };
 
-function applyNavConfig(
-  catalog:      MenuGroup[],
-  itemsOcultos: string[],
-  ordenItems:   string[],
-): MenuGroup[] {
-  if (itemsOcultos.length === 0 && ordenItems.length === 0) return catalog;
-  const flat    = catalog.flatMap(g => g.items.map(i => ({ ...i, grupo: g.label })));
-  const filtered = flat.filter(i => !itemsOcultos.includes(i.path));
-  let ordered: typeof filtered;
-  if (ordenItems.length > 0) {
-    const inOrder = ordenItems.flatMap(path => filtered.filter(i => i.path === path));
-    const rest    = filtered.filter(i => !ordenItems.includes(i.path));
-    ordered = [...inOrder, ...rest];
-  } else {
-    ordered = filtered;
-  }
-  const grupoLabels = [...new Set(ordered.map(i => i.grupo))];
-  return grupoLabels.map(label => ({
-    label,
-    items: ordered.filter(i => i.grupo === label),
-  }));
+function buildEffectiveGroups(dbGrupos: MenuGrupoDTO[], ocultosExtra: string[]): MenuGroup[] {
+  const fuente = dbGrupos.length > 0
+    ? dbGrupos
+        .slice().sort((a, b) => a.orden - b.orden)
+        .map(g => ({
+          nombre: g.nombre,
+          paths: g.items
+            .filter(i => i.visible)
+            .slice().sort((a, b) => a.orden - b.orden)
+            .map(i => i.path),
+        }))
+    : DEFAULT_GROUPS;
+
+  return fuente
+    .map(g => ({
+      label: g.nombre,
+      items: g.paths
+        .filter(path => !ocultosExtra.includes(path))
+        .map(path => MODULE_MAP[path])
+        // Por si un path quedó huérfano (módulo eliminado del código pero no de la DB)
+        .filter((m): m is ModuloMenu => Boolean(m)),
+    }))
+    .filter(g => g.items.length > 0);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -161,20 +139,20 @@ const DEFAULT_COLOR = '#e53935';
 // ── Componente ────────────────────────────────────────────────────────────────
 
 export default function Layout() {
+  const theme = useTheme();
+  const { nombreSistema, logoUrl } = useBrandingStore();
   const [mobileOpen,    setMobileOpen]    = useState(false);
-  const { sidebarCollapsed: collapsed, setSidebarCollapsed: setCollapsed } = useUIStore();
+  const { sidebarCollapsed: collapsed, setSidebarCollapsed: setCollapsed, showToast } = useUIStore();
   const [anchorEl,      setAnchorEl]      = useState<null | HTMLElement>(null);
   const [restAnchorEl,  setRestAnchorEl]  = useState<null | HTMLElement>(null);
   const [grupoAnchorEl, setGrupoAnchorEl] = useState<null | HTMLElement>(null);
   const [grupos,        setGrupos]        = useState<GrupoNegocio[]>([]);
-  const [alertasCount,  setAlertasCount]  = useState(0);
-  const [itemsOcultos,  setItemsOcultos]  = useState<string[]>([]);
-  const [ordenItems,    setOrdenItems]    = useState<string[]>([]);
 
   const location = useLocation();
   const navigate = useNavigate();
   const { usuario, logout, isSuperAdmin } = useAuthStore();
   const { loadFlags, reloadFlags, loaded: flagsLoaded } = useFeatureFlagStore();
+  const { grupos: menuGrupos, loadMenu, reloadMenu } = useMenuStore();
 
   const showListasCompras    = useFeatureFlag('listas_compras');
   const showRecetas          = useFeatureFlag('recetas');
@@ -215,27 +193,21 @@ export default function Layout() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    Promise.all([
-      uiConfigService.getConfig('navegacion', 'items_ocultos'),
-      uiConfigService.getConfig('navegacion', 'orden_items'),
-    ]).then(([ocultos, orden]) => {
-      if (Array.isArray(ocultos?.valor)) setItemsOcultos(ocultos!.valor as string[]);
-      if (Array.isArray(orden?.valor))   setOrdenItems(orden!.valor as string[]);
-    }).catch(() => {});
-  }, []);
+  useEffect(() => { loadMenu(); }, [loadMenu]);
 
+  // Refresca el menú al volver a esta pestaña (cambio de pestaña, minimizar,
+  // o restauración desde bfcache) — cubre el caso de dejar el sidebar abierto
+  // en una sesión mientras otro admin (u otra pestaña propia) edita el menú,
+  // sin depender de un socket dedicado para esto.
   useEffect(() => {
-    let mounted = true;
-    const fetchCount = async () => {
-      try {
-        const count = await alertaService.getCountNoLeidas();
-        if (mounted) setAlertasCount(count);
-      } catch { /* silencioso */ }
+    const handleVisible = () => { if (document.visibilityState === 'visible') reloadMenu(); };
+    document.addEventListener('visibilitychange', handleVisible);
+    window.addEventListener('pageshow', handleVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisible);
+      window.removeEventListener('pageshow', handleVisible);
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 60_000);
-    return () => { mounted = false; clearInterval(interval); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Computados ─────────────────────────────────────────────────────────────
@@ -248,8 +220,8 @@ export default function Layout() {
     if (!showListasCompras) flagOcultos.push('/listas-compras');
     if (!showRecetas)       flagOcultos.push('/recetas');
     if (!showClientes)      flagOcultos.push('/clientes');
-    return applyNavConfig(menuGroups, [...itemsOcultos, ...flagOcultos], ordenItems);
-  }, [itemsOcultos, ordenItems, showListasCompras, showRecetas, showClientes]);
+    return buildEffectiveGroups(menuGrupos, flagOcultos);
+  }, [menuGrupos, showListasCompras, showRecetas, showClientes]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -260,12 +232,22 @@ export default function Layout() {
     navigate('/login');
   };
 
+  // Cambio de sucursal: no-op si es la misma sede; al cambiar, el key del
+  // contenedor <main> re-monta la página activa y todo se recarga con el
+  // nuevo X-Restaurante-Id.
+  const handleCambiarSede = (r: RestauranteMini) => {
+    setRestAnchorEl(null);
+    if (r.id === restauranteActivo?.id) return;
+    setRestActivo(r);
+    showToast(`Ahora estás en ${r.nombre}`, 'success');
+  };
+
   // ── Sub-componente NavItem ─────────────────────────────────────────────────
 
   const NavItem = ({
     item,
-    activeColor = '#e53935',
-    activeBg    = 'linear-gradient(135deg, rgba(229,57,53,0.15), rgba(229,57,53,0.05))',
+    activeColor = theme.palette.primary.main,
+    activeBg    = `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.15)}, ${alpha(theme.palette.primary.main, 0.05)})`,
   }: {
     item: { text: string; icon: React.ReactNode; path: string };
     activeColor?: string;
@@ -321,18 +303,24 @@ export default function Layout() {
         <Box sx={{ display: 'flex', alignItems: 'center', gap: collapsed ? 0 : 1.5 }}>
           <Box sx={{
             width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
-            background: 'linear-gradient(135deg, #e53935, #ff6f00)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
           }}>
-            <Typography sx={{ color: 'white', fontSize: '1.1rem' }}>🍽</Typography>
+            {logoUrl ? (
+              <Box component="img" src={logoUrl} alt={nombreSistema}
+                sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            ) : (
+              <Typography sx={{ color: 'white', fontSize: '1.1rem' }}>🍽</Typography>
+            )}
           </Box>
           {!collapsed && (
             <Box>
               <Typography variant="subtitle1" fontWeight={800} sx={{ color: 'white', lineHeight: 1.2 }}>
-                {restauranteActivo?.nombre ?? 'Sistema POS'}
+                {restauranteActivo?.nombre ?? nombreSistema}
               </Typography>
               <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.5)' }}>
-                {restauranteActivo ? 'Sistema POS' : 'Panel de control'}
+                {restauranteActivo ? nombreSistema : 'Panel de control'}
               </Typography>
             </Box>
           )}
@@ -757,7 +745,7 @@ export default function Layout() {
                 {restaurantes.map((r: RestauranteMini) => (
                   <MenuItem
                     key={r.id} selected={r.id === restauranteActivo?.id}
-                    onClick={() => { setRestActivo(r); setRestAnchorEl(null); }}
+                    onClick={() => handleCambiarSede(r)}
                     sx={{ gap: 1.5 }}
                   >
                     {r.logo_url ? (
@@ -780,16 +768,8 @@ export default function Layout() {
             </>
           )}
 
-          {/* Badge alertas (solo en sección principal) */}
-          {!isAdminSection && (
-            <Tooltip title={alertasCount > 0 ? `${alertasCount} alerta${alertasCount > 1 ? 's' : ''} sin leer` : 'Sin alertas nuevas'}>
-              <IconButton onClick={() => navigate('/inventario')} sx={{ mr: 1 }}>
-                <Badge badgeContent={alertasCount > 0 ? alertasCount : null} color="error" max={99}>
-                  <NotificationsOutlined sx={{ color: alertasCount > 0 ? 'error.main' : 'text.secondary' }} />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-          )}
+          {/* Campana de notificaciones (solo en sección principal) */}
+          {!isAdminSection && <NotificationsMenu />}
 
           {/* Menú usuario */}
           <Tooltip title="Mi cuenta">
@@ -816,7 +796,7 @@ export default function Layout() {
               <Typography variant="caption" color="text.secondary">{usuario?.email}</Typography>
             </Box>
             <Divider />
-            <MenuItem onClick={() => setAnchorEl(null)}>
+            <MenuItem onClick={() => { setAnchorEl(null); navigate('/perfil'); }}>
               <ListItemIcon><Person fontSize="small" /></ListItemIcon>
               Mi perfil
             </MenuItem>
@@ -855,9 +835,12 @@ export default function Layout() {
         </Drawer>
       </Box>
 
-      {/* Contenido principal — usa <Outlet /> para renderizar la página activa */}
+      {/* Contenido principal — usa <Outlet /> para renderizar la página activa.
+          El key por sede re-monta la página al cambiar de sucursal, garantizando
+          que todos sus datos se recarguen con el nuevo X-Restaurante-Id. */}
       <Box
         component="main"
+        key={restauranteActivo?.id ?? 'sin-sede'}
         sx={{
           flexGrow: 1,
           p: 3,

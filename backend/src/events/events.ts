@@ -122,6 +122,8 @@ export interface LoteProducidoPayload {
 export interface CierreCompletadoPayload {
   idCierre:       number;
   idRestaurante:  number;
+  numeroCierre:   string;
+  estado:         string;
   totalVentas:    number;
   diferencia:     number;
 }

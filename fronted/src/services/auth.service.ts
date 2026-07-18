@@ -4,7 +4,7 @@
 
 import api from './api';
 import type { LoginCredentials } from '../types/auth.types';
-import type { UsuarioAuth, AuthTokens } from '../types';
+import type { UsuarioAuth, AuthTokens, PerfilUsuario } from '../types';
 
 export const authService = {
   async login(credentials: LoginCredentials): Promise<{ user: UsuarioAuth; tokens: AuthTokens }> {
@@ -13,7 +13,7 @@ export const authService = {
     return { user: res.data.user, tokens: res.data.tokens };
   },
 
-  async getProfile(): Promise<UsuarioAuth> {
+  async getProfile(): Promise<PerfilUsuario> {
     const res = await api.get('/auth/profile');
     return res.data.user;
   },

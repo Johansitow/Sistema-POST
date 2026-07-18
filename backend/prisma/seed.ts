@@ -385,8 +385,9 @@ async function main() {
     prisma.tipoAlerta.create({ data: { nombre: 'Lista de Compras',   codigo: 'LISTA_COMPRA',     descripcion: 'Lista de compras generada automáticamente',    icono: 'shopping_cart', color: '#FF9800', prioridad_default: 'alta',  es_sistema: true } }),
     prisma.tipoAlerta.create({ data: { nombre: 'Ajuste Stock',       codigo: 'AJUSTE_STOCK',     descripcion: 'Stock mínimo/máximo ajustado por tendencias',  icono: 'tune',        color: '#2196F3', prioridad_default: 'media' } }),
     prisma.tipoAlerta.create({ data: { nombre: 'Pérdida sin justificar', codigo: 'PERDIDA_SIN_LOTE', descripcion: 'Faltante de conteo registrado como merma sin poder atribuirlo a un lote', icono: 'report_problem', color: '#D32F2F', prioridad_default: 'alta', es_sistema: true } }),
+    prisma.tipoAlerta.create({ data: { nombre: 'Cierre de Caja',      codigo: 'CIERRE_CAJA',      descripcion: 'Cierre de caja confirmado',                    icono: 'point_of_sale', color: '#4CAF50', prioridad_default: 'media', es_sistema: true } }),
   ]);
-  console.log('✅ 6 tipos de alerta creados');
+  console.log('✅ 7 tipos de alerta creados');
 
   // ============================================================
   // CATEGORÍAS

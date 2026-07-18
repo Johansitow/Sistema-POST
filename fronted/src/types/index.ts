@@ -44,9 +44,40 @@ export interface UsuarioAuth {
    * SIEMPRE usar este campo para decisiones de acceso en el frontend.
    */
   es_super_admin: boolean;
+  /** Códigos de permiso (Permiso.codigo) asignados al rol — vacío para superadmin (bypasea todo) */
+  permisos: string[];
   rol: RolBasico;
   /** Restaurantes a los que tiene acceso este usuario (viene del JWT) */
   restaurantes: { id: number; nombre: string; es_default: boolean; id_grupo: number }[];
+}
+
+/**
+ * PerfilUsuario — respuesta de GET /auth/profile (selectPublico del backend).
+ * Más rica que el JWT (datos personales/laborales) pero SIN restaurantes:
+ * las sedes asignadas se leen del JWT (useAuthStore().user.restaurantes).
+ */
+export interface PerfilUsuario {
+  id: number;
+  uuid: string;
+  usuario: string;
+  email: string;
+  nombre_completo: string;
+  telefono?: string | null;
+  estado: string;
+  ultimo_acceso?: string | null;
+  fecha_creacion?: string;
+  es_super_admin: boolean;
+  rol: RolBasico;
+  // Datos personales / laborales (opcionales)
+  documento_identidad?: string | null;
+  fecha_nacimiento?: string | null;
+  direccion?: string | null;
+  cargo?: string | null;
+  fecha_ingreso?: string | null;
+  turno?: string | null;
+  tipo_contrato?: string | null;
+  contacto_emergencia_nombre?: string | null;
+  contacto_emergencia_telefono?: string | null;
 }
 
 export interface AuthTokens {

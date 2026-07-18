@@ -8,6 +8,7 @@
 import { registerSocketHandlers }    from './handlers/socket.handler';
 import { registerInventarioHandlers } from './handlers/inventario.handler';
 import { registerClienteHandlers }   from './handlers/cliente.handler';
+import { registerAlertaHandlers }    from './handlers/alerta.handler';
 import { registerCacheHandlers }     from './handlers/cache.handler';
 import logger from '../config/logger';
 
@@ -17,6 +18,7 @@ export function registerAllHandlers(): void {
   registerSocketHandlers();
   registerInventarioHandlers();
   registerClienteHandlers();
+  registerAlertaHandlers();
   registerCacheHandlers();
-  logger.info('✅ Domain event handlers registrados (socket, inventario, cliente, cache)');
+  logger.info('✅ Domain event handlers registrados (socket, inventario, cliente, alerta, cache)');
 }

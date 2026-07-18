@@ -17,6 +17,7 @@ import {
   StockBajoPayload,
   StockAgotadoPayload,
   LoteVencidoPayload,
+  CierreCompletadoPayload,
   FeatureFlagCambiadoPayload,
 } from '../events';
 
@@ -68,6 +69,15 @@ export function registerSocketHandlers(): void {
       nombre:       `${payload.nombreProducto} (lote próximo a vencer)`,
       stock_actual: -1,
       stock_minimo: 0,
+    });
+  });
+
+  eventBus.on<CierreCompletadoPayload>(EVENTS.CIERRE_COMPLETADO, (payload) => {
+    socketGateway.emitCierreCompletado({
+      id_cierre:      payload.idCierre,
+      id_restaurante: payload.idRestaurante,
+      numero_cierre:  payload.numeroCierre,
+      estado:         payload.estado,
     });
   });
 

@@ -9,6 +9,8 @@ import { configuracionService } from './configuracion.service';
 import { NotFoundError, BadRequestError, ConflictError } from '../exceptions/HttpErrors';
 import { getPaginationParams, getSkip, buildPaginatedResult } from '../lib/pagination';
 import { assertRestauranteId } from '../lib/tenantQuery';
+import { eventBus } from '../events/eventBus';
+import { EVENTS, CierreCompletadoPayload } from '../events/events';
 
 function generarNumeroCierre(ultimo: string | null): string {
   if (!ultimo) return 'CIE-000001';
@@ -170,13 +172,25 @@ export const cierreCajaService = {
       ? EstadoCierre.con_diferencia
       : EstadoCierre.completado;
 
-    return cierreCajaRepository.update(id, {
+    const actualizado = await cierreCajaRepository.update(id, {
       monto_final:   data.monto_final,
       diferencia,
       justificacion: data.justificacion,
       observaciones: data.observaciones,
       estado:        estadoFinal,
     });
+
+    const payload: CierreCompletadoPayload = {
+      idCierre:      actualizado.id,
+      idRestaurante: actualizado.id_restaurante,
+      numeroCierre:  actualizado.numero_cierre,
+      estado:        estadoFinal,
+      totalVentas:   Number(actualizado.total_ventas),
+      diferencia,
+    };
+    await eventBus.emit(EVENTS.CIERRE_COMPLETADO, payload);
+
+    return actualizado;
   },
 
   // ── PRIVADOS ─────────────────────────────────────────────────────────────────

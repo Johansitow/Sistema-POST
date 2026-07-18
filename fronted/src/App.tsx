@@ -18,11 +18,13 @@
  * Las páginas de admin usan React.lazy() para no inflar el bundle inicial.
  */
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { CircularProgress, Box } from '@mui/material';
+import { ThemeProvider, createTheme } from '@mui/material/styles';
 import Layout from './components/layout/Layout';
 import { useAuthStore } from './store/useStore';
+import { useBrandingStore } from './store/brandingStore';
 import { ErrorBoundary }       from './components/common/ErrorBoundary';
 import { GlobalSnackbar }      from './components/common/GlobalSnackbar';
 import { RequireRestaurante }  from './components/common/RequireRestaurante';
@@ -43,6 +45,7 @@ import { Recetas }      from './pages/Recetas';
 import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
+import { Perfil }       from './pages/Perfil';
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
 
@@ -81,18 +84,38 @@ const PrivateGuard: React.FC = () => {
 /**
  * AdminGuard — Bloquea rutas /admin si el usuario no es superadmin.
  * Se coloca como wrapper del element de cada ruta admin (no como layout).
+ *
+ * `permiso` (opcional): si se indica, además de superadmin también pasan
+ * los usuarios cuyo rol tenga ese código de permiso — igual que hace el
+ * backend vía `requirePermission()`. Sin `permiso`, el comportamiento es
+ * el de siempre: solo superadmin.
  */
-const AdminGuard: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isSuperAdmin } = useAuthStore();
+const AdminGuard: React.FC<{ children: React.ReactNode; permiso?: string }> = ({ children, permiso }) => {
+  const { isAuthenticated, isSuperAdmin, hasPermission } = useAuthStore();
   if (!isAuthenticated) return <Navigate to="/login"     replace />;
-  if (!isSuperAdmin())  return <Navigate to="/dashboard" replace />;
+  const autorizado = permiso ? hasPermission(permiso) : isSuperAdmin();
+  if (!autorizado) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 };
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
+  const colorPrimario = useBrandingStore(s => s.colorPrimario);
+  const loadBranding  = useBrandingStore(s => s.loadBranding);
+
+  // Carga la marca (nombre/color/logo) una sola vez, antes de que se monten
+  // Login o Layout — ambos la necesitan y ninguno debe disparar el fetch dos veces.
+  useEffect(() => { loadBranding(); }, [loadBranding]);
+
+  // Tema MUI centralizado: color_primario alimenta palette.primary en toda la app
+  // (botones, tabs, switches, etc.), en vez de los hex hardcodeados de antes.
+  const theme = useMemo(() => createTheme({
+    palette: { primary: { main: colorPrimario } },
+  }), [colorPrimario]);
+
   return (
+    <ThemeProvider theme={theme}>
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>
@@ -128,6 +151,8 @@ export default function App() {
 
               {/* Sistema principal */}
               <Route path="/dashboard"     element={<Dashboard   />} />
+              {/* Perfil del usuario — no requiere sede activa */}
+              <Route path="/perfil"        element={<Perfil      />} />
               <Route path="/inventario"      element={<RequireRestaurante><Inventario /></RequireRestaurante>} />
               <Route path="/inventario/:tab" element={<RequireRestaurante><Inventario /></RequireRestaurante>} />
               <Route path="/ordenes"       element={<RequireRestaurante><Ordenes     /></RequireRestaurante>} />
@@ -164,7 +189,7 @@ export default function App() {
               <Route
                 path="/admin/configuracion"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="config.sistema">
                     <Suspense fallback={<PageFallback />}><Configuracion /></Suspense>
                   </AdminGuard>
                 }
@@ -254,5 +279,6 @@ export default function App() {
         <GlobalSnackbar />
       </BrowserRouter>
     </ErrorBoundary>
+    </ThemeProvider>
   );
 }

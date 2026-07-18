@@ -26,6 +26,7 @@
  *     - lanza BadRequestError si diferencia > umbral sin justificación
  *     - estado = completado cuando diferencia <= umbral
  *     - estado = con_diferencia cuando diferencia > umbral (con justificación)
+ *     - emite CIERRE_COMPLETADO con el payload del cierre actualizado
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -73,6 +74,8 @@ import { turnoCajaRepository, cierreCajaRepository } from '../../repositories/tu
 import { configuracionService } from '../../services/configuracion.service';
 import prisma from '../../config/database';
 import { NotFoundError, BadRequestError, ConflictError, ForbiddenError } from '../../exceptions/HttpErrors';
+import { eventBus } from '../../events/eventBus';
+import { EVENTS } from '../../events/events';
 
 const pm    = prisma as any;
 const turnoR  = turnoCajaRepository  as any;
@@ -316,6 +319,27 @@ describe('cierreCajaService.confirmarCierre', () => {
     expect(updateArgs.estado).toBe(EstadoCierre.con_diferencia);
     expect(updateArgs.diferencia).toBe(-12000);
     expect(updateArgs.justificacion).toBe('Faltante detectado en efectivo');
+  });
+
+  it('emite CIERRE_COMPLETADO con el payload del cierre actualizado', async () => {
+    const emitSpy = vi.spyOn(eventBus, 'emit').mockResolvedValue();
+    cierreR.update.mockResolvedValue({
+      ...mockCierreEnProceso,
+      id_restaurante: 2,
+      estado: EstadoCierre.completado,
+    });
+
+    await cierreCajaService.confirmarCierre(5, { monto_final: 201000 });
+
+    expect(emitSpy).toHaveBeenCalledWith(EVENTS.CIERRE_COMPLETADO, {
+      idCierre:      5,
+      idRestaurante: 2,
+      numeroCierre:  'CIE-000005',
+      estado:        EstadoCierre.completado,
+      totalVentas:   200000,
+      diferencia:    1000,
+    });
+    emitSpy.mockRestore();
   });
 
   it('usa umbral default de 5000 si configuracion.getValor lanza error', async () => {

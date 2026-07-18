@@ -120,6 +120,16 @@ class SocketGateway {
   }
 
   /**
+   * Notifica a caja y admin que se completó un cierre de caja.
+   * El cliente usa este evento solo como trigger de refetch de sus
+   * notificaciones (el refetch viaja con X-Restaurante-Id, por lo que
+   * cada sede solo ve sus propias alertas aunque la room sea global).
+   */
+  emitCierreCompletado(data: { id_cierre: number; id_restaurante: number; numero_cierre: string; estado: string }): void {
+    this.io?.to('caja').to('admin').emit('CIERRE_COMPLETADO', data);
+  }
+
+  /**
    * Notifica a TODOS los clientes conectados que un feature flag cambió.
    * El cliente debe hacer un reload de sus flags al recibirlo.
    * Se emite sin filtro de room porque los flags afectan a todos los usuarios.

@@ -20,7 +20,7 @@ const getToken = (): string | null => {
     const raw = localStorage.getItem('auth-storage');
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return parsed?.state?.token ?? null;
+    return parsed?.state?.accessToken ?? null;
   } catch {
     return null;
   }
