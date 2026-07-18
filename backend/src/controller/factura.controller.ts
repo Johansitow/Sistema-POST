@@ -17,6 +17,7 @@ export const facturaController = {
       fecha_desde:    req.query.fecha_desde    ? new Date(req.query.fecha_desde as string) : undefined,
       fecha_hasta:    req.query.fecha_hasta    ? new Date(req.query.fecha_hasta as string) : undefined,
       id_restaurante: req.restauranteId ?? (req.query.id_restaurante ? Number(req.query.id_restaurante) : undefined),
+      search:         req.query.search as string | undefined,
     });
     res.json({ success: true, ...facturas });
   }),

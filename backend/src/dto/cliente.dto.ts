@@ -16,6 +16,11 @@ const emailOptional = z.string().email('Email inválido').max(150).optional().or
 const numeroDocumentoOptional = z.string().max(50).optional().or(z.literal(''))
   .transform(v => (v === '' ? undefined : v));
 
+// telefono_alterno es opcional pero @unique en la base de datos (por grupo) — misma
+// normalización '' → undefined que email/numero_documento, por la misma razón.
+const telefonoAlternoOptional = z.string().max(20).optional().or(z.literal(''))
+  .transform(v => (v === '' ? undefined : v));
+
 // Acepta cualquier string de fecha razonable (fecha sola, datetime con o sin offset/segundos)
 // en vez de exigir un formato ISO exacto — y normaliza '' → undefined.
 const fechaNacimientoOptional = z.string().optional().or(z.literal(''))
@@ -25,8 +30,9 @@ const fechaNacimientoOptional = z.string().optional().or(z.literal(''))
 export const createClienteSchema = z.object({
   nombre_completo:   z.string().min(2, 'El nombre debe tener al menos 2 caracteres').max(200),
   email:             emailOptional,
-  telefono:          z.string().max(20).optional(),
-  telefono_alterno:  z.string().max(20).optional(),
+  telefono:          z.string({ required_error: 'El teléfono es obligatorio' })
+    .min(7, 'El teléfono es obligatorio').max(20),
+  telefono_alterno:  telefonoAlternoOptional,
   tipo_documento:    z.nativeEnum(TipoDocumento).default(TipoDocumento.cc),
   numero_documento:  numeroDocumentoOptional,
   direccion:         z.string().max(255).optional(),
@@ -46,7 +52,7 @@ export const updateClienteSchema = z.object({
   nombre_completo:   z.string().min(2).max(200).optional(),
   email:             emailOptional,
   telefono:          z.string().max(20).optional(),
-  telefono_alterno:  z.string().max(20).optional(),
+  telefono_alterno:  telefonoAlternoOptional,
   tipo_documento:    z.nativeEnum(TipoDocumento).optional(),
   numero_documento:  numeroDocumentoOptional,
   direccion:         z.string().max(255).optional(),

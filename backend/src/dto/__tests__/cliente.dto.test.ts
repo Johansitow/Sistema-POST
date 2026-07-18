@@ -5,6 +5,7 @@ describe('createClienteSchema', () => {
   it('acepta email, numero_documento y fecha_nacimiento vacíos y los normaliza a undefined', () => {
     const result = createClienteSchema.parse({
       nombre_completo:  'Juan Pérez',
+      telefono:         '3001234567',
       email:            '',
       numero_documento: '',
       fecha_nacimiento: '',
@@ -16,7 +17,7 @@ describe('createClienteSchema', () => {
   });
 
   it('acepta el request sin esos campos en absoluto (cliente de paso, solo nombre)', () => {
-    const result = createClienteSchema.parse({ nombre_completo: 'Cliente Rápido' });
+    const result = createClienteSchema.parse({ nombre_completo: 'Cliente Rápido', telefono: '3001234567' });
     expect(result.email).toBeUndefined();
     expect(result.numero_documento).toBeUndefined();
     expect(result.fecha_nacimiento).toBeUndefined();
@@ -39,6 +40,7 @@ describe('createClienteSchema', () => {
   it('acepta un email válido y lo conserva', () => {
     const result = createClienteSchema.parse({
       nombre_completo: 'Juan Pérez',
+      telefono:        '3001234567',
       email:           'juan@test.com',
     });
     expect(result.email).toBe('juan@test.com');
@@ -46,13 +48,26 @@ describe('createClienteSchema', () => {
 
   it('acepta distintos formatos razonables de fecha de nacimiento', () => {
     for (const fecha of ['1990-05-15', '1990-05-15T00:00:00Z', '1990-05-15T00:00']) {
-      const result = createClienteSchema.parse({ nombre_completo: 'Juan Pérez', fecha_nacimiento: fecha });
+      const result = createClienteSchema.parse({ nombre_completo: 'Juan Pérez', telefono: '3001234567', fecha_nacimiento: fecha });
       expect(result.fecha_nacimiento).toBe(fecha);
     }
   });
 
   it('rechaza un nombre_completo ausente', () => {
     expect(() => createClienteSchema.parse({})).toThrow();
+  });
+
+  it('rechaza un telefono ausente', () => {
+    expect(() => createClienteSchema.parse({ nombre_completo: 'Juan Pérez' })).toThrow(/teléfono es obligatorio/);
+  });
+
+  it('normaliza telefono_alterno vacío a undefined (evita violar el unique por grupo)', () => {
+    const result = createClienteSchema.parse({
+      nombre_completo:  'Juan Pérez',
+      telefono:         '3001234567',
+      telefono_alterno: '',
+    });
+    expect(result.telefono_alterno).toBeUndefined();
   });
 });
 

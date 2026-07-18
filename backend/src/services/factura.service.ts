@@ -22,6 +22,7 @@ export const facturaService = {
     fecha_desde?: Date;
     fecha_hasta?: Date;
     id_restaurante?: number;
+    search?: string;
   }) {
     const pagination = getPaginationParams(params.page, params.limit);
     const [facturas, total] = await facturaRepository.findAll(pagination, {
@@ -29,6 +30,7 @@ export const facturaService = {
       fecha_desde:    params.fecha_desde,
       fecha_hasta:    params.fecha_hasta,
       id_restaurante: params.id_restaurante,
+      search:         params.search,
     });
     return buildPaginatedResult(facturas, total, pagination);
   },

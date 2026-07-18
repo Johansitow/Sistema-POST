@@ -13,7 +13,6 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Plus, Search, MapPin, Store, Clock, X, RefreshCw, Eye,
   Check, ShoppingCart, DollarSign, Package,
@@ -31,12 +30,12 @@ import {
   metodoPagoService, MetodoPagoFrontend,
 } from '../services/servicios-gestion';
 import { formatCurrency, formatDateTime, TIPOS_ORDEN as _TIPOS_ORDEN } from '../utils';
-import { configuracionService } from '../services/servicios-operacion';
+import { configuracionService, cierreCajaService } from '../services/servicios-operacion';
 import { useUIStore, toast }    from '../store/uiStore';
 import { ConfirmDialog }        from '../components/common/ConfirmDialog';
 import { useEscapeKey }         from '../hooks/useEscapeKey';
 import { useAuthStore }         from '../store/useStore';
-import { EmptyState, LoadingScreen, ErrorAlert } from '../components/common';
+import { EmptyState, LoadingScreen, ErrorAlert, ClienteFormModal } from '../components/common';
 import { clienteService } from '../services/cliente.service';
 import { categoriasService, type Categoria } from '../services/categorias.service';
 import { useRestauranteActivo, useRestauranteStore } from '../store/restauranteStore';
@@ -676,7 +675,6 @@ const CrearOrdenModal: React.FC<{
   onSave: () => void;
 }> = ({ estadoInicial, onClose, onSave }) => {
   const { user }         = useAuthStore();
-  const navigate         = useNavigate();
   const idRestaurante    = useRestauranteActivo();
 
   // Multi-restaurante
@@ -725,6 +723,7 @@ const CrearOrdenModal: React.FC<{
   const [clienteResultados, setClienteResultados] = useState<any[]>([]);
   const [clienteLoading, setClienteLoading]     = useState(false);
   const [clienteDropdown, setClienteDropdown]   = useState(false);
+  const [showQuickCliente, setShowQuickCliente] = useState(false);
   const clienteRef = useRef<HTMLDivElement>(null);
 
   // --- Datos de contacto / domicilio ---
@@ -984,6 +983,7 @@ const CrearOrdenModal: React.FC<{
   // --- Enviar ---
   const handleSubmit = async () => {
     if (detalles.length === 0) { setError('Agrega al menos un producto'); return; }
+    if (!clienteId) { setError('Selecciona o crea un cliente para continuar'); return; }
     setSaving(true); setError(null);
     try {
       if (puedeEnviarV2) {
@@ -1436,7 +1436,7 @@ const CrearOrdenModal: React.FC<{
                         <div className="px-3 py-3 text-xs text-slate-500 space-y-2">
                           <p className="font-medium">No se encontró ningún cliente.</p>
                           <button
-                            onClick={() => { onClose(); navigate('/clientes'); }}
+                            onClick={() => setShowQuickCliente(true)}
                             className="flex items-center gap-1.5 text-blue-600 hover:text-blue-700 font-semibold transition-colors">
                             <UserPlus className="w-3.5 h-3.5" /> Registrar nuevo cliente →
                           </button>
@@ -1453,7 +1453,7 @@ const CrearOrdenModal: React.FC<{
                             </button>
                           ))}
                           <button
-                            onClick={() => { onClose(); navigate('/clientes'); }}
+                            onClick={() => setShowQuickCliente(true)}
                             className="w-full text-left px-3 py-2 text-[10px] text-blue-600 hover:bg-blue-50 flex items-center gap-1 transition-colors border-t border-slate-100">
                             <UserPlus className="w-3 h-3" /> Registrar nuevo cliente
                           </button>
@@ -1465,25 +1465,14 @@ const CrearOrdenModal: React.FC<{
               )}
             </div>
 
-            {/* Datos de contacto / domicilio */}
+            {/* Costo de domicilio / observaciones — el nombre, teléfono y dirección ya
+                vienen del cliente asociado (arriba), no se vuelven a pedir aquí. */}
             <div className="border-t border-slate-100 bg-white px-4 pt-3 pb-3 flex-shrink-0 space-y-2">
-              {tipo === 'local' ? (
-                <input value={nombreContacto} onChange={e => setNombreContacto(e.target.value)}
-                  placeholder="Nombre del cliente (opcional)"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-emerald-500 outline-none" />
-              ) : (
+              {tipo === 'domicilio' && (
                 <div className="space-y-2">
                   <p className="text-xs font-bold text-blue-700 flex items-center gap-1">
-                    <MapPin className="w-3 h-3" /> Datos de Domicilio
+                    <MapPin className="w-3 h-3" /> Costo de domicilio
                   </p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input value={nombreContacto} onChange={e => setNombreContacto(e.target.value)} placeholder="Nombre cliente"
-                      className="px-3 py-2 border border-blue-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-400 outline-none bg-blue-50/50" />
-                    <input value={telefono} onChange={e => setTelefono(e.target.value)} placeholder="Teléfono"
-                      className="px-3 py-2 border border-blue-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-400 outline-none bg-blue-50/50" />
-                  </div>
-                  <input value={direccion} onChange={e => setDireccion(e.target.value)} placeholder="Dirección de entrega"
-                    className="w-full px-3 py-2 border border-blue-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-400 outline-none bg-blue-50/50" />
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 text-xs font-bold">$</span>
                     <input type="number" min="0" value={costoDomicilio} onChange={e => setCostoDomicilio(e.target.value)}
@@ -1503,16 +1492,31 @@ const CrearOrdenModal: React.FC<{
                 className="px-4 py-2.5 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 transition-colors">
                 Cancelar
               </button>
-              <button onClick={handleSubmit} disabled={saving || detalles.length === 0}
+              <button onClick={handleSubmit} disabled={saving || detalles.length === 0 || !clienteId}
                 className="flex-1 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 hover:from-emerald-700 hover:to-teal-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                 {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                {saving ? 'Creando...' : detalles.length === 0 ? 'Agrega productos' : `Crear · ${formatCurrency(total)}`}
+                {saving
+                  ? 'Creando...'
+                  : detalles.length === 0
+                    ? 'Agrega productos'
+                    : !clienteId
+                      ? 'Selecciona un cliente'
+                      : `Crear · ${formatCurrency(total)}`}
               </button>
             </div>
           </div>
         </div>
       </div>
     </div>
+
+    {/* ── Registro de cliente completo (sin salir de la orden en curso) ── */}
+    {showQuickCliente && (
+      <ClienteFormModal
+        initialValues={{ nombre_completo: clienteBusqueda }}
+        onClose={() => setShowQuickCliente(false)}
+        onSaved={c => { handleSelectCliente(c); setShowQuickCliente(false); }}
+      />
+    )}
 
     {/* ── Picker de variantes ────────────────────────────────────────── */}
     {variantePicker && (
@@ -1622,11 +1626,20 @@ export const Ordenes: React.FC = () => {
 
   useEffect(() => { loadOrdenes(); }, [loadOrdenes]);
 
-  const filtered = ordenes.filter(o =>
-    !searchTerm ||
-    o.numero_orden.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    o.nombre_contacto?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Último cierre de caja confirmado de la sede activa — las órdenes entregadas de antes
+  // (o al momento) de ese cierre se ocultan del tablero (quedaron "despachadas"); se
+  // consultan desde Facturas en vez de acumularse aquí indefinidamente.
+  const [ultimoCierre, setUltimoCierre] = useState<{ fecha_cierre: string } | null>(null);
+
+  useEffect(() => {
+    if (!idRestaurante) { setUltimoCierre(null); return; }
+    cierreCajaService.getAll({ id_restaurante: idRestaurante, limit: 5, page: 1 })
+      .then(({ data }) => {
+        const ultimo = data.find(c => c.estado === 'completado' || c.estado === 'con_diferencia');
+        setUltimoCierre(ultimo ?? null);
+      })
+      .catch(() => setUltimoCierre(null));
+  }, [idRestaurante]);
 
   // Traduce el código legado (estado.codigo, el que sí cambia en órdenes sin sedes) a la
   // misma clave de columna que usa estado_global, para que el tablero no dependa de que
@@ -1641,6 +1654,20 @@ export const Ordenes: React.FC = () => {
     const codigoLegado = o.estado?.codigo?.toUpperCase() ?? '';
     return LEGACY_TO_GLOBAL[codigoLegado] ?? codigoLegado ?? 'OTRO';
   };
+
+  const filtered = ordenes.filter(o => {
+    const matchSearch = !searchTerm ||
+      o.numero_orden.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      o.nombre_contacto?.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!matchSearch) return false;
+
+    // Las entregadas de antes (o al momento) del último cierre de caja quedan
+    // "despachadas" — ya no se muestran en el tablero, se consultan desde Facturas.
+    if (ultimoCierre && o.fecha_entrega && estadoCodigo(o) === 'ENTREGADA') {
+      if (new Date(o.fecha_entrega) <= new Date(ultimoCierre.fecha_cierre)) return false;
+    }
+    return true;
+  });
 
   const statsOrdenes = {
     pendientes:  ordenes.filter(o => estadoCodigo(o) === 'PENDIENTE' || estadoCodigo(o) === 'RECIBIDA').length,

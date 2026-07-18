@@ -703,3 +703,89 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     expect(result.advertencias[0].mensaje).toContain('incompatible');
   });
 });
+
+// ── descontarIngredientesOrden / descontarIngredientesSede ────────────────────
+// Ambas delegan en _descontarIngredientesDeVenta — una sola fórmula para las dos
+// arquitecturas (antes divergían: el legado ignoraba cantidad_producida y la
+// saga nueva no respetaba es_opcional ni convertía unidades).
+
+describe('recetaService.descontarIngredientesOrden / descontarIngredientesSede', () => {
+  const mockTx: any = {
+    orden:      { findUnique: vi.fn() },
+    receta:     { findFirst: vi.fn() },
+    producto:   { findUnique: vi.fn() },
+    movimiento: { create: vi.fn() },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockTx.producto.update = vi.fn();
+  });
+
+  it('divide por cantidad_producida: una receta que rinde 10 porciones descuenta 1/10 por unidad vendida', async () => {
+    mockTx.orden.findUnique.mockResolvedValue({
+      id: 1, numero_orden: 'ORD-000001', id_restaurante: 1,
+      detalles: [{ id_producto: 10, cantidad: new Decimal(5) }], // se vendieron 5 unidades
+    });
+    mockTx.receta.findFirst.mockResolvedValue({
+      nombre_receta:      'Bandeja Paisa',
+      cantidad_producida: new Decimal(10), // el batch de la receta rinde 10 porciones
+      ingredientes: [
+        { id_producto: 2, cantidad: new Decimal(1000), unidad: 'gramo', es_opcional: false },
+      ],
+    });
+    mockTx.producto.findUnique.mockResolvedValue({ id: 2, stock_actual: new Decimal(50000), unidad_medida: 'gramo' });
+
+    await recetaService.descontarIngredientesOrden(1, mockTx);
+
+    // 5 vendidas / 10 que rinde la receta = 0.5 → 1000g * 0.5 = 500g descontados
+    const updateCall = (mockTx.producto.update as any).mock.calls[0][0];
+    expect(Number(updateCall.data.stock_actual)).toBeCloseTo(49500);
+    const movimientoCall = (mockTx.movimiento.create as any).mock.calls[0][0];
+    expect(Number(movimientoCall.data.cantidad)).toBeCloseTo(500);
+  });
+
+  it('no descuenta ingredientes marcados como es_opcional', async () => {
+    mockTx.orden.findUnique.mockResolvedValue({
+      id: 1, numero_orden: 'ORD-000001', id_restaurante: 1,
+      detalles: [{ id_producto: 10, cantidad: new Decimal(1) }],
+    });
+    mockTx.receta.findFirst.mockResolvedValue({
+      nombre_receta:      'Bandeja Paisa',
+      cantidad_producida: new Decimal(1),
+      ingredientes: [
+        { id_producto: 2, cantidad: new Decimal(100), unidad: 'gramo', es_opcional: false },
+        { id_producto: 3, cantidad: new Decimal(50),  unidad: 'gramo', es_opcional: true },
+      ],
+    });
+    mockTx.producto.findUnique.mockResolvedValue({ id: 2, stock_actual: new Decimal(1000), unidad_medida: 'gramo' });
+
+    await recetaService.descontarIngredientesOrden(1, mockTx);
+
+    // Solo se consulta/descuenta el ingrediente obligatorio (id_producto 2)
+    expect(mockTx.producto.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockTx.producto.findUnique).toHaveBeenCalledWith({ where: { id: 2 } });
+  });
+
+  it('descontarIngredientesSede usa la misma fórmula para la arquitectura nueva, scoped por restaurante', async () => {
+    mockTx.receta.findFirst.mockResolvedValue({
+      nombre_receta:      'Bandeja Paisa',
+      cantidad_producida: new Decimal(2),
+      ingredientes: [
+        { id_producto: 2, cantidad: new Decimal(200), unidad: 'gramo', es_opcional: false },
+      ],
+    });
+    mockTx.producto.findUnique.mockResolvedValue({ id: 2, stock_actual: new Decimal(1000), unidad_medida: 'gramo' });
+
+    await recetaService.descontarIngredientesSede({
+      id_orden: 5, numero_orden: 'ORD-000005', id_restaurante: 3,
+      items: [{ id_producto: 10, cantidad: 4 }],
+    }, mockTx);
+
+    // 4 vendidas / 2 que rinde la receta = 2 → 200g * 2 = 400g descontados
+    expect(Number((mockTx.producto.update as any).mock.calls[0][0].data.stock_actual)).toBeCloseTo(600);
+    expect(mockTx.receta.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ id_producto_final: 10, id_restaurante: 3, estado: 'activo' }),
+    }));
+  });
+});

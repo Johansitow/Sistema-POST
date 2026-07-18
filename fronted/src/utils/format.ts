@@ -88,6 +88,37 @@ export const formatRelativeTime = (dateStr: string): string => {
   return formatDateShort(dateStr);
 };
 
+/**
+ * Calcula fecha_desde / fecha_hasta a partir de un selector de rango tipo
+ * píldora ("today" | "week" | "month" | "custom" | "all"). Compartida por
+ * cualquier página con un selector de período (Reportes, Facturas, ...).
+ * Ej: ('today', '', '') → { fecha_desde: '2026-07-13', fecha_hasta: '2026-07-13' }
+ *     ('all',   '', '') → {} (sin filtro de fecha)
+ */
+export const buildDateParams = (
+  range: string,
+  customDesde: string,
+  customHasta: string
+): { fecha_desde?: string; fecha_hasta?: string } => {
+  const now   = new Date();
+  const today = now.toISOString().split('T')[0];
+  switch (range) {
+    case 'today': return { fecha_desde: today, fecha_hasta: today };
+    case 'week': {
+      const d = new Date(now); d.setDate(d.getDate() - 6);
+      return { fecha_desde: d.toISOString().split('T')[0], fecha_hasta: today };
+    }
+    case 'month': {
+      const d = new Date(now); d.setDate(d.getDate() - 29);
+      return { fecha_desde: d.toISOString().split('T')[0], fecha_hasta: today };
+    }
+    case 'custom':
+      return { fecha_desde: customDesde || undefined, fecha_hasta: customHasta || undefined };
+    default:
+      return {};
+  }
+};
+
 // ─── Números ──────────────────────────────────────────────────────────────────
 
 /**

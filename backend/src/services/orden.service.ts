@@ -18,6 +18,7 @@ import { EstadoOrdenGlobal, TipoOrden } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../config/database';
 import { ordenRepository, includeOrdenCompleta } from '../repositories/orden.repository';
+import { clienteRepository } from '../repositories/cliente.repository';
 import { ordenSedeRepository as _ordenSedeRepository }  from '../repositories/orden-sede.repository';
 import { pagoOrdenRepository as _pagoOrdenRepository }  from '../repositories/pago-orden.repository';
 import { estadoRepository }     from '../repositories/estado.repository';
@@ -121,7 +122,7 @@ export const ordenService = {
   async crear(data: {
     id_grupo:    number;
     id_usuario:  number;
-    id_cliente?: number;
+    id_cliente:  number;
     tipo_orden:  TipoOrden;
     // Campos delivery
     direccion_entrega?:   string;
@@ -145,6 +146,10 @@ export const ordenService = {
       }>;
     }>;
   }) {
+    // El cliente debe existir y pertenecer al mismo grupo del usuario (evita asociar
+    // por error/ataque el cliente de otro grupo de negocio).
+    await clienteRepository.findByIdScoped(data.id_cliente, { grupoId: data.id_grupo, esSuperAdmin: false });
+
     // Verificar disponibilidad de recetas POR restaurante, antes de abrir TX
     for (const sede of data.sedes) {
       await recetaService.verificarDisponibilidadParaDetalles(
@@ -568,6 +573,10 @@ export const ordenService = {
     // Redirige al flujo legado completo de pago
     const orden = await this.obtenerPorId(id);
 
+    if (orden.estado_global === EstadoOrdenGlobal.ENTREGADA) {
+      throw new BadRequestError('La orden ya fue entregada');
+    }
+
     if (pagos && pagos.length > 0) {
       const totalPagado = pagos.reduce((s, p) => s + p.monto, 0);
       if (totalPagado < Number(orden.total)) {
@@ -598,6 +607,11 @@ export const ordenService = {
     pagos?: Array<{ id_metodo_pago: number; monto: number; referencia?: string; notas?: string }>
   ) {
     const orden = await ordenRepository.findByIdScoped(id, ctx);
+
+    const estadoActual = await estadoRepository.findById(orden.id_estado);
+    if (estadoActual?.es_final) {
+      throw new BadRequestError('La orden ya está en un estado final y no admite más cambios');
+    }
 
     await estadoRepository.findTransicion(orden.id_estado, id_estado_nuevo).then(t => {
       if (!t) throw new BadRequestError('Transición no permitida desde el estado actual');
@@ -645,6 +659,9 @@ export const ordenService = {
   /** Legado: eliminar orden con reversa de stock */
   async eliminarLegado(id: number) {
     const orden = await this.obtenerPorId(id);
+    if ((orden as any).estado?.es_final) {
+      throw new BadRequestError('No se puede eliminar una orden en un estado final (entregada o cancelada)');
+    }
     return prisma.$transaction(async (tx) => {
       for (const detalle of (orden as any).detalles ?? []) {
         const tieneReceta = await tx.receta.findFirst({
@@ -664,12 +681,20 @@ export const ordenService = {
   /** Legado: agregar detalle a orden sin sedes */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   async agregarDetalle(ordenId: number, data: any, ctx: TenantCtx) {
-    await ordenRepository.findByIdScoped(ordenId, ctx);
+    const orden = await ordenRepository.findByIdScoped(ordenId, ctx);
+    if ((orden as any).estado?.permite_edicion === false) {
+      throw new BadRequestError('No se puede editar una orden en este estado');
+    }
     await recetaService.verificarDisponibilidadParaDetalles([{ id_producto: data.id_producto, cantidad: data.cantidad }]);
     return prisma.$transaction(async (tx) => {
       const prod = await tx.producto.findUnique({ where: { id: data.id_producto } });
       if (!prod) throw new NotFoundError('Producto');
-      if (Number(prod.stock_actual) < data.cantidad) throw new BadRequestError('Stock insuficiente');
+
+      const tieneReceta = await tx.receta.findFirst({
+        where: { id_producto_final: data.id_producto, estado: 'activo' },
+        select: { id: true },
+      });
+      if (!tieneReceta && Number(prod.stock_actual) < data.cantidad) throw new BadRequestError('Stock insuficiente');
 
       const pu  = toDecimal(data.precio_unitario);
       const sub = pu.times(toDecimal(data.cantidad));
@@ -680,8 +705,10 @@ export const ordenService = {
         include: { producto: true },
       });
 
-      const nuevoStock = Number(prod.stock_actual) - data.cantidad;
-      await tx.producto.update({ where: { id: data.id_producto }, data: { stock_actual: toDecimal(nuevoStock) } });
+      if (!tieneReceta) {
+        const nuevoStock = Number(prod.stock_actual) - data.cantidad;
+        await tx.producto.update({ where: { id: data.id_producto }, data: { stock_actual: toDecimal(nuevoStock) } });
+      }
       await this._recalcularTotalesLegado(tx, ordenId);
       return detalle;
     });
@@ -691,7 +718,10 @@ export const ordenService = {
     // Validate tenant via parent order
     const detalleRaw = await ordenRepository.findDetalleById(detalleId);
     if (!detalleRaw) throw new NotFoundError('Detalle');
-    await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+    const orden = await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+    if ((orden as any).estado?.permite_edicion === false) {
+      throw new BadRequestError('No se puede editar una orden en este estado');
+    }
 
     if (data.cantidad != null) {
       const detalleActual = await prisma.ordenDetalle.findUnique({ where: { id: detalleId } });
@@ -704,11 +734,16 @@ export const ordenService = {
       const detalle = await tx.ordenDetalle.findUnique({ where: { id: detalleId }, include: { producto: true } });
       if (!detalle) throw new NotFoundError('Detalle');
 
+      const tieneReceta = await tx.receta.findFirst({
+        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        select: { id: true },
+      });
+
       const updateData: any = {};
       let dif = 0;
       if (data.cantidad != null && data.cantidad !== Number(detalle.cantidad)) {
         dif = data.cantidad - Number(detalle.cantidad);
-        if (dif > 0 && Number(detalle.producto.stock_actual) < dif) throw new BadRequestError('Stock insuficiente');
+        if (!tieneReceta && dif > 0 && Number(detalle.producto.stock_actual) < dif) throw new BadRequestError('Stock insuficiente');
         updateData.cantidad = toDecimal(data.cantidad);
         updateData.subtotal = detalle.precio_unitario.times(data.cantidad);
         updateData.total    = updateData.subtotal.minus(detalle.descuento);
@@ -717,7 +752,9 @@ export const ordenService = {
 
       const actualizado = await tx.ordenDetalle.update({ where: { id: detalleId }, data: updateData, include: { producto: true } });
       if (dif !== 0) {
-        await tx.producto.update({ where: { id: detalle.id_producto }, data: { stock_actual: toDecimal(Number(detalle.producto.stock_actual) - dif) } });
+        if (!tieneReceta) {
+          await tx.producto.update({ where: { id: detalle.id_producto }, data: { stock_actual: toDecimal(Number(detalle.producto.stock_actual) - dif) } });
+        }
         await this._recalcularTotalesLegado(tx, detalle.id_orden);
       }
       return actualizado;
@@ -728,13 +765,23 @@ export const ordenService = {
     // Validate tenant via parent order
     const detalleRaw = await ordenRepository.findDetalleById(detalleId);
     if (!detalleRaw) throw new NotFoundError('Detalle');
-    await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+    const orden = await ordenRepository.findByIdScoped(detalleRaw.id_orden, ctx);
+    if ((orden as any).estado?.permite_edicion === false) {
+      throw new BadRequestError('No se puede editar una orden en este estado');
+    }
 
     return prisma.$transaction(async (tx) => {
       const detalle = await tx.ordenDetalle.findUnique({ where: { id: detalleId } });
       if (!detalle) throw new NotFoundError('Detalle');
-      const prod = await tx.producto.findUnique({ where: { id: detalle.id_producto } });
-      if (prod) await tx.producto.update({ where: { id: detalle.id_producto }, data: { stock_actual: toDecimal(Number(prod.stock_actual) + Number(detalle.cantidad)) } });
+
+      const tieneReceta = await tx.receta.findFirst({
+        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        select: { id: true },
+      });
+      if (!tieneReceta) {
+        const prod = await tx.producto.findUnique({ where: { id: detalle.id_producto } });
+        if (prod) await tx.producto.update({ where: { id: detalle.id_producto }, data: { stock_actual: toDecimal(Number(prod.stock_actual) + Number(detalle.cantidad)) } });
+      }
       await tx.ordenDetalle.delete({ where: { id: detalleId } });
       await this._recalcularTotalesLegado(tx, detalle.id_orden);
     });
@@ -746,7 +793,7 @@ export const ordenService = {
     id_estado?:          number;
     id_usuario:          number;
     id_restaurante?:     number;
-    id_cliente?:         number;
+    id_cliente:          number;
     direccion_entrega?:  string;
     telefono_contacto?:  string;
     nombre_contacto?:    string;
@@ -761,6 +808,15 @@ export const ordenService = {
       id_variante?: number; descuento?: number; notas?: string;
     }>;
   }, _usuarioId?: number) {
+    // El cliente debe existir y pertenecer al mismo grupo del restaurante de la orden
+    // (evita asociar por error/ataque el cliente de otro grupo de negocio). El grupo no
+    // viaja directo en `data` en el flujo legado — se resuelve desde el restaurante.
+    const restaurante = await prisma.restaurante.findUnique({
+      where: { id: data.id_restaurante }, select: { id_grupo: true },
+    });
+    if (!restaurante) throw new NotFoundError('Restaurante');
+    await clienteRepository.findByIdScoped(data.id_cliente, { grupoId: restaurante.id_grupo, esSuperAdmin: false });
+
     const detalles = data.detalles ?? [];
     await recetaService.verificarDisponibilidadParaDetalles(
       detalles.map(d => ({ id_producto: d.id_producto, cantidad: d.cantidad }))

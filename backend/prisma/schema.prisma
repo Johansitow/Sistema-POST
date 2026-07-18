@@ -949,7 +949,7 @@ model Cliente {
   // Datos personales
   nombre_completo    String        @db.VarChar(200)
   email              String?       @db.VarChar(150)
-  telefono           String?       @db.VarChar(20)
+  telefono           String        @db.VarChar(20)
   telefono_alterno   String?       @db.VarChar(20)
 
   // Identificación (opcional — útil para facturación electrónica)
@@ -990,9 +990,11 @@ model Cliente {
   puntos             ClientePunto[]
   grupo              GrupoNegocio      @relation(fields: [id_grupo], references: [id])
 
-  // Únicos por grupo de negocio — un mismo email/documento puede repetirse entre
+  // Únicos por grupo de negocio — un mismo email/telefono/documento puede repetirse entre
   // grupos distintos, pero no dos veces dentro del mismo grupo.
   @@unique([id_grupo, email])
+  @@unique([id_grupo, telefono])
+  @@unique([id_grupo, telefono_alterno])
   @@unique([id_grupo, numero_documento])
   @@index([email])
   @@index([telefono])
@@ -1138,6 +1140,42 @@ model UiConfiguracion {
 
   @@unique([scope, clave, contexto])
   @@map("ui_configuraciones")
+}
+
+// ── GrupoMenu / AsignacionModuloMenu — subdivisiones editables del menú lateral ──
+// Reemplaza el par items_ocultos/orden_items de UiConfiguracion (scope navegacion):
+// antes solo se podía ocultar/reordenar módulos DENTRO de un grupo fijo por código;
+// esto permite además renombrar grupos, crear/eliminar grupos y mover módulos entre ellos.
+//
+// El catálogo de módulos posibles (texto, ícono) sigue viviendo en el frontend
+// (menuCatalog.tsx) — estas tablas solo gobiernan grupo, orden y visibilidad.
+// Sin scoping por tenant: es la misma estructura de menú para todos los restaurantes,
+// igual que hoy. Sin `estado`/soft-delete: es config de UI, no dato de negocio
+// (mismo criterio que UiConfiguracion/Configuracion).
+
+model GrupoMenu {
+  id                 Int      @id @default(autoincrement())
+  nombre             String   @db.VarChar(50)
+  orden              Int      @default(0)
+  fecha_creacion     DateTime @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  items AsignacionModuloMenu[]
+
+  @@map("grupos_menu")
+}
+
+model AsignacionModuloMenu {
+  id            Int      @id @default(autoincrement())
+  path          String   @unique @db.VarChar(100)
+  id_grupo_menu Int
+  orden         Int      @default(0)
+  visible       Boolean  @default(true)
+
+  grupo GrupoMenu @relation(fields: [id_grupo_menu], references: [id], onDelete: Cascade)
+
+  @@index([id_grupo_menu])
+  @@map("asignaciones_modulo_menu")
 }
 
 // ============================================================================

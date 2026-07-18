@@ -4,9 +4,13 @@
 
 import { Router } from 'express';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
-import { getAll, getByScope, getConfig, setConfig, deleteConfig } from '../controller/uiConfiguracion.controller';
+import { getAll, getByScope, getConfig, setConfig, deleteConfig, getPublicBranding } from '../controller/uiConfiguracion.controller';
 
 const router = Router();
+
+// Pública — registrada antes de `authenticate` a propósito: el login la necesita sin sesión.
+router.get('/public/branding', getPublicBranding);
+
 router.use(authenticate);
 
 /**

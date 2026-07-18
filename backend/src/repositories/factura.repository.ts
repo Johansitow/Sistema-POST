@@ -19,7 +19,7 @@ export const facturaRepository = {
 
   findAll: (
     pagination: PaginationParams,
-    filters: { estado_factura?: EstadoFactura; fecha_desde?: Date; fecha_hasta?: Date; id_restaurante?: number }
+    filters: { estado_factura?: EstadoFactura; fecha_desde?: Date; fecha_hasta?: Date; id_restaurante?: number; search?: string }
   ) => {
     const where: any = {};
     if (filters.estado_factura) where.estado_factura = filters.estado_factura;
@@ -28,6 +28,13 @@ export const facturaRepository = {
       where.fecha_emision = {};
       if (filters.fecha_desde) where.fecha_emision.gte = filters.fecha_desde;
       if (filters.fecha_hasta) where.fecha_emision.lte = filters.fecha_hasta;
+    }
+    if (filters.search) {
+      where.OR = [
+        { numero_factura: { contains: filters.search, mode: 'insensitive' } },
+        { orden: { numero_orden: { contains: filters.search, mode: 'insensitive' } } },
+        { orden: { cliente: { nombre_completo: { contains: filters.search, mode: 'insensitive' } } } },
+      ];
     }
 
     return Promise.all([
@@ -39,6 +46,7 @@ export const facturaRepository = {
               estado:  true,
               usuario: { select: { id: true, nombre_completo: true } },
               pagos:   { include: { metodo_pago: true } },
+              cliente: { select: { id: true, nombre_completo: true, telefono: true } },
             },
           },
         },

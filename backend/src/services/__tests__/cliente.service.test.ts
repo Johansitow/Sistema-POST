@@ -22,6 +22,8 @@ vi.mock('../../repositories/cliente.repository', () => ({
     findById:          vi.fn(),
     findByIdScoped:    vi.fn(),
     findByEmail:       vi.fn(),
+    findByTelefono:    vi.fn(),
+    findByTelefonoAlterno: vi.fn(),
     findByDocumento:   vi.fn(),
     create:            vi.fn(),
     update:            vi.fn(),
@@ -169,6 +171,25 @@ describe('clienteService.crear — tenant guard', () => {
     repo.findByDocumento.mockResolvedValue(mockCliente);
 
     await expect(clienteService.crear(makeCreateDTO({ numero_documento: '12345678' }), CTX_GRUPO_1))
+      .rejects.toThrow(ConflictError);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('lanza ConflictError si el teléfono ya está registrado', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByTelefono.mockResolvedValue(mockCliente);
+
+    await expect(clienteService.crear(makeCreateDTO({ telefono: '3001234567' }), CTX_GRUPO_1))
+      .rejects.toThrow(ConflictError);
+    expect(repo.create).not.toHaveBeenCalled();
+  });
+
+  it('lanza ConflictError si el teléfono alterno ya está registrado', async () => {
+    repo.findByEmail.mockResolvedValue(null);
+    repo.findByTelefono.mockResolvedValue(null);
+    repo.findByTelefonoAlterno.mockResolvedValue(mockCliente);
+
+    await expect(clienteService.crear(makeCreateDTO({ telefono: '3001234567', telefono_alterno: '3009999999' }), CTX_GRUPO_1))
       .rejects.toThrow(ConflictError);
     expect(repo.create).not.toHaveBeenCalled();
   });

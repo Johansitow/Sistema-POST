@@ -49,10 +49,9 @@ export const createOrdenSchema = z.object({
     .int('El ID del usuario debe ser un número entero')
     .positive('El ID del usuario debe ser positivo'),
 
-  id_cliente: z.number()
+  id_cliente: z.number({ required_error: 'Debes seleccionar o crear un cliente para la orden' })
     .int('El ID del cliente debe ser un número entero')
-    .positive('El ID del cliente debe ser positivo')
-    .optional(),
+    .positive('Debes seleccionar o crear un cliente para la orden'),
 
   id_restaurante: z.number()
     .int()
@@ -223,7 +222,8 @@ const sedeSchema = z.object({
 export const createOrdenV2Schema = z.object({
   id_grupo:    z.number().int().positive(),
   tipo_orden:  z.nativeEnum(TipoOrden),
-  id_cliente:  z.number().int().positive().optional(),
+  id_cliente:  z.number({ required_error: 'Debes seleccionar o crear un cliente para la orden' })
+    .int().positive('Debes seleccionar o crear un cliente para la orden'),
 
   // Delivery
   direccion_entrega:   z.string().max(300).optional(),

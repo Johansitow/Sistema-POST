@@ -79,6 +79,13 @@ interface AuthState {
    * con datos de una versión anterior del token (sin campo rol)
    */
   isSuperAdmin:   () => boolean;
+
+  /**
+   * Verifica si el usuario actual tiene un permiso puntual (código `recurso.accion`).
+   * El superadmin siempre pasa (bypass), igual que en el backend
+   * (ver requirePermission en permission.middleware.ts).
+   */
+  hasPermission:  (codigo: string) => boolean;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -104,6 +111,12 @@ export const useAuthStore = create<AuthState>()(
         // Leer es_super_admin del usuario directamente (no del rol).
         // El campo en el rol es @deprecated y no debe usarse para decisiones de acceso.
         return user?.es_super_admin ?? false;
+      },
+
+      hasPermission: (codigo) => {
+        const user = get().user;
+        if (user?.es_super_admin) return true;
+        return user?.permisos?.includes(codigo) ?? false;
       },
     }),
     {

@@ -15,19 +15,23 @@ import {
   Box, Paper, TextField, Button, Typography, Alert,
   InputAdornment, IconButton, CircularProgress, Divider,
 } from '@mui/material';
+import { useTheme } from '@mui/material/styles';
 import {
   Visibility, VisibilityOff, RestaurantMenu, LockOutlined, PersonOutline,
 } from '@mui/icons-material';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/useStore';
 import { useRestauranteStore } from '../store/restauranteStore';
+import { useBrandingStore } from '../store/brandingStore';
 
 export function Login() {
   const navigate = useNavigate();
   const location = useLocation();
+  const theme = useTheme();
 
   const { setAuth }       = useAuthStore();
   const { initFromToken } = useRestauranteStore();
+  const { nombreSistema, logoUrl } = useBrandingStore();
 
   const [form, setForm]               = useState({ usuario: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
@@ -128,27 +132,33 @@ export function Login() {
             sx={{
               width: 72, height: 72,
               borderRadius: '50%',
-              background: 'linear-gradient(135deg, #e53935, #ff6f00)',
+              background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              mx: 'auto', mb: 2,
-              boxShadow: '0 8px 24px rgba(229,57,53,0.4)',
+              mx: 'auto', mb: 2, overflow: 'hidden',
+              boxShadow: `0 8px 24px ${theme.palette.primary.main}66`,
             }}
           >
-            <RestaurantMenu sx={{ fontSize: 36, color: 'white' }} />
+            {logoUrl ? (
+              <Box component="img" src={logoUrl} alt={nombreSistema}
+                sx={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            ) : (
+              <RestaurantMenu sx={{ fontSize: 36, color: 'white' }} />
+            )}
           </Box>
           <Typography
             variant="h4" fontWeight={800}
             sx={{
-              background: 'linear-gradient(135deg, #1a1a2e, #e53935)',
+              background: `linear-gradient(135deg, #1a1a2e, ${theme.palette.primary.main})`,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               letterSpacing: '-0.5px',
             }}
           >
-            Cocina Oculta
+            {nombreSistema}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Sistema POS — Panel de Control
+            Panel de Control
           </Typography>
         </Box>
 
@@ -223,11 +233,11 @@ export function Login() {
               borderRadius: 2,
               fontSize: '1rem',
               fontWeight: 700,
-              background: 'linear-gradient(135deg, #e53935, #c62828)',
-              boxShadow: '0 4px 16px rgba(229,57,53,0.4)',
+              background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.primary.dark})`,
+              boxShadow: `0 4px 16px ${theme.palette.primary.main}66`,
               '&:hover': {
-                background: 'linear-gradient(135deg, #ef5350, #e53935)',
-                boxShadow: '0 6px 20px rgba(229,57,53,0.5)',
+                background: `linear-gradient(135deg, ${theme.palette.primary.light}, ${theme.palette.primary.main})`,
+                boxShadow: `0 6px 20px ${theme.palette.primary.main}80`,
                 transform: 'translateY(-1px)',
               },
               transition: 'all 0.2s ease',
@@ -241,7 +251,7 @@ export function Login() {
           variant="caption" color="text.disabled"
           sx={{ display: 'block', textAlign: 'center', mt: 3 }}
         >
-          © {new Date().getFullYear()} Cocina Oculta · Todos los derechos reservados
+          © {new Date().getFullYear()} {nombreSistema} · Todos los derechos reservados
         </Typography>
       </Paper>
     </Box>

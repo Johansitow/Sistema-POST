@@ -22,6 +22,19 @@ export const getAll = asyncHandler(async (_req: Request, res: Response) => {
   res.json({ success: true, data });
 });
 
+/**
+ * GET /ui-config/public/branding — nombre/color/logo del scope `apariencia` (SIN autenticación).
+ * Necesario porque el login y el sidebar deben poder mostrar la marca antes de que
+ * exista una sesión. Solo expone estas 3 claves (no todo el scope), ya que están
+ * pensadas para ser visibles públicamente en la pantalla de login.
+ */
+export const getPublicBranding = asyncHandler(async (_req: Request, res: Response) => {
+  const configs = await uiConfiguracionService.getByScope('apariencia');
+  const data: Record<string, unknown> = {};
+  for (const c of configs) data[c.clave] = c.valor;
+  res.json({ success: true, data });
+});
+
 /** GET /ui-config/:scope  — todas del scope (autenticado) */
 export const getByScope = asyncHandler(async (req: Request, res: Response) => {
   const data = await uiConfiguracionService.getByScope(str(req.params.scope));

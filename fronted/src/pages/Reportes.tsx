@@ -14,32 +14,12 @@ import { ordenesService } from '../services/ordenes.service';
 import { reportesService } from '../services/reportes.service';
 import { useAuthStore } from '../store/useStore';
 import { useRestauranteStore } from '../store/restauranteStore';
+import { buildDateParams } from '../utils';
 
 type ScopeReporte = 'restaurante' | 'grupo' | 'super';
 
 const formatCurrency = (v: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(v);
-
-// Calcula fecha_desde / fecha_hasta a partir del selector de rango
-function buildDateParams(range: string, customDesde: string, customHasta: string) {
-  const now   = new Date();
-  const today = now.toISOString().split('T')[0];
-  switch (range) {
-    case 'today':  return { fecha_desde: today,                   fecha_hasta: today };
-    case 'week': {
-      const d = new Date(now); d.setDate(d.getDate() - 6);
-      return { fecha_desde: d.toISOString().split('T')[0], fecha_hasta: today };
-    }
-    case 'month': {
-      const d = new Date(now); d.setDate(d.getDate() - 29);
-      return { fecha_desde: d.toISOString().split('T')[0], fecha_hasta: today };
-    }
-    case 'custom':
-      return { fecha_desde: customDesde || undefined, fecha_hasta: customHasta || undefined };
-    default:
-      return {};
-  }
-}
 
 export const Reportes: React.FC = () => {
   const [dateRange,    setDateRange]    = useState('today');

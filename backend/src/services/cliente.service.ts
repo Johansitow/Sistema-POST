@@ -55,6 +55,16 @@ export const clienteService = {
       if (existe) throw new ConflictError('Ya existe un cliente con ese email');
     }
 
+    if (data.telefono) {
+      const existe = await clienteRepository.findByTelefono(data.telefono, ctx.grupoId);
+      if (existe) throw new ConflictError('Ya existe un cliente con ese teléfono');
+    }
+
+    if (data.telefono_alterno) {
+      const existe = await clienteRepository.findByTelefonoAlterno(data.telefono_alterno, ctx.grupoId);
+      if (existe) throw new ConflictError('Ya existe un cliente con ese teléfono alterno');
+    }
+
     if (data.numero_documento) {
       const existe = await clienteRepository.findByDocumento(data.numero_documento, ctx.grupoId);
       if (existe) throw new ConflictError('Ya existe un cliente con ese número de documento');
@@ -94,6 +104,16 @@ export const clienteService = {
     if (data.email) {
       const existe = await clienteRepository.findByEmail(data.email, ctx.grupoId, id);
       if (existe) throw new ConflictError('Ya existe un cliente con ese email');
+    }
+
+    if (data.telefono) {
+      const existe = await clienteRepository.findByTelefono(data.telefono, ctx.grupoId, id);
+      if (existe) throw new ConflictError('Ya existe un cliente con ese teléfono');
+    }
+
+    if (data.telefono_alterno) {
+      const existe = await clienteRepository.findByTelefonoAlterno(data.telefono_alterno, ctx.grupoId, id);
+      if (existe) throw new ConflictError('Ya existe un cliente con ese teléfono alterno');
     }
 
     if (data.numero_documento) {

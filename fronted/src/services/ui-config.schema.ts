@@ -50,7 +50,9 @@ export const DEFAULTS: {
   },
   apariencia: {
     nombre_sistema: 'POS Restaurante',
-    color_primario: '#FF5722',
+    // Mismo rojo que ya usan Layout.tsx/Login.tsx hardcodeado hoy — evita un
+    // salto de color sorpresa en instalaciones que nunca personalizaron esto.
+    color_primario: '#e53935',
     logo_url:       '',
   },
   impresion: {

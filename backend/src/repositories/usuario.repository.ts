@@ -106,6 +106,11 @@ export const usuarioRepository = {
             nombre:         true,
             es_super_admin: true, // campo informativo del rol
             color:          true,
+            permisos: {
+              select: {
+                permiso: { select: { codigo: true } },
+              },
+            },
           },
         },
         restaurantes: {

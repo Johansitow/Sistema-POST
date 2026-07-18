@@ -2,10 +2,11 @@
  * Configuración del Sistema — Parámetros del sistema (key/value editable)
  */
 import { useState, useEffect, useCallback } from 'react';
+import { Link as RouterLink } from 'react-router-dom';
 import {
   Box, Typography, Paper, Chip, Tooltip, CircularProgress, Alert, Snackbar,
   Table, TableHead, TableRow, TableCell, TableBody, TableContainer,
-  IconButton, TextField, Select, MenuItem,
+  IconButton, TextField, Select, MenuItem, Link,
 } from '@mui/material';
 import { Settings, Edit, Save, Close, Lock } from '@mui/icons-material';
 import { configuracionService, type Configuracion as ConfiguracionType } from '../../services/servicios-operacion';
@@ -211,6 +212,12 @@ export function Configuracion() {
           </Typography>
         </Box>
       </Box>
+
+      <Alert severity="info" variant="outlined" sx={{ mb: 3 }}>
+        Estos valores son datos internos del negocio (razón social, NIT, teléfono, etc.), no la marca visible de la app.
+        Para cambiar el nombre, color o logo que se muestran en el sistema, usa{' '}
+        <Link component={RouterLink} to="/admin/apariencia" fontWeight={700}>Personalización → Apariencia</Link>.
+      </Alert>
 
       <Paper variant="outlined" sx={{ borderRadius: 2, p: 3 }}>
         <ParamsTab />

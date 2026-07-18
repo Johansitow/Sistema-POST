@@ -3,11 +3,11 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Receipt, DollarSign, Clock, CheckCircle, XCircle, Eye, Filter, Printer } from 'lucide-react';
+import { RefreshCw, Receipt, DollarSign, Clock, CheckCircle, XCircle, Eye, Filter, Printer, Search } from 'lucide-react';
 import { facturaService, Factura } from '../services/servicios-gestion';
 import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
-import { formatCurrency, formatDateTime } from '../utils';
+import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
 import { EmptyState, LoadingScreen } from '../components/common';
 import { printFactura } from '../utils/print';
 import { Z_INDEX } from '../lib/zIndex';
@@ -135,32 +135,54 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
   );
 };
 
+const PAGE_SIZE_OPTS = [20, 50, 100];
+
+const DATE_RANGE_OPTS = [
+  { value: 'all',    label: 'Todo' },
+  { value: 'today',  label: 'Hoy' },
+  { value: 'week',   label: 'Semana' },
+  { value: 'month',  label: 'Mes' },
+  { value: 'custom', label: 'Personalizado' },
+];
+
 export const Facturas: React.FC = () => {
   const idRestaurante             = useRestauranteActivo();
   const [facturas, setFacturas]   = useState<Factura[]>([]);
   const [loading, setLoading]     = useState(true);
   const [filtroEstado, setFiltroEstado] = useState('');
-  const [fechaDesde, setFechaDesde] = useState('');
-  const [fechaHasta, setFechaHasta] = useState('');
+  const [dateRange, setDateRange]   = useState('all');
+  const [customDesde, setCustomDesde] = useState('');
+  const [customHasta, setCustomHasta] = useState('');
   const [showFiltros, setShowFiltros] = useState(false);
   const [detalle, setDetalle]     = useState<Factura | null>(null);
   const [meta, setMeta]           = useState<any>(null);
   const [page, setPage]           = useState(1);
+  const [limit, setLimit]         = useState(20);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchTerm, setSearchTerm]   = useState('');
+
+  // Búsqueda con debounce por número de factura, número de orden o cliente
+  useEffect(() => {
+    const timer = setTimeout(() => { setSearchTerm(searchInput); setPage(1); }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  const { fecha_desde, fecha_hasta } = buildDateParams(dateRange, customDesde, customHasta);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const res = await facturaService.getAll({
-        page, limit: 20,
+        page, limit,
         estado_factura: filtroEstado || undefined,
-        fecha_desde:    fechaDesde || undefined,
-        fecha_hasta:    fechaHasta || undefined,
+        fecha_desde, fecha_hasta,
+        search:         searchTerm || undefined,
         id_restaurante: idRestaurante,
       });
       setFacturas(res.data); setMeta(res.meta);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [page, filtroEstado, fechaDesde, fechaHasta, idRestaurante]);
+  }, [page, limit, filtroEstado, fecha_desde, fecha_hasta, searchTerm, idRestaurante]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -198,9 +220,18 @@ export const Facturas: React.FC = () => {
           ))}
         </div>
 
-        {/* Filtros */}
+        {/* Buscador + Filtros */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">
           <div className="flex gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              <input
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                placeholder="Buscar por N° factura, N° orden o cliente..."
+                className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none"
+              />
+            </div>
             <button onClick={() => setShowFiltros(!showFiltros)}
               className={`flex items-center gap-2 px-4 py-2.5 border rounded-xl text-sm font-medium transition-colors ${showFiltros ? 'border-violet-300 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
               <Filter className="w-4 h-4" /> Filtros
@@ -208,18 +239,32 @@ export const Facturas: React.FC = () => {
             <button onClick={loadData} className="p-2.5 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-colors"><RefreshCw className="w-4 h-4" /></button>
           </div>
           {showFiltros && (
-            <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-100">
-              <select value={filtroEstado} onChange={e => { setFiltroEstado(e.target.value); setPage(1); }}
-                className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-violet-500 outline-none">
-                <option value="">Todos los estados</option>
-                <option value="pendiente">Pendiente</option>
-                <option value="pagada">Pagada</option>
-                <option value="anulada">Anulada</option>
-              </select>
-              <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
-                className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
-              <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
-                className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <div className="flex flex-wrap items-center gap-3">
+                <select value={filtroEstado} onChange={e => { setFiltroEstado(e.target.value); setPage(1); }}
+                  className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:ring-2 focus:ring-violet-500 outline-none">
+                  <option value="">Todos los estados</option>
+                  <option value="pendiente">Pendiente</option>
+                  <option value="pagada">Pagada</option>
+                  <option value="anulada">Anulada</option>
+                </select>
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
+                  {DATE_RANGE_OPTS.map(opt => (
+                    <button key={opt.value} onClick={() => { setDateRange(opt.value); setPage(1); }}
+                      className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all ${dateRange === opt.value ? 'bg-white shadow-sm text-violet-700' : 'text-slate-500 hover:text-slate-700'}`}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {dateRange === 'custom' && (
+                <div className="flex gap-3">
+                  <input type="date" value={customDesde} onChange={e => { setCustomDesde(e.target.value); setPage(1); }}
+                    className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                  <input type="date" value={customHasta} onChange={e => { setCustomHasta(e.target.value); setPage(1); }}
+                    className="px-3 py-2.5 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-violet-500 outline-none" />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -243,7 +288,12 @@ export const Facturas: React.FC = () => {
                   return (
                     <tr key={f.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-5 py-4"><span className="font-mono text-sm font-bold text-violet-600">{f.numero_factura}</span></td>
-                      <td className="px-5 py-4"><span className="text-sm text-slate-600 font-mono">{f.orden?.numero_orden || `#${f.id_orden}`}</span></td>
+                      <td className="px-5 py-4">
+                        <span className="text-sm text-slate-600 font-mono block">{f.orden?.numero_orden || `#${f.id_orden}`}</span>
+                        {f.orden?.cliente?.nombre_completo && (
+                          <span className="text-xs text-slate-400">{f.orden.cliente.nombre_completo}</span>
+                        )}
+                      </td>
                       <td className="px-5 py-4"><span className="text-sm text-slate-600">{formatDateTime(f.fecha_emision)}</span></td>
                       <td className="px-5 py-4"><span className="text-sm text-slate-500">{f.fecha_pago ? formatDateTime(f.fecha_pago) : '—'}</span></td>
                       <td className="px-5 py-4"><span className="text-sm text-slate-600">{formatCurrency(f.subtotal)}</span></td>
@@ -262,13 +312,25 @@ export const Facturas: React.FC = () => {
               </tbody>
             </table>
           </div>
-          {meta && meta.totalPages > 1 && (
-            <div className="px-5 py-3.5 border-t border-slate-100 flex items-center justify-between bg-slate-50/50">
-              <p className="text-sm text-slate-500"><span className="font-semibold">{meta.total}</span> facturas</p>
-              <div className="flex gap-2">
-                <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-100 transition-colors">Anterior</button>
-                <span className="px-3 py-1.5 text-xs text-slate-600">{page} / {meta.totalPages}</span>
-                <button disabled={page === meta.totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-100 transition-colors">Siguiente</button>
+          {meta && meta.total > 0 && (
+            <div className="px-5 py-3.5 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+              <p className="text-sm text-slate-500">
+                Mostrando <span className="font-semibold">{(page - 1) * limit + 1}</span>–
+                <span className="font-semibold">{Math.min(page * limit, meta.total)}</span> de{' '}
+                <span className="font-semibold">{meta.total}</span> facturas
+              </p>
+              <div className="flex items-center gap-3">
+                <select value={limit} onChange={e => { setLimit(Number(e.target.value)); setPage(1); }}
+                  className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs bg-white focus:ring-2 focus:ring-violet-500 outline-none">
+                  {PAGE_SIZE_OPTS.map(n => <option key={n} value={n}>{n} / página</option>)}
+                </select>
+                {meta.totalPages > 1 && (
+                  <div className="flex gap-2">
+                    <button disabled={page === 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-100 transition-colors">Anterior</button>
+                    <span className="px-3 py-1.5 text-xs text-slate-600">{page} / {meta.totalPages}</span>
+                    <button disabled={page === meta.totalPages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-slate-100 transition-colors">Siguiente</button>
+                  </div>
+                )}
               </div>
             </div>
           )}

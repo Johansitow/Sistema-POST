@@ -41,6 +41,8 @@ export interface TokenPayload {
   nombre_completo: string;
   /** Identidad del super admin — viene de Usuario.es_super_admin, NO del rol */
   es_super_admin:  boolean;
+  /** Códigos de permiso (Permiso.codigo) asignados al rol del usuario — vacío para superadmin (bypasea todo) */
+  permisos:        string[];
   rol: {
     id:             number;
     nombre:         string;
@@ -92,6 +94,7 @@ const buildPayload = (user: {
     nombre:         string;
     es_super_admin: boolean;
     color?:         string | null;
+    permisos?:      Array<{ permiso: { codigo: string } }>;
   };
   restaurantes?: Array<{
     restaurante: { id: number; nombre: string; es_default: boolean; activo: boolean; id_grupo: number };
@@ -104,6 +107,7 @@ const buildPayload = (user: {
   nombre_completo: user.nombre_completo,
   // ─── FUENTE DE VERDAD: es_super_admin del usuario, no del rol ───────────────
   es_super_admin:  user.es_super_admin,
+  permisos:        (user.rol.permisos ?? []).map(rp => rp.permiso.codigo),
   restaurantes: (user.restaurantes ?? [])
     .filter(ur => ur.restaurante.activo)
     .map(ur => ({

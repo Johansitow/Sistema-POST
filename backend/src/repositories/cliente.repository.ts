@@ -113,13 +113,37 @@ class ClienteRepositoryImpl extends TenantRepository {
     });
   }
 
+  /** Únicos por grupo de negocio — el mismo teléfono puede repetirse en otro grupo. */
+  findByTelefono(telefono: string, id_grupo: number | null | undefined, excludeId?: number) {
+    return prisma.cliente.findFirst({
+      where: {
+        telefono,
+        ...(id_grupo != null ? { id_grupo } : {}),
+        estado: { not: EstadoGeneral.eliminado },
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+    });
+  }
+
+  /** Únicos por grupo de negocio — el mismo teléfono alterno puede repetirse en otro grupo. */
+  findByTelefonoAlterno(telefono_alterno: string, id_grupo: number | null | undefined, excludeId?: number) {
+    return prisma.cliente.findFirst({
+      where: {
+        telefono_alterno,
+        ...(id_grupo != null ? { id_grupo } : {}),
+        estado: { not: EstadoGeneral.eliminado },
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+    });
+  }
+
   // ── CRUD ────────────────────────────────────────────────────────────────────
 
   create(data: {
     nombre_completo:   string;
     id_grupo:          number;
     email?:            string;
-    telefono?:         string;
+    telefono:          string;
     telefono_alterno?: string;
     tipo_documento?:   TipoDocumento;
     numero_documento?: string;

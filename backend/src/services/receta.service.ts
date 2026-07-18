@@ -445,17 +445,23 @@ export const recetaService = {
     return { ok: true };
   },
 
-  async descontarIngredientesOrden(id_orden: number, tx: any) {
-    const orden = await tx.orden.findUnique({
-      where: { id: id_orden },
-      include: { detalles: { include: { producto: true } } },
-    });
-    if (!orden) return;
-
-    for (const detalle of orden.detalles) {
-      // Usar tx para que la lectura de receta sea parte de la misma transacción
+  /**
+   * _descontarIngredientesDeVenta — lógica única de descuento de ingredientes por receta.
+   *
+   * Reusada por descontarIngredientesOrden (legado, vía OrdenDetalle) y
+   * descontarIngredientesSede (arquitectura nueva, vía OrdenSedeItem) para que ambas
+   * rutas apliquen exactamente la misma fórmula, respeten ingredientes opcionales,
+   * conviertan unidades y registren auditoría real — antes divergían entre sí.
+   */
+  async _descontarIngredientesDeVenta(tx: any, params: {
+    id_orden: number;
+    numero_orden: string;
+    id_restaurante: number;
+    items: Array<{ id_producto: number; cantidad: number }>;
+  }) {
+    for (const item of params.items) {
       const receta = await tx.receta.findFirst({
-        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        where: { id_producto_final: item.id_producto, id_restaurante: params.id_restaurante, estado: 'activo' },
         include: {
           ingredientes: {
             include: { producto: true },
@@ -463,20 +469,23 @@ export const recetaService = {
           },
         },
       });
-      if (!receta) continue;
+      if (!receta) continue; // sin receta → su stock se descontó al crear la orden
 
-      const cantidadPlatos = Number(detalle.cantidad);
+      // ing.cantidad está definida para producir `cantidad_producida` unidades del
+      // producto final — por eso se divide antes de multiplicar por lo vendido.
+      const factorPorUnidad = item.cantidad / Number(receta.cantidad_producida);
 
       for (const ing of receta.ingredientes) {
         if (ing.es_opcional) continue;
 
-        const cantidadEnReceta = Number(ing.cantidad) * cantidadPlatos;
+        const cantidadEnReceta = Number(ing.cantidad) * factorPorUnidad;
         const producto = await tx.producto.findUnique({ where: { id: ing.id_producto } });
         if (!producto) continue;
 
         // Convertir la cantidad de la receta a la unidad en que está el stock del producto
         const cantidadDescontar = convertUnits(cantidadEnReceta, ing.unidad, producto.unidad_medida);
-        const stockNuevo = Math.max(0, Number(producto.stock_actual) - cantidadDescontar);
+        const stockAnterior = Number(producto.stock_actual);
+        const stockNuevo = Math.max(0, stockAnterior - cantidadDescontar);
 
         await tx.producto.update({
           where: { id: ing.id_producto },
@@ -486,13 +495,13 @@ export const recetaService = {
         await tx.movimiento.create({
           data: {
             id_producto:     ing.id_producto,
-            id_restaurante:  orden.id_restaurante,
+            id_restaurante:  params.id_restaurante,
             tipo_movimiento: 'salida',
             cantidad:        toDecimal(cantidadDescontar),
-            stock_anterior:  toDecimal(Number(producto.stock_actual)),
+            stock_anterior:  toDecimal(stockAnterior),
             stock_nuevo:     toDecimal(stockNuevo),
-            motivo:          `Ingrediente receta "${receta.nombre_receta}" - Orden ${orden.numero_orden}`,
-            id_orden:        id_orden,
+            motivo:          `Ingrediente receta "${receta.nombre_receta}" - Orden ${params.numero_orden}`,
+            id_orden:        params.id_orden,
           },
         });
       }
@@ -501,6 +510,35 @@ export const recetaService = {
     try {
       await alertaService.sincronizar();
     } catch { /* no bloquear el flujo principal */ }
+  },
+
+  /** Legado: descuenta ingredientes de receta para los OrdenDetalle de una orden. */
+  async descontarIngredientesOrden(id_orden: number, tx: any) {
+    const orden = await tx.orden.findUnique({
+      where: { id: id_orden },
+      include: { detalles: true },
+    });
+    if (!orden) return;
+
+    await this._descontarIngredientesDeVenta(tx, {
+      id_orden,
+      numero_orden:   orden.numero_orden,
+      id_restaurante: orden.id_restaurante,
+      items: orden.detalles.map((d: { id_producto: number; cantidad: unknown }) => ({
+        id_producto: d.id_producto,
+        cantidad:    Number(d.cantidad),
+      })),
+    });
+  },
+
+  /** Arquitectura nueva: descuenta ingredientes de receta para los OrdenSedeItem de una sede. */
+  async descontarIngredientesSede(params: {
+    id_orden: number;
+    numero_orden: string;
+    id_restaurante: number;
+    items: Array<{ id_producto: number; cantidad: number }>;
+  }, tx: any) {
+    await this._descontarIngredientesDeVenta(tx, params);
   },
 
   async _verificarIngredientes(ingredientes: { id_producto: number }[]) {

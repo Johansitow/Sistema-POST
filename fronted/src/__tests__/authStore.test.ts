@@ -10,6 +10,7 @@ const mockUser: UsuarioAuth = {
   email:           'admin@test.com',
   // Fuente de verdad: campo del usuario, NO del rol
   es_super_admin:  true,
+  permisos:        [],
   rol: {
     id:             1,
     nombre:         'Super Admin',
@@ -96,5 +97,30 @@ describe('isSuperAdmin', () => {
     };
     useAuthStore.getState().setAuth(tramposo, 'tok', 'ref');
     expect(useAuthStore.getState().isSuperAdmin()).toBe(false);
+  });
+});
+
+// ── hasPermission ─────────────────────────────────────────────────────────────
+
+describe('hasPermission', () => {
+  it('retorna true para superadmin sin importar el código', () => {
+    useAuthStore.getState().setAuth(mockUser, 'tok', 'ref'); // es_super_admin: true
+    expect(useAuthStore.getState().hasPermission('config.sistema')).toBe(true);
+  });
+
+  it('retorna true cuando el usuario no-superadmin tiene el código en permisos', () => {
+    const conPermiso: UsuarioAuth = { ...mockUser, es_super_admin: false, permisos: ['config.sistema'] };
+    useAuthStore.getState().setAuth(conPermiso, 'tok', 'ref');
+    expect(useAuthStore.getState().hasPermission('config.sistema')).toBe(true);
+  });
+
+  it('retorna false cuando el usuario no-superadmin no tiene el código', () => {
+    const sinPermiso: UsuarioAuth = { ...mockUser, es_super_admin: false, permisos: [] };
+    useAuthStore.getState().setAuth(sinPermiso, 'tok', 'ref');
+    expect(useAuthStore.getState().hasPermission('config.sistema')).toBe(false);
+  });
+
+  it('retorna false cuando no hay usuario', () => {
+    expect(useAuthStore.getState().hasPermission('config.sistema')).toBe(false);
   });
 });

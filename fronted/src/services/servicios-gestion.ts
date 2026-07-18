@@ -118,7 +118,7 @@ export interface Factura {
 }
 
 class FacturaServiceFrontend {
-  async getAll(params: { page?: number; limit?: number; estado_factura?: string; fecha_desde?: string; fecha_hasta?: string; id_restaurante?: number } = {}): Promise<{ data: Factura[]; meta: any }> {
+  async getAll(params: { page?: number; limit?: number; estado_factura?: string; fecha_desde?: string; fecha_hasta?: string; id_restaurante?: number; search?: string } = {}): Promise<{ data: Factura[]; meta: any }> {
     const res = await api.get('/facturas', { params });
     return { data: res.data.data.map(this.parse), meta: res.data.meta };
   }
