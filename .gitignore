@@ -3,3 +3,7 @@ node_modules
 .env
 
 /generated/prisma
+
+# Artefactos de build y logs del backend
+backend/dist/
+backend/logs/
