@@ -49,7 +49,12 @@ export const productoRepository = {
     pagination: PaginationParams,
     filters: {
       id_grupo?:       number | null;   // tenant scope (catálogo por grupo)
-      id_restaurante?: number;          // incluye ProductoStock de esta sede
+      /**
+       * Catálogo POR SEDE: solo productos registrados en esta sucursal
+       * (con fila ProductoStock activa). Cada sede ingresa sus productos
+       * desde 0; también enriquece la salida con el stock local.
+       */
+      id_restaurante?: number;
       search?:         string;
       id_categoria?:   number;
       estado?:         EstadoGeneral;
@@ -59,6 +64,9 @@ export const productoRepository = {
     const where: any = {
       estado: { not: EstadoGeneral.eliminado },
       ...tenantWhere(filters.id_grupo),
+      ...(filters.id_restaurante
+        ? { stocks: { some: { id_restaurante: filters.id_restaurante, activo: true } } }
+        : {}),
     };
     if (filters.search) {
       where.AND = [
@@ -129,8 +137,15 @@ export const productoRepository = {
       data: { estado: EstadoGeneral.eliminado },
     }),
 
-  count: (id_grupo?: number) =>
-    prisma.producto.count({ where: { ...tenantWhere(id_grupo) } }),
-  countByEstado: (estado: EstadoGeneral, id_grupo?: number) =>
-    prisma.producto.count({ where: { estado, ...tenantWhere(id_grupo) } }),
+  count: (id_grupo?: number, id_restaurante?: number) =>
+    prisma.producto.count({ where: {
+      ...tenantWhere(id_grupo),
+      ...(id_restaurante ? { stocks: { some: { id_restaurante, activo: true } } } : {}),
+    } }),
+  countByEstado: (estado: EstadoGeneral, id_grupo?: number, id_restaurante?: number) =>
+    prisma.producto.count({ where: {
+      estado,
+      ...tenantWhere(id_grupo),
+      ...(id_restaurante ? { stocks: { some: { id_restaurante, activo: true } } } : {}),
+    } }),
 };

@@ -48,10 +48,13 @@ export const getBySKU = asyncHandler(async (req: Request, res: Response) => {
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const data = createProductoSchema.parse(req.body);
-  // id_grupo viene del contexto autenticado (req.grupoId), nunca del body del cliente.
-  // Mismo patrón que categorias.controller y proveedor.controller.
+  // id_grupo e id_restaurante vienen del contexto autenticado, nunca del body.
+  // La sede activa registra el producto en SU catálogo (ProductoStock).
   const producto = await commandBus.dispatch(
-    new CreateProductoCommand({ ...data, id_grupo: req.grupoId! }, (req as any).user?.id),
+    new CreateProductoCommand(
+      { ...data, id_grupo: req.grupoId!, id_restaurante: req.restauranteId },
+      (req as any).user?.id,
+    ),
   ) as any;
 
   registrarAuditoria({

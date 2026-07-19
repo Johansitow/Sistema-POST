@@ -7,6 +7,11 @@ import type { ICommand } from '../CommandBus';
 export interface CreateProductoData {
   /** Obligatorio — viene de req.grupoId (contexto autenticado), nunca del body del cliente. */
   id_grupo:               number;
+  /**
+   * Sede donde se registra el producto (req.restauranteId). El catálogo es
+   * por sucursal: el producto solo será visible en la sede que lo creó.
+   */
+  id_restaurante?:        number;
   sku:                    string;
   nombre:                 string;
   descripcion?:           string;

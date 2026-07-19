@@ -54,9 +54,9 @@ export const dashboardService = {
       ventasSemana,   // ventas agrupadas por día últimos 7 días
       stockBajoLista, // productos con stock crítico en la sede activa
     ] = await Promise.all([
-      productoRepository.count(id_grupo),
+      productoRepository.count(id_grupo, id_restaurante),
       ordenRepository.countHoy(hoy, manana, id_restaurante),
-      productoRepository.countByEstado(EstadoGeneral.activo, id_grupo),
+      productoRepository.countByEstado(EstadoGeneral.activo, id_grupo, id_restaurante),
       ordenRepository.aggregateVentasHoy(idEstado, hoy, manana, id_restaurante),
       ordenRepository.groupByFechaSemana(
         idEstado,

@@ -26,6 +26,7 @@ vi.mock('../../repositories/producto-stock.repository', () => ({
   productoStockRepository: {
     findOne:        vi.fn(),
     findBajoMinimo: vi.fn(),
+    upsert:         vi.fn(),
   },
 }));
 
@@ -104,6 +105,37 @@ describe('productoService.crear', () => {
 
     const callArg = (productoRepository.create as any).mock.calls[0][0];
     expect(callArg.id_grupo).toBe(7);
+  });
+
+  it('con id_restaurante registra el producto en el catálogo de ESA sede (ProductoStock)', async () => {
+    (productoRepository.findBySKU as any).mockResolvedValue(null);
+    (productoRepository.create as any).mockResolvedValue(mockProducto);
+    (productoStockRepository.upsert as any).mockResolvedValue({});
+
+    await productoService.crear({
+      sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000, precio_venta: 8000,
+      stock_actual: 12, stock_minimo: 3, id_grupo: 7, id_restaurante: 4,
+    });
+
+    // El id_restaurante NO se cuela al modelo Producto (catálogo del grupo)
+    const createArg = (productoRepository.create as any).mock.calls[0][0];
+    expect(createArg.id_restaurante).toBeUndefined();
+
+    // Pero sí crea la fila que lo hace visible en la sede que lo creó
+    expect(productoStockRepository.upsert).toHaveBeenCalledOnce();
+    const [idProd, idSede, stockData] = (productoStockRepository.upsert as any).mock.calls[0];
+    expect(idProd).toBe(mockProducto.id);
+    expect(idSede).toBe(4);
+    expect(stockData).toMatchObject({ stock_actual: 12, stock_minimo: 3, activo: true });
+  });
+
+  it('sin id_restaurante (superadmin sin sede) no registra fila de sede', async () => {
+    (productoRepository.findBySKU as any).mockResolvedValue(null);
+    (productoRepository.create as any).mockResolvedValue(mockProducto);
+
+    await productoService.crear({ sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000, id_grupo: 7 });
+
+    expect(productoStockRepository.upsert).not.toHaveBeenCalled();
   });
 });
 

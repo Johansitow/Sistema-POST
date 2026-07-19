@@ -85,8 +85,9 @@ export const productoService = {
     const existeSKU = await productoRepository.findBySKU(data.sku);
     if (existeSKU) throw new ConflictError('Ya existe un producto con ese SKU');
 
+    const { id_restaurante, ...productoData } = data;
     const producto = await productoRepository.create({
-      ...data,
+      ...productoData,
       precio_unitario: toDecimal(data.precio_unitario),
       precio_venta:    data.precio_venta    != null ? toDecimal(data.precio_venta)   : undefined,
       stock_actual:    data.stock_actual    != null ? toDecimal(data.stock_actual)   : toDecimal(0),
@@ -94,6 +95,19 @@ export const productoService = {
       stock_maximo:    data.stock_maximo    != null ? toDecimal(data.stock_maximo)   : undefined,
       punto_reorden:   data.punto_reorden   != null ? toDecimal(data.punto_reorden)  : undefined,
     });
+
+    // Registrar el producto en la SEDE donde se creó: el catálogo es por
+    // sucursal (cada sede ingresa sus productos desde 0) y esta fila de
+    // ProductoStock es la que lo hace visible en sus listados.
+    if (id_restaurante) {
+      await productoStockRepository.upsert(producto.id, id_restaurante, {
+        stock_actual:       data.stock_actual ?? 0,
+        stock_minimo:       data.stock_minimo ?? 0,
+        stock_maximo:       data.stock_maximo ?? undefined,
+        precio_venta_local: data.precio_venta ?? undefined,
+        activo:             true,
+      });
+    }
 
     await cacheDel(KEY_LIST);
     return producto;

@@ -17,6 +17,7 @@
     "seed": "tsx prisma/seed.ts",
     "seed:vylonia": "tsx prisma/seed-vylonia.ts",
     "seed:recetas": "tsx prisma/seed-recetas.ts",
+    "backfill:catalogo": "tsx prisma/backfill-catalogo-sede.ts",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "test": "vitest run",
