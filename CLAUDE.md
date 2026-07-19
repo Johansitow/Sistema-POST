@@ -58,7 +58,7 @@ Routes → Controller → Service → Repository → Prisma
 - **Services**: Business logic. Use `cacheGetOrSet(key, TTL, fn)` for reads; call `cacheDel(key)` on mutations. Call `registrarAuditoria()` after critical write operations.
 - **Repositories**: Prisma queries. Always filter `estado: { not: EstadoGeneral.eliminado }` (soft-delete). Tenant repos extend `TenantRepository` (`src/repositories/base/TenantRepository.ts`).
 - **CommandBus / QueryBus** (`src/application/`): CQRS pattern for complex operations (e.g., `CreateOrdenCommand`, `GetDashboardStatsQuery`).
-- **EventBus** (`src/core/events/EventBus.ts`): Domain events. Handlers in `src/events/handlers/`.
+- **EventBus** (`src/events/eventBus.ts`): Domain events (catalog in `src/events/events.ts`). Handlers in `src/events/handlers/`.
 - **Sagas** (`src/application/sagas/`): Multi-aggregate orchestration (e.g., OrdenSede state machine).
 - **Plugins** (`src/plugins/`): Feature-flagged modules loaded at startup via `PluginLoader`. Core plugins: usuarios, restaurantes, categorias. Example: `LoyaltyPlugin`.
 
