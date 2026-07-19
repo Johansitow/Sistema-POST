@@ -168,9 +168,10 @@ describe('ordenService.crear', () => {
     });
 
     expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledOnce();
-    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
-      { id_producto: 5, cantidad: 1 },
-    ]);
+    // Segundo argumento: la sede que prepara (recetas son por sucursal)
+    const [detalles, sedeVerificada] = (recetaService.verificarDisponibilidadParaDetalles as any).mock.calls[0];
+    expect(detalles).toEqual([{ id_producto: 5, cantidad: 1 }]);
+    expect(sedeVerificada).toBeUndefined(); // el fixture de sede no define id_restaurante
   });
 
   it('resuelve el impuesto del restaurante (sede→grupo→global) y lo guarda en la orden — no un porcentaje fijo', async () => {
@@ -589,9 +590,10 @@ describe('ordenService.agregarDetalle', () => {
 
     await ordenService.agregarDetalle(1, { id_producto: 7, cantidad: 2, precio_unitario: 5000 }, CTX_SUPERADMIN);
 
-    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
-      { id_producto: 7, cantidad: 2 },
-    ]);
+    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith(
+      [{ id_producto: 7, cantidad: 2 }],
+      (mockOrdenBase as { id_restaurante?: number }).id_restaurante,
+    );
   });
 
   it('no agrega el detalle si verificarDisponibilidadParaDetalles lanza error', async () => {
@@ -664,9 +666,9 @@ describe('ordenService.actualizarDetalle', () => {
 
     await ordenService.actualizarDetalle(10, { cantidad: 5 }, CTX_SUPERADMIN); // 5 > 2 → verifica dif = 3
 
-    expect(recetaService.verificarDisponibilidadParaDetalles).toHaveBeenCalledWith([
-      { id_producto: 5, cantidad: 3 }, // diferencia = 5 - 2 = 3
-    ]);
+    const [detallesDif, sedeDif] = (recetaService.verificarDisponibilidadParaDetalles as any).mock.calls[0];
+    expect(detallesDif).toEqual([{ id_producto: 5, cantidad: 3 }]); // diferencia = 5 - 2 = 3
+    expect(sedeDif).toBe((mockOrdenBase as { id_restaurante?: number }).id_restaurante);
   });
 
   it('NO llama verificarDisponibilidadParaDetalles cuando la cantidad baja', async () => {

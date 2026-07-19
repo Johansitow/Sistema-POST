@@ -51,14 +51,17 @@ class RecetaRepositoryImpl extends TenantRepository {
 
   // ── Consultas ─────────────────────────────────────────────────────────────
 
-  findAll(params: { skip: number; take: number; id_producto?: number; estado?: string }) {
+  findAll(params: { skip: number; take: number; id_producto?: number; estado?: string; id_restaurante?: number }) {
+    const where = {
+      ...(params.id_producto    && { id_producto_final: params.id_producto }),
+      ...(params.estado         && { estado: params.estado as never }),
+      // Recetas son POR SEDE: cada sucursal solo ve y gestiona las suyas
+      ...(params.id_restaurante && { id_restaurante: params.id_restaurante }),
+    };
     return prisma.$transaction([
       prisma.receta.findMany({
         skip: params.skip, take: params.take,
-        where: {
-          ...(params.id_producto && { id_producto_final: params.id_producto }),
-          ...(params.estado      && { estado: params.estado as never }),
-        },
+        where,
         include: {
           producto_final: {
             select: { id: true, nombre: true, sku: true, precio_venta: true,
@@ -69,7 +72,7 @@ class RecetaRepositoryImpl extends TenantRepository {
         },
         orderBy: { fecha_creacion: 'desc' },
       }),
-      prisma.receta.count(),
+      prisma.receta.count({ where }),
     ]);
   }
 
@@ -95,9 +98,13 @@ class RecetaRepositoryImpl extends TenantRepository {
     );
   }
 
-  findByProductoFinal(id_producto: number) {
+  findByProductoFinal(id_producto: number, id_restaurante?: number) {
     return prisma.receta.findFirst({
-      where: { id_producto_final: id_producto, estado: 'activo' },
+      where: {
+        id_producto_final: id_producto,
+        estado: 'activo',
+        ...(id_restaurante ? { id_restaurante } : {}),
+      },
       include: {
         ingredientes: {
           include: { producto: true },

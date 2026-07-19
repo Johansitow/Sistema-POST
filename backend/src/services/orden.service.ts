@@ -158,7 +158,8 @@ export const ordenService = {
     // Verificar disponibilidad de recetas POR restaurante, antes de abrir TX
     for (const sede of data.sedes) {
       await recetaService.verificarDisponibilidadParaDetalles(
-        sede.items.map(i => ({ id_producto: i.id_producto, cantidad: i.cantidad }))
+        sede.items.map(i => ({ id_producto: i.id_producto, cantidad: i.cantidad })),
+        sede.id_restaurante,
       );
     }
 
@@ -672,7 +673,7 @@ export const ordenService = {
     return prisma.$transaction(async (tx) => {
       for (const detalle of (orden as any).detalles ?? []) {
         const tieneReceta = await tx.receta.findFirst({
-          where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+          where: { id_producto_final: detalle.id_producto, id_restaurante: orden.id_restaurante, estado: 'activo' },
           select: { id: true },
         });
         if (tieneReceta) continue;
@@ -692,13 +693,16 @@ export const ordenService = {
     if ((orden as any).estado?.permite_edicion === false) {
       throw new BadRequestError('No se puede editar una orden en este estado');
     }
-    await recetaService.verificarDisponibilidadParaDetalles([{ id_producto: data.id_producto, cantidad: data.cantidad }]);
+    await recetaService.verificarDisponibilidadParaDetalles(
+      [{ id_producto: data.id_producto, cantidad: data.cantidad }],
+      (orden as { id_restaurante?: number }).id_restaurante,
+    );
     return prisma.$transaction(async (tx) => {
       const prod = await tx.producto.findUnique({ where: { id: data.id_producto } });
       if (!prod) throw new NotFoundError('Producto');
 
       const tieneReceta = await tx.receta.findFirst({
-        where: { id_producto_final: data.id_producto, estado: 'activo' },
+        where: { id_producto_final: data.id_producto, id_restaurante: (orden as any).id_restaurante, estado: 'activo' },
         select: { id: true },
       });
       if (!tieneReceta && Number(prod.stock_actual) < data.cantidad) throw new BadRequestError('Stock insuficiente');
@@ -734,7 +738,12 @@ export const ordenService = {
       const detalleActual = await prisma.ordenDetalle.findUnique({ where: { id: detalleId } });
       if (detalleActual) {
         const dif = data.cantidad - Number(detalleActual.cantidad);
-        if (dif > 0) await recetaService.verificarDisponibilidadParaDetalles([{ id_producto: detalleActual.id_producto, cantidad: dif }]);
+        if (dif > 0) {
+          await recetaService.verificarDisponibilidadParaDetalles(
+            [{ id_producto: detalleActual.id_producto, cantidad: dif }],
+            (orden as { id_restaurante?: number }).id_restaurante,
+          );
+        }
       }
     }
     return prisma.$transaction(async (tx) => {
@@ -742,7 +751,7 @@ export const ordenService = {
       if (!detalle) throw new NotFoundError('Detalle');
 
       const tieneReceta = await tx.receta.findFirst({
-        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        where: { id_producto_final: detalle.id_producto, id_restaurante: (orden as any).id_restaurante, estado: 'activo' },
         select: { id: true },
       });
 
@@ -782,7 +791,7 @@ export const ordenService = {
       if (!detalle) throw new NotFoundError('Detalle');
 
       const tieneReceta = await tx.receta.findFirst({
-        where: { id_producto_final: detalle.id_producto, estado: 'activo' },
+        where: { id_producto_final: detalle.id_producto, id_restaurante: (orden as any).id_restaurante, estado: 'activo' },
         select: { id: true },
       });
       if (!tieneReceta) {
@@ -826,7 +835,8 @@ export const ordenService = {
 
     const detalles = data.detalles ?? [];
     await recetaService.verificarDisponibilidadParaDetalles(
-      detalles.map(d => ({ id_producto: d.id_producto, cantidad: d.cantidad }))
+      detalles.map(d => ({ id_producto: d.id_producto, cantidad: d.cantidad })),
+      data.id_restaurante,
     );
 
     const impuesto = await resolverImpuestoDeRestaurante(data.id_restaurante);
@@ -880,7 +890,7 @@ export const ordenService = {
       });
 
       for (const d of detalles) {
-        const tieneReceta = await tx.receta.findFirst({ where: { id_producto_final: d.id_producto, estado: 'activo' }, select: { id: true } });
+        const tieneReceta = await tx.receta.findFirst({ where: { id_producto_final: d.id_producto, id_restaurante: data.id_restaurante, estado: 'activo' }, select: { id: true } });
         if (tieneReceta) continue;
         const prod = await tx.producto.findUnique({ where: { id: d.id_producto } });
         if (prod) {

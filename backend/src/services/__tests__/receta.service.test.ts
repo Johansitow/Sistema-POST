@@ -208,7 +208,7 @@ describe('recetaService.calcularDisponibilidad', () => {
       ],
     });
 
-    const result = await recetaService.calcularDisponibilidad(1);
+    const result = await recetaService.calcularDisponibilidad(1, { esSuperAdmin: true });
 
     expect(result.stock_producido).toBe(5);
     expect(result.disponibilidad_por_receta).toBe(1);
@@ -227,7 +227,7 @@ describe('recetaService.calcularDisponibilidad', () => {
       ],
     });
 
-    const result = await recetaService.calcularDisponibilidad(1);
+    const result = await recetaService.calcularDisponibilidad(1, { esSuperAdmin: true });
 
     expect(result.stock_producido).toBe(0);
     expect(result.disponibilidad_por_receta).toBe(3);
@@ -236,7 +236,7 @@ describe('recetaService.calcularDisponibilidad', () => {
 
   it('lanza NotFoundError si la receta no existe', async () => {
     (recetaRepository.findRecetaConStock as any).mockResolvedValue(null);
-    await expect(recetaService.calcularDisponibilidad(999)).rejects.toThrow(NotFoundError);
+    await expect(recetaService.calcularDisponibilidad(999, { esSuperAdmin: true })).rejects.toThrow(NotFoundError);
   });
 });
 
@@ -625,7 +625,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ], 0, 15000);
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.costo_total).toBe(500000);          // 100 × 5000
     expect(result.costo_con_merma).toBe(500000);      // sin merma
@@ -640,7 +640,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ]);
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.advertencias).toHaveLength(1);
     expect(result.advertencias[0].ingrediente).toBe('Pollo');
@@ -654,7 +654,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ], 10);  // 10% merma
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.costo_total).toBe(10000);
     // costo_con_merma = 10000 / (1 - 0.10) = 11111.11
@@ -669,7 +669,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ], 0, 10000);
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.margen_porcentaje).not.toBeNull();
     expect(result.margen_porcentaje!).toBeLessThan(0);
@@ -681,7 +681,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ], 0, null);
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.precio_venta).toBeNull();
     expect(result.margen_porcentaje).toBeNull();
@@ -693,7 +693,7 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
     ], 0, 15000);
     (recetaRepository as any).findByIdWithProveedores = vi.fn().mockResolvedValue(receta);
 
-    const result = await recetaService.obtenerDesgloseRentabilidad(1);
+    const result = await recetaService.obtenerDesgloseRentabilidad(1, { esSuperAdmin: true });
 
     expect(result.desglose[0].unidad_incompatible).toBe(true);
     expect(result.desglose[0].subtotal).toBe(0);
@@ -711,15 +711,19 @@ describe('recetaService.obtenerDesgloseRentabilidad', () => {
 
 describe('recetaService.descontarIngredientesOrden / descontarIngredientesSede', () => {
   const mockTx: any = {
-    orden:      { findUnique: vi.fn() },
-    receta:     { findFirst: vi.fn() },
-    producto:   { findUnique: vi.fn() },
-    movimiento: { create: vi.fn() },
+    orden:         { findUnique: vi.fn() },
+    receta:        { findFirst: vi.fn() },
+    producto:      { findUnique: vi.fn() },
+    movimiento:    { create: vi.fn() },
+    productoStock: { findUnique: vi.fn(), upsert: vi.fn() },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockTx.producto.update = vi.fn();
+    // Sin fila de ProductoStock por defecto → el stock anterior sale del campo legacy
+    mockTx.productoStock.findUnique.mockResolvedValue(null);
+    mockTx.productoStock.upsert.mockResolvedValue({});
   });
 
   it('divide por cantidad_producida: una receta que rinde 10 porciones descuenta 1/10 por unidad vendida', async () => {
@@ -743,6 +747,33 @@ describe('recetaService.descontarIngredientesOrden / descontarIngredientesSede',
     expect(Number(updateCall.data.stock_actual)).toBeCloseTo(49500);
     const movimientoCall = (mockTx.movimiento.create as any).mock.calls[0][0];
     expect(Number(movimientoCall.data.cantidad)).toBeCloseTo(500);
+
+    // El stock POR SEDE (ProductoStock) también queda actualizado
+    const upsertCall = (mockTx.productoStock.upsert as any).mock.calls[0][0];
+    expect(upsertCall.where.id_producto_id_restaurante).toEqual({ id_producto: 2, id_restaurante: 1 });
+    expect(Number(upsertCall.update.stock_actual)).toBeCloseTo(49500);
+  });
+
+  it('si la sede ya tiene fila de ProductoStock, descuenta desde ESE stock (no el legacy)', async () => {
+    mockTx.orden.findUnique.mockResolvedValue({
+      id: 1, numero_orden: 'ORD-000001', id_restaurante: 1,
+      detalles: [{ id_producto: 10, cantidad: new Decimal(1) }],
+    });
+    mockTx.receta.findFirst.mockResolvedValue({
+      nombre_receta:      'Bandeja Paisa',
+      cantidad_producida: new Decimal(1),
+      ingredientes: [
+        { id_producto: 2, cantidad: new Decimal(100), unidad: 'gramo', es_opcional: false },
+      ],
+    });
+    // Legacy dice 9999 (contaminado), pero la sede tiene 300 en ProductoStock
+    mockTx.producto.findUnique.mockResolvedValue({ id: 2, stock_actual: new Decimal(9999), unidad_medida: 'gramo' });
+    mockTx.productoStock.findUnique.mockResolvedValue({ stock_actual: new Decimal(300) });
+
+    await recetaService.descontarIngredientesOrden(1, mockTx);
+
+    const upsertCall = (mockTx.productoStock.upsert as any).mock.calls[0][0];
+    expect(Number(upsertCall.update.stock_actual)).toBeCloseTo(200); // 300 - 100
   });
 
   it('no descuenta ingredientes marcados como es_opcional', async () => {

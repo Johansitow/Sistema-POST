@@ -16,13 +16,14 @@ const MARGEN_DEFAULT = 0.40;
 
 export const recetaService = {
 
-  async listar(params: { page?: unknown; limit?: unknown; id_producto?: number; estado?: string }) {
+  async listar(params: { page?: unknown; limit?: unknown; id_producto?: number; estado?: string; id_restaurante?: number }) {
     const p = getPaginationParams(params.page, params.limit);
     const [data, total] = await recetaRepository.findAll({
-      skip:        getSkip(p),
-      take:        p.limit,
-      id_producto: params.id_producto,
-      estado:      params.estado,
+      skip:           getSkip(p),
+      take:           p.limit,
+      id_producto:    params.id_producto,
+      estado:         params.estado,
+      id_restaurante: params.id_restaurante,
     });
     return buildPaginatedResult(
       data.map(r => ({ ...r, rentabilidad: this._calcularRentabilidad(r as any) })),
@@ -36,8 +37,14 @@ export const recetaService = {
     return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
   },
 
-  async obtenerPorProducto(id_producto: number) {
-    const receta = await recetaRepository.findByProductoFinal(id_producto);
+  /** Lookup guardado por tenant: NotFoundError si la receta es de otra sede. */
+  async obtenerPorIdScoped(id: number, ctx: TenantCtx) {
+    const receta = await recetaRepository.findByIdScoped(id, ctx);
+    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+  },
+
+  async obtenerPorProducto(id_producto: number, id_restaurante?: number) {
+    const receta = await recetaRepository.findByProductoFinal(id_producto, id_restaurante);
     if (!receta) throw new NotFoundError('Receta para este producto');
     return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
   },
@@ -72,8 +79,9 @@ export const recetaService = {
     const producto = await prisma.producto.findUnique({ where: { id: data.id_producto_final } });
     if (!producto) throw new NotFoundError('Producto final');
 
-    const existente = await recetaRepository.findByProductoFinal(data.id_producto_final);
-    if (existente) throw new ConflictError('Este producto ya tiene una receta activa');
+    // El conflicto se valida POR SEDE: cada sucursal maneja sus propias recetas
+    const existente = await recetaRepository.findByProductoFinal(data.id_producto_final, data.id_restaurante);
+    if (existente) throw new ConflictError('Este producto ya tiene una receta activa en esta sede');
 
     await this._verificarIngredientes(data.ingredientes);
 
@@ -135,7 +143,9 @@ export const recetaService = {
 
   // ─── Disponibilidad ──────────────────────────────────────────────────────────
 
-  async calcularDisponibilidad(id_receta: number) {
+  async calcularDisponibilidad(id_receta: number, ctx: TenantCtx) {
+    // Guard de tenant: la receta debe ser de la sede activa
+    await recetaRepository.findByIdScoped(id_receta, ctx);
     const receta = await recetaRepository.findRecetaConStock(id_receta);
     if (!receta) throw new NotFoundError('Receta');
 
@@ -221,7 +231,9 @@ export const recetaService = {
   // ─── Rentabilidad ────────────────────────────────────────────────────────────
 
   /** Desglose detallado usando precios de ProveedorProducto (preferido o primero). */
-  async obtenerDesgloseRentabilidad(id: number) {
+  async obtenerDesgloseRentabilidad(id: number, ctx: TenantCtx) {
+    // Guard de tenant: la receta debe ser de la sede activa
+    await recetaRepository.findByIdScoped(id, ctx);
     const receta = await recetaRepository.findByIdWithProveedores(id);
     if (!receta) throw new NotFoundError('Receta');
 
@@ -350,7 +362,8 @@ export const recetaService = {
    * ANTES de crear la orden (no requiere que la orden exista).
    */
   async verificarDisponibilidadParaDetalles(
-    detalles: { id_producto: number; cantidad: number }[]
+    detalles: { id_producto: number; cantidad: number }[],
+    id_restaurante?: number,
   ) {
     const faltantes: {
       producto: string; ingrediente: string;
@@ -358,7 +371,8 @@ export const recetaService = {
     }[] = [];
 
     for (const det of detalles) {
-      const receta = await recetaRepository.findByProductoFinal(det.id_producto);
+      // La receta que aplica es la de la SEDE que prepara la orden
+      const receta = await recetaRepository.findByProductoFinal(det.id_producto, id_restaurante);
       if (!receta) continue; // Sin receta: el stock del producto ya lo valida crear()
 
       for (const ing of receta.ingredientes) {
@@ -388,12 +402,16 @@ export const recetaService = {
     return { ok: true };
   },
 
-  async verificarStockParaOrden(id_orden: number) {
+  async verificarStockParaOrden(id_orden: number, ctx?: TenantCtx) {
     const orden = await prisma.orden.findUnique({
       where: { id: id_orden },
       include: { detalles: { include: { producto: true } } },
     });
     if (!orden) throw new NotFoundError('Orden');
+    // Anti-IDOR: la orden debe ser de la sede activa (mismo error que "no existe")
+    if (ctx && !ctx.esSuperAdmin && ctx.restauranteId !== undefined && orden.id_restaurante !== ctx.restauranteId) {
+      throw new NotFoundError('Orden');
+    }
 
     const faltantes: {
       producto: string; ingrediente: string;
@@ -401,7 +419,8 @@ export const recetaService = {
     }[] = [];
 
     for (const detalle of orden.detalles) {
-      const receta = await recetaRepository.findByProductoFinal(detalle.id_producto);
+      // La receta que aplica es la de la sede de la orden
+      const receta = await recetaRepository.findByProductoFinal(detalle.id_producto, orden.id_restaurante);
 
       if (!receta) {
         if (Number(detalle.producto.stock_actual) < Number(detalle.cantidad)) {
@@ -484,9 +503,28 @@ export const recetaService = {
 
         // Convertir la cantidad de la receta a la unidad en que está el stock del producto
         const cantidadDescontar = convertUnits(cantidadEnReceta, ing.unidad, producto.unidad_medida);
-        const stockAnterior = Number(producto.stock_actual);
+
+        // Stock POR SEDE (ProductoStock) — fuente autoritativa multi-sede.
+        // Si la sede aún no tiene fila, se inicializa desde el campo legacy.
+        const stockRecord = await tx.productoStock.findUnique({
+          where: { id_producto_id_restaurante: { id_producto: ing.id_producto, id_restaurante: params.id_restaurante } },
+        });
+        const stockAnterior = stockRecord ? Number(stockRecord.stock_actual) : Number(producto.stock_actual);
         const stockNuevo = Math.max(0, stockAnterior - cantidadDescontar);
 
+        await tx.productoStock.upsert({
+          where:  { id_producto_id_restaurante: { id_producto: ing.id_producto, id_restaurante: params.id_restaurante } },
+          update: { stock_actual: toDecimal(stockNuevo) },
+          create: {
+            id_producto:    ing.id_producto,
+            id_restaurante: params.id_restaurante,
+            stock_actual:   toDecimal(stockNuevo),
+            stock_minimo:   producto.stock_minimo,
+            stock_maximo:   producto.stock_maximo ?? undefined,
+          },
+        });
+
+        // Campo legacy — se mantiene por compatibilidad con código que aún lo lee
         await tx.producto.update({
           where: { id: ing.id_producto },
           data:  { stock_actual: toDecimal(stockNuevo) },

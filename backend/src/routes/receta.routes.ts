@@ -19,7 +19,7 @@ router.use(authenticate, tenantContext, tenantIsolation);
 router.post('/verificar-stock/:id_orden',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const result = await recetaService.verificarStockParaOrden(Number(req.params.id_orden));
+      const result = await recetaService.verificarStockParaOrden(Number(req.params.id_orden), buildTenantCtx(req));
       res.json(successResponse(result));
     } catch (e: any) {
       if (e.message?.includes('Stock insuficiente')) {
@@ -37,7 +37,7 @@ router.post('/verificar-stock/:id_orden',
 router.get('/producto/:id_producto',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await recetaService.obtenerPorProducto(Number(req.params.id_producto));
+      const data = await recetaService.obtenerPorProducto(Number(req.params.id_producto), req.restauranteId);
       res.json(successResponse(data));
     } catch (e) { next(e); }
   }
@@ -51,6 +51,8 @@ router.get('/',
         page, limit,
         id_producto: id_producto ? Number(id_producto) : undefined,
         estado,
+        // Recetas son por sede: solo las de la sucursal activa
+        id_restaurante: req.restauranteId,
       });
       res.json({ success: true, ...result });
     } catch (e) { next(e); }
@@ -71,7 +73,7 @@ router.get('/disponibilidad-catalogo',
 router.get('/:id',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      res.json(successResponse(await recetaService.obtenerPorId(Number(req.params.id))));
+      res.json(successResponse(await recetaService.obtenerPorIdScoped(Number(req.params.id), buildTenantCtx(req))));
     } catch (e) { next(e); }
   }
 );
@@ -79,7 +81,7 @@ router.get('/:id',
 router.get('/:id/rentabilidad',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const receta = await recetaService.obtenerPorId(Number(req.params.id));
+      const receta = await recetaService.obtenerPorIdScoped(Number(req.params.id), buildTenantCtx(req));
       res.json(successResponse(receta.rentabilidad));
     } catch (e) { next(e); }
   }
@@ -88,7 +90,7 @@ router.get('/:id/rentabilidad',
 router.get('/:id/rentabilidad/desglose',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await recetaService.obtenerDesgloseRentabilidad(Number(req.params.id));
+      const data = await recetaService.obtenerDesgloseRentabilidad(Number(req.params.id), buildTenantCtx(req));
       res.json(successResponse(data));
     } catch (e) { next(e); }
   }
@@ -136,7 +138,7 @@ router.put('/:id/ingredientes', requirePermission('productos.editar'),
 router.get('/:id/disponibilidad',
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const data = await recetaService.calcularDisponibilidad(Number(req.params.id));
+      const data = await recetaService.calcularDisponibilidad(Number(req.params.id), buildTenantCtx(req));
       res.json(successResponse(data));
     } catch (e) { next(e); }
   }

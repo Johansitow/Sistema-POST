@@ -196,10 +196,11 @@ export const ordenSedeService = {
       throw new BadRequestError('La sede está cancelada');
     }
 
-    // Verificar receta y stock
-    await recetaService.verificarDisponibilidadParaDetalles([
-      { id_producto: data.id_producto, cantidad: data.cantidad },
-    ]);
+    // Verificar receta y stock (de la sede que prepara)
+    await recetaService.verificarDisponibilidadParaDetalles(
+      [{ id_producto: data.id_producto, cantidad: data.cantidad }],
+      sede.id_restaurante,
+    );
 
     const tasaIva = await getTasaIvaDeRestaurante(sede.id_restaurante);
 
