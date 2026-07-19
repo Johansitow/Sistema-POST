@@ -75,6 +75,11 @@ export const ordenSedeService = {
     return sede;
   },
 
+  /** Lookup guardado por tenant: NotFoundError si la sede es de otro restaurante. */
+  async obtenerPorIdScoped(id: number, ctx: TenantCtx) {
+    return ordenSedeRepository.findByIdScoped(id, ctx);
+  },
+
   // ── Avanzar estado de cocina ───────────────────────────────────────────────
   /**
    * Avanza el estado de la sede al siguiente en la cadena.

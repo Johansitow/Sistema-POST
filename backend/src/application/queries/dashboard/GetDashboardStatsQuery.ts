@@ -12,5 +12,6 @@ export class GetDashboardStatsQuery implements IQuery {
 
   constructor(
     public readonly restauranteId?: number,
+    public readonly grupoId?:       number,
   ) {}
 }

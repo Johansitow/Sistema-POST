@@ -88,24 +88,24 @@ export const getVentasPorHora = asyncHandler(async (req: Request, res: Response)
 });
 
 export const getValorMerma = asyncHandler(async (req: Request, res: Response) => {
-  const result = await reporteService.getValorMerma(parseFechas(req));
+  const result = await reporteService.getValorMerma({ ...parseFechas(req), id_restaurante: req.restauranteId });
   res.json(result);
 });
 
-export const getTendenciasConsumo = asyncHandler(async (_req: Request, res: Response) => {
-  const result = await reporteService.getTendenciasConsumo();
+export const getTendenciasConsumo = asyncHandler(async (req: Request, res: Response) => {
+  const result = await reporteService.getTendenciasConsumo(req.restauranteId);
   res.json(result);
 });
 
 export const getTopClientes = asyncHandler(async (req: Request, res: Response) => {
   const limit = req.query.limit ? Number(req.query.limit) : 20;
-  const result = await reporteService.getTopClientes(limit);
+  const result = await reporteService.getTopClientes(limit, req.grupoId);
   res.json(result);
 });
 
 export const getLotesPorVencer = asyncHandler(async (req: Request, res: Response) => {
   const dias = req.query.dias ? Number(req.query.dias) : 30;
-  const result = await reporteService.getLotesPorVencer(dias);
+  const result = await reporteService.getLotesPorVencer(dias, req.restauranteId);
   res.json(result);
 });
 

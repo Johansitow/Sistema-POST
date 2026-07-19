@@ -64,7 +64,7 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
     numero_orden: orden.numero_orden,
     tipo_orden:   orden.tipo_orden,
     total:        orden.total,
-  });
+  }, req.restauranteId !== undefined ? [req.restauranteId] : []);
 
   res.status(201).json({ success: true, data: orden, message: 'Orden creada correctamente' });
 });
@@ -90,7 +90,7 @@ export const updateEstado = asyncHandler(async (req: Request, res: Response) => 
     user_agent:            req.auditContext?.userAgent,
   });
 
-  socketGateway.emitEstadoOrden({ id: (orden as any)?.id, id_estado });
+  socketGateway.emitEstadoOrden({ id: (orden as any)?.id, id_estado }, req.restauranteId !== undefined ? [req.restauranteId] : []);
 
   res.json({ success: true, data: orden, message: 'Estado de orden actualizado' });
 });
@@ -109,7 +109,7 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
     user_agent:            req.auditContext?.userAgent,
   });
 
-  socketGateway.emitOrdenCancelada(id);
+  socketGateway.emitOrdenCancelada(id, req.restauranteId !== undefined ? [req.restauranteId] : []);
 
   res.status(204).send();
 });

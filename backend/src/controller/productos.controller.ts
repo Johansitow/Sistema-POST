@@ -30,12 +30,13 @@ export const getAll = asyncHandler(async (req: Request, res: Response) => {
     estado:      qs(req.query.estado),
     es_vendible: req.query.es_vendible !== undefined ? req.query.es_vendible === 'true' : undefined,
     id_grupo:    req.grupoId,
+    id_restaurante: req.restauranteId,
   })) as any;
   res.json({ success: true, ...result });
 });
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {
-  const producto = await productoService.obtenerPorId(Number(req.params.id));
+  const producto = await productoService.obtenerPorId(Number(req.params.id), req.restauranteId);
   res.json({ success: true, data: producto });
 });
 
@@ -123,14 +124,14 @@ export const updateStock = asyncHandler(async (req: Request, res: Response) => {
         nombre:       producto.nombre,
         stock_actual: stockActual,
         stock_minimo: stockMinimo,
-      });
+      }, req.restauranteId!);
     }
   }
 
   res.json({ success: true, data: producto, message: 'Stock actualizado correctamente' });
 });
 
-export const getStockBajo = asyncHandler(async (_req: Request, res: Response) => {
-  const productos = await productoService.stockBajo();
+export const getStockBajo = asyncHandler(async (req: Request, res: Response) => {
+  const productos = await productoService.stockBajo(req.restauranteId);
   res.json({ success: true, data: productos });
 });

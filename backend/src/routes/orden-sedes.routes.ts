@@ -58,9 +58,10 @@ router.get(
  */
 router.get(
   '/:id',
+  tenantContext,
   requirePermission('ordenes.ver'),
   asyncHandler(async (req, res) => {
-    const sede = await ordenSedeService.obtenerPorId(Number(req.params.id));
+    const sede = await ordenSedeService.obtenerPorIdScoped(Number(req.params.id), buildTenantCtx(req));
     res.json({ success: true, data: sede });
   })
 );

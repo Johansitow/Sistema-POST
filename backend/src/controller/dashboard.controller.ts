@@ -13,7 +13,7 @@ import { GetDashboardStatsQuery } from '../application/queries/dashboard/GetDash
 import { GetResumenVentasQuery }  from '../application/queries/reportes/GetResumenVentasQuery';
 
 export const getStats = asyncHandler(async (req: Request, res: Response) => {
-  const stats = await queryBus.execute(new GetDashboardStatsQuery(req.restauranteId));
+  const stats = await queryBus.execute(new GetDashboardStatsQuery(req.restauranteId, req.grupoId));
   res.json({ success: true, data: stats });
 });
 

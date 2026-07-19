@@ -29,7 +29,7 @@ export function registerSocketHandlers(): void {
       numero_orden: payload.numeroOrden,
       tipo_orden:  payload.tipoOrden,
       total:       payload.total,
-    });
+    }, [payload.idRestaurante]);
   });
 
   eventBus.on<OrdenEstadoCambiadoPayload>(EVENTS.ORDEN_ESTADO_CAMBIADO, (payload) => {
@@ -38,11 +38,11 @@ export function registerSocketHandlers(): void {
       numero_orden: payload.numeroOrden,
       id_estado:    payload.idEstado,
       estado:       payload.nombreEstado,
-    });
+    }, [payload.idRestaurante]);
   });
 
   eventBus.on<OrdenCanceladaPayload>(EVENTS.ORDEN_CANCELADA, (payload) => {
-    socketGateway.emitOrdenCancelada(payload.idOrden);
+    socketGateway.emitOrdenCancelada(payload.idOrden, [payload.idRestaurante]);
   });
 
   eventBus.on<StockBajoPayload>(EVENTS.STOCK_BAJO, (payload) => {
@@ -51,7 +51,7 @@ export function registerSocketHandlers(): void {
       nombre:       payload.nombreProducto,
       stock_actual: payload.stockActual,
       stock_minimo: payload.stockMinimo,
-    });
+    }, payload.idRestaurante);
   });
 
   eventBus.on<StockAgotadoPayload>(EVENTS.STOCK_AGOTADO, (payload) => {
@@ -60,7 +60,7 @@ export function registerSocketHandlers(): void {
       nombre:       payload.nombre,
       stock_actual: 0,
       stock_minimo: 0,
-    });
+    }, payload.idRestaurante);
   });
 
   eventBus.on<LoteVencidoPayload>(EVENTS.LOTE_VENCIDO, (payload) => {
@@ -69,7 +69,7 @@ export function registerSocketHandlers(): void {
       nombre:       `${payload.nombreProducto} (lote próximo a vencer)`,
       stock_actual: -1,
       stock_minimo: 0,
-    });
+    }, payload.idRestaurante);
   });
 
   eventBus.on<CierreCompletadoPayload>(EVENTS.CIERRE_COMPLETADO, (payload) => {

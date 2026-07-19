@@ -22,9 +22,16 @@ vi.mock('../../repositories/producto.repository', () => ({
   },
 }));
 
-vi.mock('../../repositories/movimiento.repository', () => ({
-  movimientoRepository: {
-    create: vi.fn(),
+vi.mock('../../repositories/producto-stock.repository', () => ({
+  productoStockRepository: {
+    findOne:        vi.fn(),
+    findBajoMinimo: vi.fn(),
+  },
+}));
+
+vi.mock('../inventario.service', () => ({
+  inventarioService: {
+    registrarMovimiento: vi.fn(),
   },
 }));
 
@@ -38,7 +45,8 @@ vi.mock('../../config/redis', () => ({
 
 import { productoService } from '../producto.service';
 import { productoRepository } from '../../repositories/producto.repository';
-import { movimientoRepository } from '../../repositories/movimiento.repository';
+import { productoStockRepository } from '../../repositories/producto-stock.repository';
+import { inventarioService } from '../inventario.service';
 import { ConflictError, NotFoundError, BadRequestError, ForbiddenError } from '../../exceptions/HttpErrors';
 import { createProductoSchema } from '../../dto/productos.dto';
 
@@ -137,56 +145,56 @@ describe('productoService.obtenerPorId', () => {
 describe('productoService.actualizarStock', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('suma stock en entrada', async () => {
-    (productoRepository.findById as any)
-      .mockResolvedValueOnce(mockProducto)   // primera llamada: obtenerPorId
-      .mockResolvedValueOnce({ ...mockProducto, stock_actual: new Decimal('15') }); // al final de actualizarStock
-    (productoRepository.updateStock as any).mockResolvedValue({});
-    (movimientoRepository.create as any).mockResolvedValue({});
-
-    await productoService.actualizarStock(1, 5, 'entrada', 1);
-
-    expect(productoRepository.updateStock).toHaveBeenCalledOnce();
-    const [, decimal] = (productoRepository.updateStock as any).mock.calls[0];
-    expect(decimal.toString()).toBe('15');
-  });
-
-  it('resta stock en salida', async () => {
-    (productoRepository.findById as any)
-      .mockResolvedValueOnce(mockProducto)   // primera llamada: obtenerPorId
-      .mockResolvedValueOnce(mockProducto);  // segunda: findById al final
-    (productoRepository.updateStock as any).mockResolvedValue({});
-    (movimientoRepository.create as any).mockResolvedValue({});
-
-    await productoService.actualizarStock(1, 3, 'salida', 1);
-
-    expect(productoRepository.updateStock).toHaveBeenCalledOnce();
-    const [, decimal] = (productoRepository.updateStock as any).mock.calls[0];
-    expect(decimal.toString()).toBe('7');
-  });
-
-  it('lanza BadRequestError si la salida supera el stock', async () => {
-    (productoRepository.findById as any).mockResolvedValue(mockProducto); // stock = 10
-
-    await expect(productoService.actualizarStock(1, 99, 'salida', 1)).rejects.toThrow(BadRequestError);
-  });
-
-  it('lanza BadRequestError si stock queda exactamente negativo', async () => {
-    (productoRepository.findById as any).mockResolvedValue(mockProducto); // stock = 10
-
-    await expect(productoService.actualizarStock(1, 11, 'salida', 1)).rejects.toThrow(BadRequestError);
-  });
-
-  it('crea movimiento de inventario', async () => {
+  it('delega la entrada al flujo canónico de inventario (mantiene ProductoStock por sede)', async () => {
+    (inventarioService.registrarMovimiento as any).mockResolvedValue({});
     (productoRepository.findById as any).mockResolvedValue(mockProducto);
-    (productoRepository.updateStock as any).mockResolvedValue({});
-    (movimientoRepository.create as any).mockResolvedValue({});
+    (productoStockRepository.findOne as any).mockResolvedValue(null);
 
-    await productoService.actualizarStock(1, 5, 'entrada', 1);
+    await productoService.actualizarStock(1, 5, 'entrada', 3);
 
-    expect(movimientoRepository.create).toHaveBeenCalledOnce();
-    const callArg = (movimientoRepository.create as any).mock.calls[0][0];
-    expect(callArg.tipo_movimiento).toBe('entrada');
+    expect(inventarioService.registrarMovimiento).toHaveBeenCalledOnce();
+    const callArg = (inventarioService.registrarMovimiento as any).mock.calls[0][0];
+    expect(callArg).toMatchObject({
+      id_producto:     1,
+      id_restaurante:  3,
+      tipo_movimiento: 'entrada',
+      cantidad:        5,
+    });
+  });
+
+  it('delega la salida con tipo_movimiento salida', async () => {
+    (inventarioService.registrarMovimiento as any).mockResolvedValue({});
+    (productoRepository.findById as any).mockResolvedValue(mockProducto);
+    (productoStockRepository.findOne as any).mockResolvedValue(null);
+
+    await productoService.actualizarStock(1, 3, 'salida', 3);
+
+    const callArg = (inventarioService.registrarMovimiento as any).mock.calls[0][0];
+    expect(callArg.tipo_movimiento).toBe('salida');
+  });
+
+  it('propaga BadRequestError de stock insuficiente desde inventario', async () => {
+    (inventarioService.registrarMovimiento as any).mockRejectedValue(
+      new BadRequestError('Stock insuficiente. Actual: 10, requerido: 99'),
+    );
+
+    await expect(productoService.actualizarStock(1, 99, 'salida', 3)).rejects.toThrow(BadRequestError);
+  });
+
+  it('devuelve el producto con el stock de la sede (ProductoStock)', async () => {
+    (inventarioService.registrarMovimiento as any).mockResolvedValue({});
+    (productoRepository.findById as any).mockResolvedValue(mockProducto);
+    (productoStockRepository.findOne as any).mockResolvedValue({
+      stock_actual:       new Decimal('15'),
+      stock_minimo:       new Decimal('2'),
+      stock_maximo:       null,
+      precio_venta_local: null,
+    });
+
+    const result = await productoService.actualizarStock(1, 5, 'entrada', 3);
+
+    expect(productoStockRepository.findOne).toHaveBeenCalledWith(1, 3);
+    expect(String((result as any).stock_actual)).toBe('15');
   });
 });
 
@@ -214,5 +222,62 @@ describe('productoService.stockBajo', () => {
 
     const result = await productoService.stockBajo();
     expect(result).toHaveLength(0);
+  });
+
+  it('con sede usa ProductoStock (no el catálogo global) y filtra bajo mínimo', async () => {
+    const stockRow = (id: number, actual: string, minimo: string) => ({
+      stock_actual: new Decimal(actual),
+      stock_minimo: new Decimal(minimo),
+      producto: { id, nombre: `P${id}`, sku: `SKU-${id}`, precio_unitario: new Decimal('1000'), categoria: null },
+    });
+    (productoStockRepository.findBajoMinimo as any).mockResolvedValue([
+      stockRow(1, '1', '2'),   // bajo
+      stockRow(2, '5', '2'),   // ok
+      stockRow(3, '2', '2'),   // exacto = bajo
+    ]);
+
+    const result = await productoService.stockBajo(7);
+
+    expect(productoStockRepository.findBajoMinimo).toHaveBeenCalledWith(7);
+    expect(productoRepository.findActivos).not.toHaveBeenCalled();
+    expect(result.map(p => p.id)).toEqual([1, 3]);
+  });
+});
+
+// ── listar — stock por sede desde ProductoStock ───────────────────────────────
+
+describe('productoService.listar con id_restaurante', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('sobrescribe stock_actual con la fila de ProductoStock de la sede', async () => {
+    const conStock = {
+      ...mockProducto,
+      stocks: [{ stock_actual: new Decimal('33'), stock_minimo: new Decimal('4'), stock_maximo: null, precio_venta_local: null }],
+    };
+    (productoRepository.findAll as any).mockResolvedValue([[conStock], 1]);
+
+    const result = await productoService.listar({ id_grupo: 1, id_restaurante: 3 });
+
+    const filtros = (productoRepository.findAll as any).mock.calls[0][1];
+    expect(filtros.id_restaurante).toBe(3);
+    expect(String(result.data[0].stock_actual)).toBe('33');
+    expect((result.data[0] as any).stocks).toBeUndefined();
+  });
+
+  it('sin fila de ProductoStock expone stock 0 (la sede nunca movió el producto)', async () => {
+    const sinStock = { ...mockProducto, stocks: [] };
+    (productoRepository.findAll as any).mockResolvedValue([[sinStock], 1]);
+
+    const result = await productoService.listar({ id_grupo: 1, id_restaurante: 3 });
+
+    expect(String(result.data[0].stock_actual)).toBe('0');
+  });
+
+  it('sin contexto de sede el producto se devuelve tal cual (catálogo)', async () => {
+    (productoRepository.findAll as any).mockResolvedValue([[mockProducto], 1]);
+
+    const result = await productoService.listar({ id_grupo: 1 });
+
+    expect(String(result.data[0].stock_actual)).toBe('10');
   });
 });

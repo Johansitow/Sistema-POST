@@ -48,6 +48,21 @@ import {
 
 const qs = (val: unknown): string | undefined => Array.isArray(val) ? val[0] : val as string | undefined;
 
+/**
+ * Sedes (restaurantes) involucradas en una orden, para dirigir los eventos socket.
+ * Órdenes nueva arquitectura: ids de orden.sedes[]. Legado / sin sedes: fallback
+ * al id_restaurante de la orden o al de la request.
+ */
+const sedesDeOrden = (orden: unknown, fallback?: number): number[] => {
+  const o = orden as { sedes?: Array<{ id_restaurante?: number }>; id_restaurante?: number } | null;
+  const ids = (o?.sedes ?? [])
+    .map(s => s.id_restaurante)
+    .filter((id): id is number => typeof id === 'number');
+  if (ids.length) return [...new Set(ids)];
+  const unico = o?.id_restaurante ?? fallback;
+  return unico !== undefined ? [unico] : [];
+};
+
 const router = Router();
 router.use(authenticate);
 
@@ -80,15 +95,19 @@ router.get('/estadisticas',
       fecha_desde: req.query.fecha_desde ? new Date(qs(req.query.fecha_desde)!) : undefined,
       fecha_hasta: req.query.fecha_hasta ? new Date(qs(req.query.fecha_hasta)!) : undefined,
       id_grupo:    req.query.id_grupo ? Number(req.query.id_grupo) : undefined,
+      // Consolidado por grupo cuando se pide id_grupo; si no, estadísticas de la sede activa
+      id_restaurante: req.query.id_grupo ? undefined : req.restauranteId,
     });
     res.json({ success: true, data: stats });
   })
 );
 
 router.get('/:id',
+  tenantContext,
+  tenantIsolation,
   requirePermission('ordenes.ver'),
   asyncHandler(async (req, res) => {
-    const orden = await ordenService.obtenerPorId(Number(req.params.id));
+    const orden = await ordenService.obtenerPorIdScoped(Number(req.params.id), buildTenantCtx(req));
     res.json({ success: true, data: orden });
   })
 );
@@ -143,7 +162,7 @@ router.post('/',
       numero_orden: (orden as any).numero_orden,
       tipo_orden:   (orden as any).tipo_orden,
       total:        (orden as any).total,
-    });
+    }, sedesDeOrden(orden, req.restauranteId));
 
     res.status(201).json({ success: true, data: orden, message: 'Orden creada correctamente' });
   })
@@ -175,7 +194,7 @@ router.post('/:id/pagar',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado: 0 });
+    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado: 0 }, sedesDeOrden(orden, req.restauranteId));
     res.json({ success: true, data: orden, message: 'Orden pagada y entregada' });
   })
 );
@@ -205,7 +224,7 @@ router.post('/:id/cancelar',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitOrdenCancelada(Number(req.params.id));
+    socketGateway.emitOrdenCancelada(Number(req.params.id), req.restauranteId !== undefined ? [req.restauranteId] : []);
     res.json({ success: true, message: 'Orden cancelada' });
   })
 );
@@ -243,7 +262,7 @@ router.patch('/:id/estado',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado });
+    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado }, sedesDeOrden(orden, req.restauranteId));
     res.json({ success: true, data: orden, message: 'Estado de orden actualizado' });
   })
 );
@@ -257,7 +276,7 @@ router.delete('/:id',
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     // Pre-dispatch guard: validate tenant before CQRS — command handler has no ctx
-    await ordenRepository.findByIdScoped(id, buildTenantCtx(req));
+    const ordenCancelada = await ordenRepository.findByIdScoped(id, buildTenantCtx(req));
     await commandBus.dispatch(new CancelOrdenCommand(id, (req as any).user?.id));
 
     registrarAuditoria({
@@ -270,7 +289,7 @@ router.delete('/:id',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitOrdenCancelada(id);
+    socketGateway.emitOrdenCancelada(id, sedesDeOrden(ordenCancelada, req.restauranteId));
     res.status(204).send();
   })
 );

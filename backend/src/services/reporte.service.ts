@@ -193,8 +193,9 @@ export const reporteService = {
 
   // ─── Nuevos reportes ─────────────────────────────────────────────────────────
 
-  async getValorMerma(params: { fecha_desde?: Date; fecha_hasta?: Date }) {
+  async getValorMerma(params: { fecha_desde?: Date; fecha_hasta?: Date; id_restaurante?: number }) {
     const where: any = { estado_lote: { not: 'en_produccion' } };
+    if (params.id_restaurante) where.id_restaurante = params.id_restaurante;
     const fechaWhere = buildFechaWhere(params.fecha_desde, params.fecha_hasta);
     if (fechaWhere) where.fecha_produccion = fechaWhere;
 
@@ -239,21 +240,22 @@ export const reporteService = {
     };
   },
 
-  async getTendenciasConsumo() {
+  async getTendenciasConsumo(id_restaurante?: number) {
     const ahora     = new Date();
     const hace30    = new Date(ahora); hace30.setDate(hace30.getDate() - 30);
     const hace60    = new Date(ahora); hace60.setDate(hace60.getDate() - 60);
 
+    const sedeWhere = id_restaurante ? { id_restaurante } : {};
     const [periodo1, periodo2] = await Promise.all([
       prisma.movimiento.groupBy({
         by: ['id_producto'],
-        where: { tipo_movimiento: { in: ['salida', 'venta', 'merma'] }, fecha_movimiento: { gte: hace30 } },
+        where: { ...sedeWhere, tipo_movimiento: { in: ['salida', 'venta', 'merma'] }, fecha_movimiento: { gte: hace30 } },
         _sum: { cantidad: true },
         _count: true,
       }),
       prisma.movimiento.groupBy({
         by: ['id_producto'],
-        where: { tipo_movimiento: { in: ['salida', 'venta', 'merma'] }, fecha_movimiento: { gte: hace60, lt: hace30 } },
+        where: { ...sedeWhere, tipo_movimiento: { in: ['salida', 'venta', 'merma'] }, fecha_movimiento: { gte: hace60, lt: hace30 } },
         _sum: { cantidad: true },
         _count: true,
       }),
@@ -298,9 +300,9 @@ export const reporteService = {
     }).sort((a, b) => Math.abs(b.variacion_porcentaje) - Math.abs(a.variacion_porcentaje));
   },
 
-  async getTopClientes(limit = 20) {
+  async getTopClientes(limit = 20, id_grupo?: number) {
     return prisma.cliente.findMany({
-      where:   { estado: 'activo', total_ordenes: { gt: 0 } },
+      where:   { estado: 'activo', total_ordenes: { gt: 0 }, ...(id_grupo ? { id_grupo } : {}) },
       orderBy: { total_gastado: 'desc' },
       take:    limit,
       select: {
@@ -666,7 +668,7 @@ export const reporteService = {
     };
   },
 
-  async getLotesPorVencer(dias = 30) {
+  async getLotesPorVencer(dias = 30, id_restaurante?: number) {
     const fechaLimite = new Date();
     fechaLimite.setDate(fechaLimite.getDate() + dias);
 
@@ -674,6 +676,7 @@ export const reporteService = {
       where: {
         fecha_vencimiento: { lte: fechaLimite, gte: new Date() },
         estado_lote: { in: ['activo' as any, 'en_produccion' as any] },
+        ...(id_restaurante ? { id_restaurante } : {}),
       },
       include: {
         producto: {

@@ -48,11 +48,12 @@ export const productoRepository = {
   findAll: (
     pagination: PaginationParams,
     filters: {
-      id_grupo?:     number | null;   // tenant scope
-      search?:       string;
-      id_categoria?: number;
-      estado?:       EstadoGeneral;
-      es_vendible?:  boolean;
+      id_grupo?:       number | null;   // tenant scope (catálogo por grupo)
+      id_restaurante?: number;          // incluye ProductoStock de esta sede
+      search?:         string;
+      id_categoria?:   number;
+      estado?:         EstadoGeneral;
+      es_vendible?:    boolean;
     }
   ) => {
     const where: any = {
@@ -74,7 +75,12 @@ export const productoRepository = {
     return Promise.all([
       prisma.producto.findMany({
         where,
-        include: includeDefault,
+        include: {
+          ...includeDefault,
+          ...(filters.id_restaurante
+            ? { stocks: { where: { id_restaurante: filters.id_restaurante } } }
+            : {}),
+        },
         orderBy: { nombre: 'asc' },
         skip: getSkip(pagination),
         take: pagination.limit,
@@ -83,10 +89,15 @@ export const productoRepository = {
     ]);
   },
 
-  findById: (id: number) =>
+  findById: (id: number, id_restaurante?: number) =>
     prisma.producto.findFirst({
       where: { id, estado: { not: EstadoGeneral.eliminado } },
-      include: includeDetalle,
+      include: {
+        ...includeDetalle,
+        ...(id_restaurante
+          ? { stocks: { where: { id_restaurante } } }
+          : {}),
+      },
     }),
 
   findBySKU: (sku: string) =>
@@ -118,6 +129,8 @@ export const productoRepository = {
       data: { estado: EstadoGeneral.eliminado },
     }),
 
-  count: ()                            => prisma.producto.count(),
-  countByEstado: (estado: EstadoGeneral) => prisma.producto.count({ where: { estado } }),
+  count: (id_grupo?: number) =>
+    prisma.producto.count({ where: { ...tenantWhere(id_grupo) } }),
+  countByEstado: (estado: EstadoGeneral, id_grupo?: number) =>
+    prisma.producto.count({ where: { estado, ...tenantWhere(id_grupo) } }),
 };

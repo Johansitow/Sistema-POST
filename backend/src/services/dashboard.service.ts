@@ -16,6 +16,7 @@ import { EstadoGeneral } from '@prisma/client';
 import prisma from '../config/database';
 import { ordenRepository } from '../repositories/orden.repository';
 import { productoRepository } from '../repositories/producto.repository';
+import { productoService } from './producto.service';
 
 /**
  * Busca el id del estado 'ENTREGADA' en BD.
@@ -37,7 +38,7 @@ export const dashboardService = {
    * Todas las queries corren en paralelo con Promise.all para minimizar
    * el tiempo de respuesta total (no dependen entre sí excepto idEstado).
    */
-  async getStats(id_restaurante?: number) {
+  async getStats(id_restaurante?: number, id_grupo?: number) {
     // Rango de hoy: desde 00:00:00 hasta 00:00:00 del día siguiente
     const hoy    = new Date(); hoy.setHours(0, 0, 0, 0);
     const manana = new Date(hoy); manana.setDate(manana.getDate() + 1);
@@ -46,30 +47,27 @@ export const dashboardService = {
     const idEstado = await getEstadoFinalId();
 
     const [
-      total,          // total de productos en BD
+      total,          // total de productos del catálogo del grupo
       ordenesHoy,     // cantidad de órdenes creadas hoy
-      activos,        // productos con estado activo
+      activos,        // productos activos del grupo
       ventasHoy,      // suma de ventas de órdenes entregadas hoy
       ventasSemana,   // ventas agrupadas por día últimos 7 días
-      todosActivos,   // lista completa de productos activos (para calcular stock bajo)
+      stockBajoLista, // productos con stock crítico en la sede activa
     ] = await Promise.all([
-      productoRepository.count(),
+      productoRepository.count(id_grupo),
       ordenRepository.countHoy(hoy, manana, id_restaurante),
-      productoRepository.countByEstado(EstadoGeneral.activo),
+      productoRepository.countByEstado(EstadoGeneral.activo, id_grupo),
       ordenRepository.aggregateVentasHoy(idEstado, hoy, manana, id_restaurante),
       ordenRepository.groupByFechaSemana(
         idEstado,
         new Date(Date.now() - 7 * 24 * 60 * 60 * 1000), // hace 7 días
         id_restaurante,
       ),
-      productoRepository.findActivos(),
+      productoService.stockBajo(id_restaurante),
     ]);
 
-    // Calcular stock bajo en memoria — más eficiente que una query extra
     // Stock bajo = stock_actual <= stock_minimo (incluye agotados)
-    const stockBajo = (todosActivos as any[])
-      .filter(p => Number(p.stock_actual) <= Number(p.stock_minimo))
-      .slice(0, 10); // máx 10 para no sobrecargar el dashboard
+    const stockBajo = stockBajoLista.slice(0, 10); // máx 10 para no sobrecargar el dashboard
 
     // Top 5 productos más vendidos — requiere dos queries:
     // 1. Agregar por id_producto para obtener cantidades

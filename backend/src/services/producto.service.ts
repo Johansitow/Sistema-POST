@@ -2,10 +2,11 @@
  * ProductoService - Solo lógica de negocio para productos
  */
 
-import { EstadoGeneral } from '@prisma/client';
+import { EstadoGeneral, ProductoStock, TipoMovimiento } from '@prisma/client';
 import { productoRepository } from '../repositories/producto.repository';
-import { movimientoRepository } from '../repositories/movimiento.repository';
-import { NotFoundError, ConflictError, BadRequestError } from '../exceptions/HttpErrors';
+import { productoStockRepository } from '../repositories/producto-stock.repository';
+import { inventarioService } from './inventario.service';
+import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
 import { toDecimal } from '../lib/decimal';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
@@ -15,31 +16,56 @@ const keyOne  = (id: number)  => `prod:${id}`;
 const keySKU  = (sku: string) => `prod:sku:${sku}`;
 const KEY_LIST = 'prod:list';      // wildcard para invalidar todas las listas paginadas
 
+/**
+ * Sobrescribe los campos de stock legacy del producto con los valores de
+ * ProductoStock de la sede activa (cuando la query incluyó `stocks`).
+ * - Con fila de la sede → stock/mínimo/máximo y precio_venta_local de la sede.
+ * - Sin fila (la sede nunca ha movido este producto) → stock 0.
+ * - Sin include de stocks (sin contexto de sede) → producto tal cual.
+ */
+function aplicarStockSede<T extends { stocks?: ProductoStock[] }>(producto: T) {
+  const { stocks, ...resto } = producto;
+  if (stocks === undefined) return producto;
+  const stockSede = stocks[0];
+  return {
+    ...resto,
+    stock_actual:  stockSede?.stock_actual  ?? toDecimal(0),
+    stock_minimo:  stockSede?.stock_minimo  ?? (resto as Record<string, unknown>).stock_minimo,
+    stock_maximo:  stockSede?.stock_maximo  ?? (resto as Record<string, unknown>).stock_maximo,
+    ...(stockSede?.precio_venta_local != null ? { precio_venta: stockSede.precio_venta_local } : {}),
+  };
+}
+
 export const productoService = {
   async listar(params: {
     page?: unknown; limit?: unknown;
-    search?: string; categoria?: number; estado?: EstadoGeneral; es_vendible?: boolean; id_grupo?: number;
+    search?: string; categoria?: number; estado?: EstadoGeneral; es_vendible?: boolean;
+    id_grupo?: number; id_restaurante?: number;
   }) {
     const pagination = getPaginationParams(params.page, params.limit);
     // Listas con filtros NO se cachean (demasiadas combinaciones)
     const [productos, total] = await productoRepository.findAll(pagination, {
-      search:       params.search,
-      id_categoria: params.categoria,
-      estado:       params.estado,
-      es_vendible:  params.es_vendible,
-      id_grupo:     params.id_grupo,
+      search:         params.search,
+      id_categoria:   params.categoria,
+      estado:         params.estado,
+      es_vendible:    params.es_vendible,
+      id_grupo:       params.id_grupo,
+      id_restaurante: params.id_restaurante,
     });
-    return buildPaginatedResult(productos, total, pagination);
+    return buildPaginatedResult(productos.map(aplicarStockSede), total, pagination);
   },
 
-  async obtenerPorId(id: number) {
+  async obtenerPorId(id: number, id_restaurante?: number) {
     const producto = await cacheGetOrSet(
       keyOne(id),
       CACHE_TTL.MID,
       () => productoRepository.findById(id)
     );
     if (!producto) throw new NotFoundError('Producto');
-    return producto;
+    if (!id_restaurante) return producto;
+    // Stock de la sede siempre fresco (no cacheado): cambia con cada movimiento
+    const stockSede = await productoStockRepository.findOne(id, id_restaurante);
+    return aplicarStockSede({ ...producto, stocks: stockSede ? [stockSede] : [] });
   },
 
   async obtenerPorSKU(sku: string) {
@@ -102,30 +128,39 @@ export const productoService = {
   },
 
   async actualizarStock(id: number, cantidad: number, tipo: 'entrada' | 'salida', id_restaurante: number) {
-    const producto = await this.obtenerPorId(id);
-    const stockActual = Number(producto.stock_actual);
-    const nuevoStock  = tipo === 'entrada' ? stockActual + cantidad : stockActual - cantidad;
-
-    if (nuevoStock < 0) throw new BadRequestError('Stock insuficiente');
-
-    await productoRepository.updateStock(id, toDecimal(nuevoStock));
-    await movimientoRepository.create({
-      id_producto:      id,
+    // Delegar al flujo canónico de inventario: mantiene ProductoStock (por sede),
+    // el campo legacy y el movimiento en una sola transacción.
+    await inventarioService.registrarMovimiento({
+      id_producto:     id,
       id_restaurante,
-      tipo_movimiento:  tipo as any,
-      cantidad:         toDecimal(cantidad),
-      stock_anterior:   toDecimal(stockActual),
-      stock_nuevo:      toDecimal(nuevoStock),
+      tipo_movimiento: tipo === 'entrada' ? TipoMovimiento.entrada : TipoMovimiento.salida,
+      cantidad,
       motivo: `${tipo === 'entrada' ? 'Entrada' : 'Salida'} manual de inventario`,
     });
 
     // Invalidar caché del producto para que el siguiente GET refleje el nuevo stock
     await cacheDel(keyOne(id));
 
-    return productoRepository.findById(id);
+    return this.obtenerPorId(id, id_restaurante);
   },
 
-  async stockBajo() {
+  async stockBajo(id_restaurante?: number) {
+    if (id_restaurante) {
+      // Fuente por sede: ProductoStock (Prisma no compara columnas → filtro en memoria)
+      const stocks = await productoStockRepository.findBajoMinimo(id_restaurante);
+      return stocks
+        .filter(s => Number(s.stock_actual) <= Number(s.stock_minimo))
+        .map(s => ({
+          id:              s.producto.id,
+          nombre:          s.producto.nombre,
+          sku:             s.producto.sku,
+          stock_actual:    s.stock_actual,
+          stock_minimo:    s.stock_minimo,
+          precio_unitario: s.producto.precio_unitario,
+          categoria:       s.producto.categoria ? { nombre: s.producto.categoria.nombre } : null,
+        }));
+    }
+    // Sin contexto de sede (superadmin sin header): comportamiento global legacy
     const productos = await productoRepository.findActivos();
     return productos.filter(p => Number(p.stock_actual) <= Number(p.stock_minimo));
   },

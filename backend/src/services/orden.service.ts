@@ -14,7 +14,7 @@
  *   creadas antes de esta migración.
  */
 
-import { EstadoOrdenGlobal, TipoOrden } from '@prisma/client';
+import { EstadoOrdenGlobal, TipoOrden, Prisma } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 import prisma from '../config/database';
 import { ordenRepository, includeOrdenCompleta } from '../repositories/orden.repository';
@@ -107,6 +107,11 @@ export const ordenService = {
     const orden = await ordenRepository.findById(id);
     if (!orden) throw new NotFoundError('Orden');
     return orden;
+  },
+
+  /** Lookup guardado por tenant: NotFoundError si la orden es de otro restaurante. */
+  async obtenerPorIdScoped(id: number, ctx: TenantCtx) {
+    return ordenRepository.findByIdScoped(id, ctx);
   },
 
   // ── CREAR — nueva arquitectura ────────────────────────────────────────────
@@ -541,13 +546,15 @@ export const ordenService = {
   },
 
   // ── ESTADÍSTICAS ───────────────────────────────────────────────────────────
-  async estadisticas(params: { fecha_desde?: Date; fecha_hasta?: Date; id_grupo?: number }) {
-    const where: any = {};
+  async estadisticas(params: { fecha_desde?: Date; fecha_hasta?: Date; id_grupo?: number; id_restaurante?: number }) {
+    const where: Prisma.OrdenWhereInput = {};
     if (params.id_grupo) where.id_grupo = params.id_grupo;
+    if (params.id_restaurante) where.id_restaurante = params.id_restaurante;
     if (params.fecha_desde || params.fecha_hasta) {
-      where.fecha_apertura = {};
-      if (params.fecha_desde) where.fecha_apertura.gte = params.fecha_desde;
-      if (params.fecha_hasta) where.fecha_apertura.lte = params.fecha_hasta;
+      where.fecha_apertura = {
+        ...(params.fecha_desde ? { gte: params.fecha_desde } : {}),
+        ...(params.fecha_hasta ? { lte: params.fecha_hasta } : {}),
+      };
     }
     const [total, porEstado, porTipo, agg] = await Promise.all([
       ordenRepository.count(where),

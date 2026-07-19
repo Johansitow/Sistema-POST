@@ -16,6 +16,8 @@ export class GetProductosQuery implements IQuery {
       estado?:      string;
       es_vendible?: boolean;
       id_grupo?:    number;
+      /** Sede activa: enriquece cada producto con su ProductoStock local */
+      id_restaurante?: number;
     },
   ) {}
 }
