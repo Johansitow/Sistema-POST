@@ -93,11 +93,12 @@ export default function NotificationsMenu() {
   }, [fetchCount, restauranteActivo?.id]);
 
   // Tiempo real: cualquier evento de alerta refresca el badge (y la lista si está abierta).
-  // El backend emite STOCK_BAJO y CIERRE_COMPLETADO solo a las rooms 'admin'/'caja',
+  // El backend emite STOCK_BAJO y CIERRE_COMPLETADO a las rooms 'admin:{sede}'/'caja:{sede}',
   // y el Layout conecta el socket sin room (connectGlobal) — hay que unirse aquí.
-  // El refetch viaja con X-Restaurante-Id, así que cada sede solo ve lo suyo.
+  // Al cambiar de sede se hace leave de la room vieja y join a la nueva.
   useEffect(() => {
-    const joinRoom = () => socket.emit('join', { room: 'admin' });
+    const idRestaurante = restauranteActivo?.id;
+    const joinRoom = () => socket.emit('join', { room: 'admin', idRestaurante });
     if (socket.connected) joinRoom();
     socket.on('connect', joinRoom);
 
@@ -111,8 +112,9 @@ export default function NotificationsMenu() {
       socket.off('connect', joinRoom);
       socket.off('STOCK_BAJO', handleEvento);
       socket.off('CIERRE_COMPLETADO', handleEvento);
+      socket.emit('leave', { room: 'admin', idRestaurante });
     };
-  }, [fetchCount, fetchAlertas, open]);
+  }, [fetchCount, fetchAlertas, open, restauranteActivo?.id]);
 
   const handleOpen = (e: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(e.currentTarget);

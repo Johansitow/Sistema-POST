@@ -15,6 +15,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import api from '../services/api';
+import { useStore } from './useStore';
 
 export interface RestauranteMini {
   id:        number;
@@ -112,7 +113,13 @@ export const useRestauranteStore = create<RestauranteState>()(
         }
       },
 
-      setActivo: (r) => set({ activo: r }),
+      setActivo: (r) => {
+        const anterior = get().activo;
+        set({ activo: r });
+        // Los datos por sede (productos, órdenes, inventario) no viven en el subárbol
+        // que se re-monta con key={sede} — hay que limpiarlos explícitamente.
+        if (anterior?.id !== r.id) useStore.getState().resetSedeData();
+      },
 
       clear: () => set({ restaurantes: [], activo: null, loaded: false, grupoActivo: null }),
     }),

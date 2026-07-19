@@ -19,6 +19,8 @@ import {
   AppBar, Box, Drawer, IconButton, List, ListItem,
   ListItemButton, ListItemIcon, ListItemText, Toolbar,
   Typography, Avatar, Menu, MenuItem, Divider, Tooltip, Chip,
+  Backdrop, CircularProgress, Dialog, DialogTitle, DialogContent,
+  DialogContentText, DialogActions, Button,
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import {
@@ -28,7 +30,7 @@ import {
   ArrowBack, AccountTree, SupervisorAccount,
   PlayCircleOutline,
 } from '@mui/icons-material';
-import { useAuthStore } from '../../store/useStore';
+import { useAuthStore, useStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
 import { authService }  from '../../services/auth.service';
 import { People, Business } from '@mui/icons-material';
@@ -147,6 +149,8 @@ export default function Layout() {
   const [restAnchorEl,  setRestAnchorEl]  = useState<null | HTMLElement>(null);
   const [grupoAnchorEl, setGrupoAnchorEl] = useState<null | HTMLElement>(null);
   const [grupos,        setGrupos]        = useState<GrupoNegocio[]>([]);
+  const [cambiandoSede, setCambiandoSede] = useState(false);
+  const [sedePendiente, setSedePendiente] = useState<RestauranteMini | null>(null);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -234,12 +238,24 @@ export default function Layout() {
 
   // Cambio de sucursal: no-op si es la misma sede; al cambiar, el key del
   // contenedor <main> re-monta la página activa y todo se recarga con el
-  // nuevo X-Restaurante-Id.
+  // nuevo X-Restaurante-Id. El backdrop cubre el remount para evitar el
+  // flash de datos de la sede anterior.
+  const aplicarCambioSede = (r: RestauranteMini) => {
+    setCambiandoSede(true);
+    setRestActivo(r);
+    showToast(`Ahora estás en ${r.nombre}`, 'success');
+    window.setTimeout(() => setCambiandoSede(false), 450);
+  };
+
   const handleCambiarSede = (r: RestauranteMini) => {
     setRestAnchorEl(null);
     if (r.id === restauranteActivo?.id) return;
-    setRestActivo(r);
-    showToast(`Ahora estás en ${r.nombre}`, 'success');
+    // Si hay una orden a medio construir, confirmar antes de descartarla
+    if (useStore.getState().ordenActual !== null) {
+      setSedePendiente(r);
+      return;
+    }
+    aplicarCambioSede(r);
   };
 
   // ── Sub-componente NavItem ─────────────────────────────────────────────────
@@ -706,16 +722,19 @@ export default function Layout() {
             </>
           )}
 
-          {/* Selector de restaurante */}
-          {restaurantes.length > 1 && !isAdminSection && (
+          {/* Selector de restaurante — siempre visible como indicador de sede activa.
+              Con una sola sede es informativo; con varias abre el menú de cambio. */}
+          {restaurantes.length > 0 && !isAdminSection && (
             <>
-              <Tooltip title="Cambiar restaurante">
+              <Tooltip title={restaurantes.length > 1 ? 'Cambiar restaurante' : 'Restaurante activo'}>
                 <Box
-                  onClick={e => setRestAnchorEl(e.currentTarget)}
+                  onClick={restaurantes.length > 1 ? (e => setRestAnchorEl(e.currentTarget)) : undefined}
                   sx={{
-                    display: 'flex', alignItems: 'center', gap: 0.75, cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 0.75,
+                    cursor: restaurantes.length > 1 ? 'pointer' : 'default',
                     px: 1.5, py: 0.5, mr: 1, borderRadius: 2, border: '1px solid',
-                    borderColor: 'divider', '&:hover': { bgcolor: 'action.hover' },
+                    borderColor: 'divider',
+                    ...(restaurantes.length > 1 ? { '&:hover': { bgcolor: 'action.hover' } } : {}),
                   }}
                 >
                   {restauranteActivo?.logo_url ? (
@@ -728,7 +747,9 @@ export default function Layout() {
                     sx={{ display: { xs: 'none', md: 'block' }, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {restauranteActivo?.nombre ?? 'Sin restaurante'}
                   </Typography>
-                  <KeyboardArrowDown fontSize="small" sx={{ color: 'text.secondary' }} />
+                  {restaurantes.length > 1 && (
+                    <KeyboardArrowDown fontSize="small" sx={{ color: 'text.secondary' }} />
+                  )}
                 </Box>
               </Tooltip>
 
@@ -853,6 +874,40 @@ export default function Layout() {
         <AppBreadcrumbs />
         <Outlet />
       </Box>
+
+      {/* Confirmación: cambiar de sede con una orden sin guardar */}
+      <Dialog open={Boolean(sedePendiente)} onClose={() => setSedePendiente(null)}>
+        <DialogTitle>Cambiar de sucursal</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Tienes una orden sin guardar en <strong>{restauranteActivo?.nombre}</strong>.
+            Se descartará al cambiar a <strong>{sedePendiente?.nombre}</strong>.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSedePendiente(null)}>Cancelar</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => {
+              const destino = sedePendiente;
+              setSedePendiente(null);
+              if (destino) aplicarCambioSede(destino);
+            }}
+          >
+            Cambiar de todos modos
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Overlay de transición al cambiar de sede (evita el flash de datos viejos) */}
+      <Backdrop
+        open={cambiandoSede}
+        sx={{ zIndex: theme.zIndex.drawer + 2, color: '#fff', flexDirection: 'column', gap: 2 }}
+      >
+        <CircularProgress color="inherit" />
+        <Typography fontWeight={600}>Cambiando a {restauranteActivo?.nombre}…</Typography>
+      </Backdrop>
     </Box>
   );
 }

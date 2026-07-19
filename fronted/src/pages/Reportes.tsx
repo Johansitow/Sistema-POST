@@ -36,7 +36,16 @@ export const Reportes: React.FC = () => {
   const [loadingExtra,   setLoadingExtra]   = useState(true);
 
   // Scope: sede individual | grupo consolidado | super (SA, todos los grupos)
-  const [scope,           setScope]           = useState<ScopeReporte>('restaurante');
+  // Se persiste en sessionStorage: al cambiar de sucursal el <main key={sede}>
+  // re-monta esta página, y quien estaba viendo "consolidado" debe seguir ahí.
+  const [scope, setScopeState] = useState<ScopeReporte>(() => {
+    const guardado = sessionStorage.getItem('reportes-scope');
+    return guardado === 'grupo' || guardado === 'super' ? guardado : 'restaurante';
+  });
+  const setScope = useCallback((s: ScopeReporte) => {
+    sessionStorage.setItem('reportes-scope', s);
+    setScopeState(s);
+  }, []);
   const [consolidado,     setConsolidado]     = useState<any>(null);
   const [superData,       setSuperData]       = useState<any>(null);
   const [loadingConsol,   setLoadingConsol]   = useState(false);
@@ -134,6 +143,14 @@ export const Reportes: React.FC = () => {
     if (scope === 'grupo')  loadConsolidado();
     if (scope === 'super')  loadSuperConsolidado();
   }, [scope, loadConsolidado, loadSuperConsolidado]);
+
+  // Guard del scope rehidratado de sessionStorage: si el usuario ya no puede
+  // ver ese scope (p. ej. dejó de ser SA o tiene una sola sede), volver a sede.
+  useEffect(() => {
+    if ((scope === 'super' && !esSuperAdmin) || (scope !== 'restaurante' && !puedeVerGrupo)) {
+      setScope('restaurante');
+    }
+  }, [scope, esSuperAdmin, puedeVerGrupo, setScope]);
 
   const kpis = [
     {

@@ -39,6 +39,8 @@ interface AppState {
   setInventario: (i: InventarioItem[]) => void;
   loading: boolean;
   setLoading: (l: boolean) => void;
+  /** Limpia los datos que pertenecen a una sede — llamado al cambiar de restaurante activo */
+  resetSedeData: () => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -47,6 +49,7 @@ export const useStore = create<AppState>((set) => ({
   ordenActual:   null,  setOrdenActual: (ordenActual) => set({ ordenActual }),
   inventario:    [],    setInventario:  (inventario)  => set({ inventario }),
   loading:       false, setLoading:     (loading)     => set({ loading }),
+  resetSedeData: () => set({ productos: [], ordenes: [], ordenActual: null, inventario: [] }),
 }));
 
 // ─── Auth Store ───────────────────────────────────────────────────────────────

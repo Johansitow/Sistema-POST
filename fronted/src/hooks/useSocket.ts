@@ -15,7 +15,8 @@
  */
 
 import { useEffect, useState } from 'react';
-import { socket, connectSocket } from '../lib/socket';
+import { socket, connectSocket, leaveRoom } from '../lib/socket';
+import { useRestauranteActivo } from '../store/restauranteStore';
 
 export interface OrdenEvent {
   id:           number;
@@ -49,10 +50,11 @@ export const useSocket = (
   handlers: SocketHandlers = {}
 ) => {
   const [isConnected, setIsConnected] = useState(socket.connected);
+  const idRestaurante = useRestauranteActivo();
 
   useEffect(() => {
-    // Conectar al montar
-    connectSocket(room);
+    // Conectar al montar / al cambiar de sede (re-join a la room de la nueva sede)
+    connectSocket(room, idRestaurante);
 
     const onConnect    = () => setIsConnected(true);
     const onDisconnect = () => setIsConnected(false);
@@ -75,11 +77,12 @@ export const useSocket = (
       if (handlers.onStockBajo)      socket.off('STOCK_BAJO',     handlers.onStockBajo);
 
       // No desconectamos el socket aquí: el lifecycle de la conexión lo gestiona Layout.
-      // Solo dejamos la room para no recibir más eventos de ese scope.
-      socket.emit('leave', { room });
+      // Solo dejamos la room de ESTA sede (la capturada por el closure) para no
+      // recibir más eventos de ese scope.
+      leaveRoom(room, idRestaurante);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room]);
+  }, [room, idRestaurante]);
 
   return { isConnected };
 };
