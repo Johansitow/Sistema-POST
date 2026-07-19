@@ -14,6 +14,9 @@ import {
   OrdenCreadaPayload,
   OrdenEstadoCambiadoPayload,
   OrdenCanceladaPayload,
+  OrdenEntregadaPayload,
+  SedeEnPreparacionPayload,
+  SedeListaPayload,
   StockBajoPayload,
   StockAgotadoPayload,
   LoteVencidoPayload,
@@ -43,6 +46,28 @@ export function registerSocketHandlers(): void {
 
   eventBus.on<OrdenCanceladaPayload>(EVENTS.ORDEN_CANCELADA, (payload) => {
     socketGateway.emitOrdenCancelada(payload.idOrden);
+  });
+
+  // La orden global pasó a ENTREGADA (pago registrado). Los estados de la
+  // nueva arquitectura no viven en la tabla estados_orden, por eso id_estado: 0
+  // (los clientes usan ESTADO_ORDEN solo como trigger de refetch).
+  eventBus.on<OrdenEntregadaPayload>(EVENTS.ORDEN_ENTREGADA, (payload) => {
+    socketGateway.emitEstadoOrden({
+      id:           payload.idOrden,
+      numero_orden: payload.numeroOrden,
+      id_estado:    0,
+      estado:       'ENTREGADA',
+    });
+  });
+
+  // Transiciones de sede (PENDIENTE → EN_PREPARACION → LISTA): sin este puente,
+  // las demás pantallas de cocina/caja no se enteran del avance.
+  eventBus.on<SedeEnPreparacionPayload>(EVENTS.SEDE_EN_PREPARACION, (payload) => {
+    socketGateway.emitEstadoOrden({ id: payload.idOrden, id_estado: 0, estado: 'SEDE_EN_PREPARACION' });
+  });
+
+  eventBus.on<SedeListaPayload>(EVENTS.SEDE_LISTA, (payload) => {
+    socketGateway.emitEstadoOrden({ id: payload.idOrden, id_estado: 0, estado: 'SEDE_LISTA' });
   });
 
   eventBus.on<StockBajoPayload>(EVENTS.STOCK_BAJO, (payload) => {

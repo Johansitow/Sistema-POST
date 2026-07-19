@@ -26,7 +26,6 @@ import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { buildTenantCtx } from '../lib/tenantCtx';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
-import { socketGateway } from '../config/socket.gateway';
 import { commandBus } from '../application/commands/CommandBus';
 import { queryBus }   from '../application/queries/QueryBus';
 import { GetOrdenesQuery }    from '../application/queries/orden/GetOrdenesQuery';
@@ -138,13 +137,6 @@ router.post('/',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitNuevaOrden({
-      id:           (orden as any).id,
-      numero_orden: (orden as any).numero_orden,
-      tipo_orden:   (orden as any).tipo_orden,
-      total:        (orden as any).total,
-    });
-
     res.status(201).json({ success: true, data: orden, message: 'Orden creada correctamente' });
   })
 );
@@ -175,7 +167,6 @@ router.post('/:id/pagar',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado: 0 });
     res.json({ success: true, data: orden, message: 'Orden pagada y entregada' });
   })
 );
@@ -205,7 +196,6 @@ router.post('/:id/cancelar',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitOrdenCancelada(Number(req.params.id));
     res.json({ success: true, message: 'Orden cancelada' });
   })
 );
@@ -243,7 +233,6 @@ router.patch('/:id/estado',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitEstadoOrden({ id: Number(req.params.id), id_estado });
     res.json({ success: true, data: orden, message: 'Estado de orden actualizado' });
   })
 );
@@ -270,7 +259,6 @@ router.delete('/:id',
       user_agent:           req.auditContext?.userAgent,
     });
 
-    socketGateway.emitOrdenCancelada(id);
     res.status(204).send();
   })
 );

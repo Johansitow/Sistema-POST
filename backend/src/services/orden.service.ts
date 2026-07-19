@@ -317,23 +317,27 @@ export const ordenService = {
         },
       });
 
-      // 5. Emitir evento al bus (fire-and-forget) y obtener la orden completa.
-      // Se consulta vía `tx` (no el cliente prisma global) porque la transacción
-      // todavía no hizo commit — una consulta fuera de `tx` no vería estas filas
-      // y devolvería null.
-      const ordenFinal = await tx.orden.findUnique({
+      // 5. Obtener la orden completa. Se consulta vía `tx` (no el cliente prisma
+      // global) porque la transacción todavía no hizo commit — una consulta fuera
+      // de `tx` no vería estas filas y devolvería null.
+      return tx.orden.findUnique({
         where: { id: orden.id },
         include: includeOrdenCompleta,
       });
+    }).then((ordenFinal) => {
+      // 6. Emitir eventos DESPUÉS del commit: si se emitieran dentro de la TX,
+      // los clientes refetcharían antes de que la orden fuera visible (o verían
+      // una orden fantasma si la TX hace rollback).
+      if (!ordenFinal) return ordenFinal;
 
       eventBus.emit(EVENTS.ORDEN_GLOBAL_CREADA, {
-        idOrden:     orden.id,
-        numeroOrden: numero_orden,
+        idOrden:     ordenFinal.id,
+        numeroOrden: ordenFinal.numero_orden,
         idGrupo:     data.id_grupo,
         idCliente:   data.id_cliente,
         tipoOrden:   data.tipo_orden,
-        total:       0, // se recalculará
-        sedes:       (ordenFinal?.sedes ?? []).map(s => ({
+        total:       Number(ordenFinal.total),
+        sedes:       (ordenFinal.sedes ?? []).map(s => ({
           idSede:        s.id,
           idRestaurante: s.id_restaurante,
           sufijo:        s.sufijo ?? '',
@@ -342,13 +346,13 @@ export const ordenService = {
 
       // Evento legado para compatibilidad con socket gateway
       eventBus.emit(EVENTS.ORDEN_CREADA, {
-        idOrden:       orden.id,
-        numeroOrden:   numero_orden,
+        idOrden:       ordenFinal.id,
+        numeroOrden:   ordenFinal.numero_orden,
         idRestaurante: data.sedes[0].id_restaurante,
         idGrupo:       data.id_grupo,
         idCliente:     data.id_cliente,
         tipoOrden:     data.tipo_orden,
-        total:         0,
+        total:         Number(ordenFinal.total),
       });
 
       return ordenFinal;
@@ -525,6 +529,8 @@ export const ordenService = {
         },
       });
 
+    }).then(() => {
+      // Emitir después del commit (ver crear())
       eventBus.emit(EVENTS.ORDEN_CANCELADA, { idOrden: id, idRestaurante: orden.id_restaurante });
     });
   },
@@ -583,7 +589,7 @@ export const ordenService = {
         throw new BadRequestError(`El total pagado (${totalPagado}) es menor al total (${Number(orden.total)})`);
       }
 
-      return prisma.$transaction(async (tx) => {
+      const ordenEntregada = await prisma.$transaction(async (tx) => {
         for (const p of pagos) {
           await tx.pago.create({
             data: { id_orden: id, id_metodo_pago: p.id_metodo_pago, monto: toDecimal(p.monto), referencia: p.referencia, notas: p.notas },
@@ -594,6 +600,18 @@ export const ordenService = {
         await recetaService.descontarIngredientesOrden(id, tx);
         return tx.orden.findUnique({ where: { id }, include: { estado: true, detalles: { include: { producto: true } }, pagos: { include: { metodo_pago: true } } } });
       });
+
+      // Aquí cambia estado_global (no id_estado); se notifica el nombre ENTREGADA
+      // y se conserva el id_estado vigente para el payload tipado.
+      eventBus.emit(EVENTS.ORDEN_ESTADO_CAMBIADO, {
+        idOrden:       id,
+        numeroOrden:   orden.numero_orden,
+        idRestaurante: orden.id_restaurante,
+        idEstado:      orden.id_estado,
+        nombreEstado:  'ENTREGADA',
+      });
+
+      return ordenEntregada;
     }
 
     return ordenRepository.findById(id);
@@ -628,7 +646,7 @@ export const ordenService = {
       await recetaService.verificarStockParaOrden(id);
     }
 
-    return prisma.$transaction(async (tx) => {
+    const ordenActualizada = await prisma.$transaction(async (tx) => {
       if (estadoNuevo.codigo === 'EN_PREPARACION') {
         const facturaExistente = await tx.factura.findUnique({ where: { id_orden: id } });
         if (!facturaExistente) await facturaService.generarDesdeOrden(id, tx);
@@ -654,6 +672,16 @@ export const ordenService = {
         include: { estado: true, usuario: { select: { id: true, nombre_completo: true } }, detalles: { include: { producto: true } }, pagos: { include: { metodo_pago: true } } },
       });
     });
+
+    eventBus.emit(EVENTS.ORDEN_ESTADO_CAMBIADO, {
+      idOrden:       id,
+      numeroOrden:   orden.numero_orden,
+      idRestaurante: orden.id_restaurante,
+      idEstado:      id_estado_nuevo,
+      nombreEstado:  estadoNuevo.nombre,
+    });
+
+    return ordenActualizada;
   },
 
   /** Legado: eliminar orden con reversa de stock */
@@ -674,6 +702,8 @@ export const ordenService = {
       }
       await tx.ordenDetalle.deleteMany({ where: { id_orden: id } });
       await tx.orden.delete({ where: { id } });
+    }).then(() => {
+      // Emitir después del commit (ver crear())
       eventBus.emit(EVENTS.ORDEN_CANCELADA, { idOrden: id, idRestaurante: orden.id_restaurante });
     });
   },
@@ -882,7 +912,17 @@ export const ordenService = {
         }
       }
 
-      eventBus.emit(EVENTS.ORDEN_CREADA, { idOrden: orden.id, idRestaurante: data.id_restaurante });
+      return orden;
+    }).then((orden) => {
+      // Emitir después del commit (ver crear())
+      eventBus.emit(EVENTS.ORDEN_CREADA, {
+        idOrden:       orden.id,
+        numeroOrden:   numero_orden,
+        idRestaurante: data.id_restaurante,
+        idCliente:     data.id_cliente,
+        tipoOrden:     orden.tipo_orden,
+        total:         Number(orden.total),
+      });
       return orden;
     });
   },

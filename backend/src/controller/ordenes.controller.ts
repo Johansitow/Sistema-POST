@@ -14,7 +14,6 @@ import { buildTenantCtx } from '../lib/tenantCtx';
 import { createOrdenSchema, updateOrdenSchema, updateEstadoSchema, addDetalleSchema, updateDetalleSchema } from '../dto/ordenes.dto';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
-import { socketGateway } from '../config/socket.gateway';
 import { commandBus } from '../application/commands/CommandBus';
 import { queryBus }   from '../application/queries/QueryBus';
 import { GetOrdenesQuery }    from '../application/queries/orden/GetOrdenesQuery';
@@ -59,13 +58,6 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
     user_agent:            req.auditContext?.userAgent,
   });
 
-  socketGateway.emitNuevaOrden({
-    id:           orden.id,
-    numero_orden: orden.numero_orden,
-    tipo_orden:   orden.tipo_orden,
-    total:        orden.total,
-  });
-
   res.status(201).json({ success: true, data: orden, message: 'Orden creada correctamente' });
 });
 
@@ -90,8 +82,6 @@ export const updateEstado = asyncHandler(async (req: Request, res: Response) => 
     user_agent:            req.auditContext?.userAgent,
   });
 
-  socketGateway.emitEstadoOrden({ id: (orden as any)?.id, id_estado });
-
   res.json({ success: true, data: orden, message: 'Estado de orden actualizado' });
 });
 
@@ -108,8 +98,6 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
     ip_address:            req.auditContext?.ip,
     user_agent:            req.auditContext?.userAgent,
   });
-
-  socketGateway.emitOrdenCancelada(id);
 
   res.status(204).send();
 });
