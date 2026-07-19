@@ -62,6 +62,9 @@ const Apariencia      = lazy(() => import('./pages/admin/Apariencia'));
 const GruposNegocio   = lazy(() => import('./pages/admin/GruposNegocio'));
 const OnboardingPrueba = lazy(() => import('./pages/admin/OnboardingPrueba').then(m => ({ default: m.OnboardingPrueba })));
 
+// Panel del dueño/admin del grupo — no requiere superadmin (la API valida el rol)
+const MiGrupo = lazy(() => import('./pages/MiGrupo'));
+
 // ── Fallback mientras el chunk lazy se descarga ────────────────────────────────
 
 const PageFallback = () => (
@@ -165,6 +168,8 @@ export default function App() {
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
               {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
               <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
+              {/* Panel del grupo: compartido entre sucursales (como Reportes) */}
+              <Route path="/mi-grupo"      element={<Suspense fallback={<PageFallback />}><MiGrupo /></Suspense>} />
               <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}

@@ -21,6 +21,14 @@ export const restauranteRepository = {
   findDefault: () =>
     prisma.restaurante.findFirst({ where: { es_default: true, activo: true } }),
 
+  /** Sedes de un grupo (incluye inactivas — el owner debe poder verlas) */
+  findByGrupo: (id_grupo: number) =>
+    prisma.restaurante.findMany({
+      where:   { id_grupo },
+      orderBy: { nombre: 'asc' },
+      include: { _count: { select: { usuarios: true } } },
+    }),
+
   create: async (data: {
     nombre:       string;
     id_grupo:     number;

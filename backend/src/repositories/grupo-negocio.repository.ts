@@ -79,6 +79,24 @@ export const grupoNegocioRepository = {
       include: includeRestaurantes,
     }),
 
+  /** Membresía puntual de un usuario en un grupo (activa) */
+  findMiembro: (id_usuario: number, id_grupo: number) =>
+    prisma.usuarioGrupo.findFirst({
+      where: { id_usuario, id_grupo, es_activo: true },
+    }),
+
+  /** Grupos donde el usuario es owner o admin (para el panel Mi Grupo) */
+  findMembresiasAdmin: (id_usuario: number) =>
+    prisma.usuarioGrupo.findMany({
+      where: {
+        id_usuario,
+        es_activo:    true,
+        rol_en_grupo: { in: ['owner', 'admin'] },
+      },
+      select:  { id_grupo: true, rol_en_grupo: true },
+      orderBy: { fecha_asignacion: 'asc' },
+    }),
+
   /** Lista los miembros del grupo con su rol */
   findMiembros: (id_grupo: number) =>
     prisma.usuarioGrupo.findMany({

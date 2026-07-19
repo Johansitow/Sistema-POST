@@ -28,7 +28,7 @@ import {
   ManageSearch, Settings, ChevronLeft,
   Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount,
-  PlayCircleOutline,
+  PlayCircleOutline, Groups,
 } from '@mui/icons-material';
 import { useAuthStore, useStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
@@ -41,6 +41,7 @@ import type { MenuGrupoDTO } from '../../services/menu.service';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS, type ModuloMenu } from '../../config/menuCatalog';
 import { useRestauranteStore, type RestauranteMini, type GrupoMini } from '../../store/restauranteStore';
 import { gruposNegocioService, type GrupoNegocio } from '../../services/grupos-negocio.service';
+import { miGrupoService } from '../../services/mi-grupo.service';
 import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
@@ -151,6 +152,7 @@ export default function Layout() {
   const [grupos,        setGrupos]        = useState<GrupoNegocio[]>([]);
   const [cambiandoSede, setCambiandoSede] = useState(false);
   const [sedePendiente, setSedePendiente] = useState<RestauranteMini | null>(null);
+  const [esAdminGrupo,  setEsAdminGrupo]  = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -198,6 +200,17 @@ export default function Layout() {
   }, []);
 
   useEffect(() => { loadMenu(); }, [loadMenu]);
+
+  // ¿Puede administrar su grupo? (owner/admin del grupo o superadmin).
+  // El backend decide (requireGrupoAdmin); un 403 simplemente oculta la entrada.
+  useEffect(() => {
+    let alive = true;
+    if (!usuario?.id) { setEsAdminGrupo(false); return; }
+    miGrupoService.getResumen()
+      .then(() => { if (alive) setEsAdminGrupo(true); })
+      .catch(() => { if (alive) setEsAdminGrupo(false); });
+    return () => { alive = false; };
+  }, [usuario?.id]);
 
   // Refresca el menú al volver a esta pestaña (cambio de pestaña, minimizar,
   // o restauración desde bfcache) — cubre el caso de dejar el sidebar abierto
@@ -358,6 +371,20 @@ export default function Layout() {
             </List>
           </Box>
         ))}
+
+        {/* Mi Grupo — panel del dueño/admin del grupo (compartido entre sedes) */}
+        {esAdminGrupo && (
+          <>
+            <Divider sx={{ my: 1, opacity: 0.5 }} />
+            <List dense>
+              <NavItem
+                item={{ text: 'Mi Grupo', icon: <Groups />, path: '/mi-grupo' }}
+                activeColor="#7c3aed"
+                activeBg="rgba(124,58,237,0.1)"
+              />
+            </List>
+          </>
+        )}
 
         {/* Acceso a administración — un solo ítem que lleva a /admin/usuarios */}
         {isSuperAdmin() && (
