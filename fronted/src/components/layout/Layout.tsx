@@ -28,7 +28,7 @@ import {
   ManageSearch, Settings, ChevronLeft,
   Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount,
-  PlayCircleOutline, Groups,
+  PlayCircleOutline,
 } from '@mui/icons-material';
 import { useAuthStore, useStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
@@ -41,7 +41,6 @@ import type { MenuGrupoDTO } from '../../services/menu.service';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS, type ModuloMenu } from '../../config/menuCatalog';
 import { useRestauranteStore, type RestauranteMini, type GrupoMini } from '../../store/restauranteStore';
 import { gruposNegocioService, type GrupoNegocio } from '../../services/grupos-negocio.service';
-import { miGrupoService } from '../../services/mi-grupo.service';
 import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
@@ -58,37 +57,43 @@ const COLLAPSED_WIDTH = 64;
 const menuItems = MODULE_CATALOG;
 
 // ── Grupos del panel de administración (estáticos) ────────────────────────────
+// `permiso`: código que habilita el módulo para un admin de grupo (además del
+// superadmin, que ve todo). Sin `permiso` el ítem es exclusivo del superadmin.
+// Debe coincidir con el permiso del AdminGuard de la ruta (App.tsx) y con el
+// requireAdminAccess del backend.
 
-const ADMIN_GROUPS = [
+interface AdminItem { text: string; icon: React.ReactNode; path: string; permiso?: string }
+
+const ADMIN_GROUPS: { label: string; items: AdminItem[] }[] = [
   {
     label: 'Gestión',
     items: [
-      { text: 'Usuarios',     icon: <People />,         path: '/admin/usuarios'     },
-      { text: 'Restaurantes', icon: <Business />,       path: '/admin/restaurantes' },
-      { text: 'Grupos',       icon: <AccountTree />,    path: '/admin/grupos'       },
-      { text: 'Permisos',     icon: <Lock />,           path: '/admin/permisos'     },
+      { text: 'Usuarios',     icon: <People />,         path: '/admin/usuarios',     permiso: 'usuarios.gestionar' },
+      { text: 'Restaurantes', icon: <Business />,       path: '/admin/restaurantes', permiso: 'sedes.gestionar'    },
+      { text: 'Grupos',       icon: <AccountTree />,    path: '/admin/grupos'        /* solo superadmin */         },
+      { text: 'Permisos',     icon: <Lock />,           path: '/admin/permisos',     permiso: 'permisos.gestionar' },
     ],
   },
   {
     label: 'Configuración',
     items: [
-      { text: 'Funciones',    icon: <Flag />,                path: '/admin/feature-flags'      },
-      { text: 'Parámetros',   icon: <Settings />,            path: '/admin/configuracion'      },
-      { text: 'Categorías',   icon: <Category />,            path: '/admin/categorias'         },
-      { text: 'Probar configuración', icon: <PlayCircleOutline />, path: '/admin/onboarding-prueba' },
+      { text: 'Funciones',    icon: <Flag />,                path: '/admin/feature-flags',    permiso: 'funciones.gestionar'  },
+      { text: 'Parámetros',   icon: <Settings />,            path: '/admin/configuracion',    permiso: 'config.sistema'       },
+      { text: 'Categorías',   icon: <Category />,            path: '/admin/categorias',       permiso: 'categorias.gestionar' },
+      { text: 'Probar configuración', icon: <PlayCircleOutline />, path: '/admin/onboarding-prueba' /* solo superadmin */     },
     ],
   },
   {
     label: 'Personalización',
     items: [
-      { text: 'Apariencia',   icon: <Palette />,        path: '/admin/apariencia'   },
-      { text: 'Impresión',    icon: <Print />,          path: '/admin/plantillas'   },
+      { text: 'Apariencia',   icon: <Palette />,        path: '/admin/apariencia',   permiso: 'apariencia.gestionar' },
+      { text: 'Impresión',    icon: <Print />,          path: '/admin/plantillas',   permiso: 'plantillas.gestionar' },
     ],
   },
 ];
 
-const ADMIN_STANDALONE = [
-  { text: 'Auditoría', icon: <ManageSearch />, path: '/admin/auditoria' },
+const ADMIN_STANDALONE: AdminItem[] = [
+  { text: 'Auditoría', icon: <ManageSearch />, path: '/admin/auditoria', permiso: 'auditoria.ver' },
 ];
 
 // Flat list for AppBar title lookup
@@ -152,11 +157,22 @@ export default function Layout() {
   const [grupos,        setGrupos]        = useState<GrupoNegocio[]>([]);
   const [cambiandoSede, setCambiandoSede] = useState(false);
   const [sedePendiente, setSedePendiente] = useState<RestauranteMini | null>(null);
-  const [esAdminGrupo,  setEsAdminGrupo]  = useState(false);
 
   const location = useLocation();
   const navigate = useNavigate();
-  const { usuario, logout, isSuperAdmin } = useAuthStore();
+  const { usuario, logout, isSuperAdmin, esAdminGrupo, hasPermission } = useAuthStore();
+
+  // ── Módulos de administración visibles para este usuario ───────────────────
+  // Superadmin ve todo; un admin de grupo solo los módulos cuyo permiso le
+  // otorgó el SA (claims permisos + grupos_admin del JWT — sin llamadas extra).
+  const puedeVerAdminItem = (item: AdminItem) =>
+    isSuperAdmin() || (item.permiso !== undefined && esAdminGrupo() && hasPermission(item.permiso));
+  const adminGroupsVisibles = ADMIN_GROUPS
+    .map(g => ({ ...g, items: g.items.filter(puedeVerAdminItem) }))
+    .filter(g => g.items.length > 0);
+  const adminStandaloneVisibles = ADMIN_STANDALONE.filter(puedeVerAdminItem);
+  const primerModuloAdmin =
+    adminGroupsVisibles[0]?.items[0]?.path ?? adminStandaloneVisibles[0]?.path;
   const { loadFlags, reloadFlags, loaded: flagsLoaded } = useFeatureFlagStore();
   const { grupos: menuGrupos, loadMenu, reloadMenu } = useMenuStore();
 
@@ -200,17 +216,6 @@ export default function Layout() {
   }, []);
 
   useEffect(() => { loadMenu(); }, [loadMenu]);
-
-  // ¿Puede administrar su grupo? (owner/admin del grupo o superadmin).
-  // El backend decide (requireGrupoAdmin); un 403 simplemente oculta la entrada.
-  useEffect(() => {
-    let alive = true;
-    if (!usuario?.id) { setEsAdminGrupo(false); return; }
-    miGrupoService.getResumen()
-      .then(() => { if (alive) setEsAdminGrupo(true); })
-      .catch(() => { if (alive) setEsAdminGrupo(false); });
-    return () => { alive = false; };
-  }, [usuario?.id]);
 
   // Refresca el menú al volver a esta pestaña (cambio de pestaña, minimizar,
   // o restauración desde bfcache) — cubre el caso de dejar el sidebar abierto
@@ -283,7 +288,8 @@ export default function Layout() {
     activeBg?: string;
   }) => {
     // El ítem de Administración se activa en cualquier ruta /admin/*
-    const isAdminEntry = item.path === '/admin/usuarios';
+    // (su path es el primer módulo admin visible, que varía por permisos)
+    const isAdminEntry = item.path.startsWith('/admin');
     const active = isAdminEntry
       ? location.pathname.startsWith('/admin')
       : location.pathname === item.path ||
@@ -372,27 +378,15 @@ export default function Layout() {
           </Box>
         ))}
 
-        {/* Mi Grupo — panel del dueño/admin del grupo (compartido entre sedes) */}
-        {esAdminGrupo && (
+        {/* Acceso a administración — visible para el superadmin y para los
+            admins de grupo con al menos un módulo habilitado por el SA.
+            Lleva al primer módulo que el usuario puede ver. */}
+        {primerModuloAdmin && (
           <>
             <Divider sx={{ my: 1, opacity: 0.5 }} />
             <List dense>
               <NavItem
-                item={{ text: 'Mi Grupo', icon: <Groups />, path: '/mi-grupo' }}
-                activeColor="#7c3aed"
-                activeBg="rgba(124,58,237,0.1)"
-              />
-            </List>
-          </>
-        )}
-
-        {/* Acceso a administración — un solo ítem que lleva a /admin/usuarios */}
-        {isSuperAdmin() && (
-          <>
-            <Divider sx={{ my: 1, opacity: 0.5 }} />
-            <List dense>
-              <NavItem
-                item={{ text: 'Administración', icon: <AdminPanelSettings />, path: '/admin/usuarios' }}
+                item={{ text: 'Administración', icon: <AdminPanelSettings />, path: primerModuloAdmin }}
                 activeColor="#ff9800"
                 activeBg="rgba(255,152,0,0.1)"
               />
@@ -494,9 +488,9 @@ export default function Layout() {
         <Divider sx={{ mt: 0.5 }} />
       </Box>
 
-      {/* Grupos de administración (estáticos) */}
+      {/* Grupos de administración — filtrados por los permisos del usuario */}
       <Box sx={{ px: collapsed ? 0.5 : 1.5, pt: 1, flexGrow: 1, overflowY: 'auto', overflowX: 'hidden' }}>
-        {ADMIN_GROUPS.map((group, idx) => (
+        {adminGroupsVisibles.map((group, idx) => (
           <Box key={group.label}>
             {idx > 0 && <Divider sx={{ my: 1, opacity: 0.5 }} />}
             {!collapsed && (
@@ -541,9 +535,9 @@ export default function Layout() {
         ))}
 
         {/* Auditoría — standalone */}
-        <Divider sx={{ my: 1, opacity: 0.5 }} />
+        {adminStandaloneVisibles.length > 0 && <Divider sx={{ my: 1, opacity: 0.5 }} />}
         <List dense>
-          {ADMIN_STANDALONE.map(item => {
+          {adminStandaloneVisibles.map(item => {
             const active = location.pathname === item.path ||
                            location.pathname.startsWith(item.path + '/');
             return (

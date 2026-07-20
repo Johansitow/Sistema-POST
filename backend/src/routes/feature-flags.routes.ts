@@ -9,6 +9,7 @@ import {
 } from '../controller/feature-flags.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { requireSuperAdmin } from '../middlewares/auth.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 
 const router = Router();
@@ -171,14 +172,20 @@ const router = Router();
 // Endpoint público para el frontend (requiere auth; tenant opcional para resolver grupo)
 router.get('/client', authenticate, tenantContextOptional, getClientFlags);
 
-// Endpoints de gestión (solo superadmin)
-router.use(authenticate, requireSuperAdmin);
-router.get('/',    getAll);
-router.get('/:id', getById);
-router.post('/',   create);
-router.put('/:id', update);
-router.delete('/:id', remove);
-router.put('/:id/asignaciones',              setAsignacion);
-router.delete('/:id/asignaciones/:contexto', deleteAsignacion);
+router.use(authenticate);
+
+// Lectura y asignaciones: superadmin (global) o admin de grupo con funciones.gestionar
+// (las asignaciones se filtran/validan al grupo y sedes del admin)
+const funcionesAdmin = [tenantContextOptional, requireAdminAccess('funciones.gestionar')] as const;
+
+router.get('/',    ...funcionesAdmin, getAll);
+router.get('/:id', ...funcionesAdmin, getById);
+router.put('/:id/asignaciones',              ...funcionesAdmin, setAsignacion);
+router.delete('/:id/asignaciones/:contexto', ...funcionesAdmin, deleteAsignacion);
+
+// CRUD de flags: definición global del sistema — solo superadmin
+router.post('/',      requireSuperAdmin, create);
+router.put('/:id',    requireSuperAdmin, update);
+router.delete('/:id', requireSuperAdmin, remove);
 
 export default router;

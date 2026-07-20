@@ -55,24 +55,40 @@ const selectPublico = {
   },
 };
 
+/**
+ * Fragmento where: el usuario pertenece al grupo, sea por membresía directa
+ * (UsuarioGrupo) o por acceso a alguna sede del grupo (UsuarioRestaurante).
+ * Usado para acotar todo el módulo de usuarios cuando administra un admin de grupo.
+ */
+const perteneceAGrupoWhere = (id_grupo: number) => ({
+  OR: [
+    { grupos:       { some: { id_grupo } } },
+    { restaurantes: { some: { restaurante: { id_grupo } } } },
+  ],
+});
+
 export const usuarioRepository = {
 
   findAll: (
     pagination: PaginationParams,
-    filters: { search?: string; estado?: EstadoGeneral; id_rol?: number }
+    filters: { search?: string; estado?: EstadoGeneral; id_rol?: number; id_grupo?: number }
   ) => {
     // Por defecto excluye eliminados; se sobreescribe si se pasa un estado específico
-    const where: any = { estado: { not: EstadoGeneral.eliminado } };
+    const where: any = { estado: { not: EstadoGeneral.eliminado }, AND: [] as any[] };
 
     if (filters.search) {
-      where.OR = [
-        { nombre_completo: { contains: filters.search, mode: 'insensitive' } },
-        { email:           { contains: filters.search, mode: 'insensitive' } },
-        { usuario:         { contains: filters.search, mode: 'insensitive' } },
-      ];
+      where.AND.push({
+        OR: [
+          { nombre_completo: { contains: filters.search, mode: 'insensitive' } },
+          { email:           { contains: filters.search, mode: 'insensitive' } },
+          { usuario:         { contains: filters.search, mode: 'insensitive' } },
+        ],
+      });
     }
-    if (filters.estado) where.estado = filters.estado;
-    if (filters.id_rol) where.id_rol = filters.id_rol;
+    if (filters.estado)   where.estado = filters.estado;
+    if (filters.id_rol)   where.id_rol = filters.id_rol;
+    // Scope multi-tenant: admin de grupo solo ve usuarios de su grupo
+    if (filters.id_grupo) where.AND.push(perteneceAGrupoWhere(filters.id_grupo));
 
     return Promise.all([
       prisma.usuario.findMany({
@@ -85,6 +101,57 @@ export const usuarioRepository = {
       prisma.usuario.count({ where }),
     ]);
   },
+
+  /** ¿El usuario pertenece al grupo? (membresía o acceso a alguna sede) */
+  perteneceAGrupo: (id: number, id_grupo: number) =>
+    prisma.usuario.findFirst({
+      where:  { id, ...perteneceAGrupoWhere(id_grupo) },
+      select: { id: true },
+    }),
+
+  // ── Permisos directos (UsuarioPermiso) — otorgados por el superadmin ────────
+
+  findPermisosDirectos: (id_usuario: number) =>
+    prisma.usuarioPermiso.findMany({
+      where:   { id_usuario },
+      include: { permiso: true },
+      orderBy: { permiso: { nombre: 'asc' } },
+    }),
+
+  /** Reemplaza todos los permisos directos del usuario en una sola operación */
+  syncPermisosDirectos: (id_usuario: number, ids_permisos: number[]) =>
+    prisma.$transaction(async (tx) => {
+      await tx.usuarioPermiso.deleteMany({ where: { id_usuario } });
+      if (ids_permisos.length > 0) {
+        await tx.usuarioPermiso.createMany({
+          data: ids_permisos.map(id_permiso => ({ id_usuario, id_permiso })),
+        });
+      }
+      return tx.usuarioPermiso.findMany({
+        where:   { id_usuario },
+        include: { permiso: true },
+      });
+    }),
+
+  findPermisosByIds: (ids: number[]) =>
+    prisma.permiso.findMany({ where: { id: { in: ids } } }),
+
+  /** Usuarios que son owner/admin de algún grupo (candidatos a permisos admin) */
+  findAdminsDeGrupo: () =>
+    prisma.usuario.findMany({
+      where: {
+        estado: { not: EstadoGeneral.eliminado },
+        grupos: { some: { es_activo: true, rol_en_grupo: { in: ['owner', 'admin'] } } },
+      },
+      select: {
+        id: true, uuid: true, nombre_completo: true, email: true, usuario: true, estado: true,
+        grupos: {
+          where:  { es_activo: true, rol_en_grupo: { in: ['owner', 'admin'] } },
+          select: { id_grupo: true, rol_en_grupo: true, grupo: { select: { nombre: true } } },
+        },
+      },
+      orderBy: { nombre_completo: 'asc' },
+    }),
 
   findById: (id: number) =>
     prisma.usuario.findFirst({
@@ -120,6 +187,15 @@ export const usuarioRepository = {
               select: { id: true, nombre: true, es_default: true, activo: true, id_grupo: true },
             },
           },
+        },
+        // Permisos directos por usuario (UsuarioPermiso) — se unen a los del rol
+        permisos_directos: {
+          select: { permiso: { select: { codigo: true } } },
+        },
+        // Membresías owner/admin de grupo — claim grupos_admin del JWT
+        grupos: {
+          where: { es_activo: true, rol_en_grupo: { in: ['owner', 'admin'] } },
+          select: { id_grupo: true, rol_en_grupo: true },
         },
       },
       // Nota: `include` devuelve todos los campos del usuario (incluyendo
@@ -216,8 +292,10 @@ export const usuarioRepository = {
       create: { id_usuario, ...data },
     }),
 
-  count:         ()                      => prisma.usuario.count(),
-  countByEstado: (estado: EstadoGeneral) => prisma.usuario.count({ where: { estado } }),
+  count: (id_grupo?: number) =>
+    prisma.usuario.count({ where: id_grupo ? perteneceAGrupoWhere(id_grupo) : undefined }),
+  countByEstado: (estado: EstadoGeneral, id_grupo?: number) =>
+    prisma.usuario.count({ where: { estado, ...(id_grupo ? perteneceAGrupoWhere(id_grupo) : {}) } }),
 
   findRoles: () =>
     prisma.rol.findMany({

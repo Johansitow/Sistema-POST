@@ -89,6 +89,16 @@ interface AuthState {
    * (ver requirePermission en permission.middleware.ts).
    */
   hasPermission:  (codigo: string) => boolean;
+
+  /**
+   * Verifica si el usuario es owner/admin de algún grupo de negocio
+   * (claim grupos_admin del JWT). Junto con los permisos del módulo
+   * administracion, habilita el panel /admin para dueños de restaurante.
+   */
+  esAdminGrupo:   () => boolean;
+
+  /** ¿Tiene al menos uno de los permisos dados? (superadmin siempre pasa) */
+  hasAnyPermission: (codigos: string[]) => boolean;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -120,6 +130,16 @@ export const useAuthStore = create<AuthState>()(
         const user = get().user;
         if (user?.es_super_admin) return true;
         return user?.permisos?.includes(codigo) ?? false;
+      },
+
+      esAdminGrupo: () => {
+        const user = get().user;
+        return (user?.grupos_admin?.length ?? 0) > 0;
+      },
+
+      hasAnyPermission: (codigos) => {
+        const { hasPermission } = get();
+        return codigos.some(c => hasPermission(c));
       },
     }),
     {

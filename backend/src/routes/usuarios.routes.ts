@@ -3,18 +3,28 @@
  */
 
 import { Router } from 'express';
-import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina } from '../controller/usuarios.controller';
+import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina, listarAdminsDeGrupo, listarPermisosDirectos, sincronizarPermisosDirectos } from '../controller/usuarios.controller';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
+import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { sanitizarSuperAdminFlag, protegerSuperAdmin } from '../middlewares/superAdmin.guard';
 
 const router = Router();
 
-// Todas requieren autenticación y ser super admin
-router.use(authenticate, requireSuperAdmin);
+// Superadmin (acceso global) o admin de grupo con el permiso usuarios.gestionar
+// (scoped: solo ve/gestiona usuarios de su propio grupo — ver grupoScope en el controller)
+router.use(authenticate, tenantContextOptional, requireAdminAccess('usuarios.gestionar'));
 
 router.get('/',                     listar);
 router.get('/roles',                listarRoles);
 router.get('/estadisticas',         estadisticas);
+
+// ── Permisos directos por usuario (SOLO superadmin) ───────────────────────────
+// El SA decide qué módulos del panel admin puede usar cada admin de grupo.
+router.get('/admins-grupo',         requireSuperAdmin, listarAdminsDeGrupo);
+router.get('/:id/permisos',         requireSuperAdmin, listarPermisosDirectos);
+router.put('/:id/permisos',         requireSuperAdmin, sincronizarPermisosDirectos);
+
 router.get('/:id',                  obtener);
 
 // Creación: eliminar es_super_admin del body antes de llegar al controller

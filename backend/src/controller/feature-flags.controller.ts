@@ -24,9 +24,16 @@ const asignacionSchema = z.object({
   habilitado: z.boolean(),
 });
 
-/** GET /feature-flags — Lista todos los flags (admin) */
-export const getAll = asyncHandler(async (_req: Request, res: Response) => {
-  const flags = await featureFlagService.listar();
+/**
+ * Scope multi-tenant: undefined para superadmin; el grupo administrado
+ * (req.grupoAdminId de requireAdminAccess) para admins de grupo.
+ */
+const grupoScope = (req: Request): number | undefined =>
+  req.esSuperAdmin ? undefined : req.grupoAdminId;
+
+/** GET /feature-flags — Lista todos los flags (admin; asignaciones scoped por grupo) */
+export const getAll = asyncHandler(async (req: Request, res: Response) => {
+  const flags = await featureFlagService.listar(grupoScope(req));
   res.json({ success: true, data: flags });
 });
 
@@ -41,7 +48,7 @@ export const getClientFlags = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {
-  const flag = await featureFlagService.obtenerPorId(Number(req.params.id));
+  const flag = await featureFlagService.obtenerPorId(Number(req.params.id), grupoScope(req));
   res.json({ success: true, data: flag });
 });
 
@@ -102,7 +109,7 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
 export const setAsignacion = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const { contexto, habilitado } = asignacionSchema.parse(req.body);
-  const asignacion = await featureFlagService.setAsignacion(id, contexto, habilitado);
+  const asignacion = await featureFlagService.setAsignacion(id, contexto, habilitado, grupoScope(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -121,7 +128,7 @@ export const setAsignacion = asyncHandler(async (req: Request, res: Response) =>
 export const deleteAsignacion = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const contexto = String(req.params.contexto);
-  await featureFlagService.eliminarAsignacion(id, contexto);
+  await featureFlagService.eliminarAsignacion(id, contexto, grupoScope(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,

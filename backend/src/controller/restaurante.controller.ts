@@ -8,9 +8,18 @@ import { restauranteService } from '../services/restaurante.service';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
+/**
+ * Scope multi-tenant: undefined para superadmin (acceso global),
+ * el grupo administrado (req.grupoAdminId de requireAdminAccess) para admins de grupo.
+ */
+const grupoScope = (req: Request): number | undefined =>
+  req.esSuperAdmin ? undefined : req.grupoAdminId;
+
 const createRestauranteSchema = z.object({
   nombre:       z.string().min(1).max(200),
-  id_grupo:     z.number().int().positive(),
+  // Opcional para admins de grupo (el service fuerza su propio grupo);
+  // el service exige/usa id_grupo válido cuando crea el superadmin
+  id_grupo:     z.number().int().positive().optional(),
   nit:          z.string().max(50).optional(),
   descripcion:  z.string().optional(),
   logo_url:     z.string().url().max(500).optional().or(z.literal('')),
@@ -35,8 +44,13 @@ const updateRestauranteSchema = createRestauranteSchema.partial();
  */
 export const listar = asyncHandler(async (req: Request, res: Response) => {
   const todos = req.query.todos === 'true';
-  const data  = todos
-    ? await restauranteService.listarTodos()
+  // ?todos=true: superadmin ve todas; un no-superadmin solo las de su grupo
+  // (claim grupos_admin del JWT, o el grupo de su primera sede)
+  const grupoDelUsuario = req.esSuperAdmin
+    ? undefined
+    : req.user?.grupos_admin?.[0]?.id_grupo ?? req.user?.restaurantes?.[0]?.id_grupo;
+  const data = todos
+    ? await restauranteService.listarTodos(grupoDelUsuario)
     : await restauranteService.listar();
   res.json({ success: true, data });
 });
@@ -62,7 +76,7 @@ export const crear = asyncHandler(async (req: Request, res: Response) => {
     logo_url: dto.logo_url || undefined,
     email:    dto.email    || undefined,
   };
-  const restaurante = await restauranteService.crear(data);
+  const restaurante = await restauranteService.crear(data as any, grupoScope(req));
 
   registrarAuditoria({
     accion:                'CREAR_RESTAURANTE',
@@ -87,7 +101,7 @@ export const actualizar = asyncHandler(async (req: Request, res: Response) => {
     logo_url: dto.logo_url || undefined,
     email:    dto.email    || undefined,
   };
-  const restaurante = await restauranteService.actualizar(id, data);
+  const restaurante = await restauranteService.actualizar(id, data, grupoScope(req));
 
   registrarAuditoria({
     accion:                'ACTUALIZAR_RESTAURANTE',
@@ -105,14 +119,14 @@ export const actualizar = asyncHandler(async (req: Request, res: Response) => {
 
 /** GET /restaurantes/:id/usuarios — Lista los usuarios asignados a un restaurante */
 export const listarUsuarios = asyncHandler(async (req: Request, res: Response) => {
-  const data = await restauranteService.listarUsuarios(Number(req.params.id));
+  const data = await restauranteService.listarUsuarios(Number(req.params.id), grupoScope(req));
   res.json({ success: true, data });
 });
 
 /** POST /restaurantes/:id/usuarios — Asigna un usuario al restaurante */
 export const asignarUsuario = asyncHandler(async (req: Request, res: Response) => {
   const { id_usuario } = z.object({ id_usuario: z.number().int().positive() }).parse(req.body);
-  const data = await restauranteService.asignarUsuario(Number(req.params.id), id_usuario);
+  const data = await restauranteService.asignarUsuario(Number(req.params.id), id_usuario, grupoScope(req));
 
   registrarAuditoria({
     accion:               'ASIGNAR_USUARIO_RESTAURANTE',
@@ -130,7 +144,7 @@ export const asignarUsuario = asyncHandler(async (req: Request, res: Response) =
 
 /** DELETE /restaurantes/:id/usuarios/:userId — Remueve un usuario del restaurante */
 export const removerUsuario = asyncHandler(async (req: Request, res: Response) => {
-  await restauranteService.removerUsuario(Number(req.params.id), Number(req.params.userId));
+  await restauranteService.removerUsuario(Number(req.params.id), Number(req.params.userId), grupoScope(req));
 
   registrarAuditoria({
     accion:               'REMOVER_USUARIO_RESTAURANTE',
@@ -149,7 +163,7 @@ export const removerUsuario = asyncHandler(async (req: Request, res: Response) =
 /** PATCH /restaurantes/:id/toggle — Activa/desactiva un restaurante (superadmin) */
 export const toggleActivo = asyncHandler(async (req: Request, res: Response) => {
   const id          = Number(req.params.id);
-  const restaurante = await restauranteService.toggleActivo(id);
+  const restaurante = await restauranteService.toggleActivo(id, grupoScope(req));
 
   registrarAuditoria({
     accion:                restaurante.activo ? 'ACTIVAR_RESTAURANTE' : 'DESACTIVAR_RESTAURANTE',

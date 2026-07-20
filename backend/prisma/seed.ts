@@ -143,6 +143,19 @@ async function main() {
   ]);
   console.log('✅ Permiso onboarding.aplicar creado');
 
+  // Permisos del panel de administración para admins de grupo (dueños).
+  // NO se asignan a ningún rol: el superadmin los otorga por persona
+  // vía UsuarioPermiso desde el módulo de Permisos.
+  await Promise.all([
+    prisma.permiso.create({ data: { nombre: 'Gestionar sedes',       codigo: 'sedes.gestionar',      modulo: 'administracion', descripcion: 'Editar sedes del grupo, activar/desactivar, vincular usuarios y crear sedes hasta el límite del plan' } }),
+    prisma.permiso.create({ data: { nombre: 'Gestionar categorías',  codigo: 'categorias.gestionar', modulo: 'administracion', descripcion: 'Administrar las categorías del catálogo del grupo' } }),
+    prisma.permiso.create({ data: { nombre: 'Gestionar funciones',   codigo: 'funciones.gestionar',  modulo: 'administracion', descripcion: 'Ver feature flags y gestionar sus asignaciones dentro del grupo' } }),
+    prisma.permiso.create({ data: { nombre: 'Gestionar apariencia',  codigo: 'apariencia.gestionar', modulo: 'administracion', descripcion: 'Personalizar la apariencia (UI config) del grupo y sus sedes' } }),
+    prisma.permiso.create({ data: { nombre: 'Gestionar plantillas',  codigo: 'plantillas.gestionar', modulo: 'administracion', descripcion: 'Administrar las plantillas de impresión del grupo' } }),
+    prisma.permiso.create({ data: { nombre: 'Gestionar permisos',    codigo: 'permisos.gestionar',   modulo: 'administracion', descripcion: 'Ajustar permisos de los roles operativos (no de sistema)' } }),
+  ]);
+  console.log('✅ Permisos de administración (admins de grupo) creados');
+
   const todosLosPermisos = [...permisos, ...permisosNuevos, ...permisosOnboarding];
 
   // Admin recibe TODOS los permisos

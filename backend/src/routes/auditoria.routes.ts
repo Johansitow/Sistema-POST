@@ -1,21 +1,25 @@
 /**
  * Auditoría Routes
  *
- * GET /api/auditoria → historial completo con filtros
+ * GET /api/auditoria → historial con filtros
  *
- * Protegido por requireRole('auditoria.ver'):
- * Solo el superadmin tiene este permiso por defecto.
- * El superadmin puede delegarlo a otros usuarios desde el frontend.
+ * Superadmin: historial completo del sistema.
+ * Admin de grupo con permiso auditoria.ver: solo los registros de SU grupo.
+ *
+ * Nota: antes usaba requireRole('auditoria.ver'), que compara NOMBRES de rol —
+ * como ningún rol se llama así, en la práctica solo pasaba el superadmin.
+ * requireAdminAccess valida el permiso real (RolPermiso ∪ UsuarioPermiso).
  */
 
 import { Router } from 'express';
 import { auditoriaController } from '../controller/auditoria.controller';
-import { authenticate, requireRole } from '../middlewares/auth.middleware';
+import { authenticate } from '../middlewares/auth.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
+import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 
 const router = Router();
 
-router.use(authenticate);
-router.use(requireRole('auditoria.ver'));
+router.use(authenticate, tenantContextOptional, requireAdminAccess('auditoria.ver'));
 
 router.get('/', auditoriaController.getAll);
 

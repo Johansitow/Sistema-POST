@@ -17,6 +17,7 @@ import {
   type UsuarioAsignado, type UsuarioItem,
 } from '../../services/restaurantes.service';
 import { grupoNegocioService, type GrupoNegocio } from '../../services/grupo-negocio.service';
+import { useAuthStore } from '../../store/useStore';
 import { LoadingScreen, EmptyState } from '../../components/common';
 
 const FieldRow = ({ children }: { children: React.ReactNode }) => (
@@ -41,9 +42,11 @@ const EMPTY_FIELDS: RestauranteFields = {
   direccion: '', ciudad: '', telefono: '', email: '', es_default: false,
 };
 
-function RestauranteFieldsForm({ fields, onChange }: {
+function RestauranteFieldsForm({ fields, onChange, ocultarDefault = false }: {
   fields: RestauranteFields;
   onChange: (f: Partial<RestauranteFields>) => void;
+  /** Los admins de grupo no controlan es_default (el backend lo ignora igualmente) */
+  ocultarDefault?: boolean;
 }) {
   const set = (k: keyof RestauranteFields) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -65,10 +68,12 @@ function RestauranteFieldsForm({ fields, onChange }: {
         <TextField fullWidth label="Email" type="email" value={fields.email} onChange={set('email')} />
       </FieldRow>
       <TextField fullWidth label="URL del logo" placeholder="https://..." value={fields.logo_url} onChange={set('logo_url')} />
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Switch checked={fields.es_default} onChange={e => onChange({ es_default: e.target.checked })} />
-        <Typography variant="body2">Restaurante por defecto</Typography>
-      </Box>
+      {!ocultarDefault && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Switch checked={fields.es_default} onChange={e => onChange({ es_default: e.target.checked })} />
+          <Typography variant="body2">Restaurante por defecto</Typography>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -78,6 +83,12 @@ function RestauranteFieldsForm({ fields, onChange }: {
 function CrearRestauranteWizard({ open, onClose, onSaved }: {
   open: boolean; onClose: () => void; onSaved: (r: Restaurante) => void;
 }) {
+  // Superadmin: wizard completo (elegir tipo de tenant + grupo).
+  // Admin de grupo: solo el formulario — el backend fuerza SU grupo y valida
+  // el límite de sedes del plan (no puede elegir grupo ni tipo de tenant).
+  const { isSuperAdmin } = useAuthStore();
+  const esSA = isSuperAdmin();
+
   // Paso 0: decisión  |  Paso 1: formulario
   const [step,         setStep]         = useState<0 | 1>(0);
   const [tipoTenant,   setTipoTenant]   = useState<TipoTenant | null>(null);
@@ -96,10 +107,10 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
   const [loading,      setLoading]      = useState(false);
   const [error,        setError]        = useState('');
 
-  // Reset al abrir
+  // Reset al abrir — un admin de grupo entra directo al formulario
   useEffect(() => {
     if (!open) return;
-    setStep(0);
+    setStep(esSA ? 0 : 1);
     setTipoTenant(null);
     setGrupoSel(null);
     setGrupoNombre('');
@@ -129,11 +140,11 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
   const handleSave = async () => {
     if (!fields.nombre.trim()) { setError('El nombre del restaurante es obligatorio'); return; }
 
-    if (tipoTenant === 'compartido' && !grupoSel) {
+    if (esSA && tipoTenant === 'compartido' && !grupoSel) {
       setError('Selecciona el grupo de negocio al que pertenece este restaurante');
       return;
     }
-    if (tipoTenant === 'aislado' && !grupoNombre.trim()) {
+    if (esSA && tipoTenant === 'aislado' && !grupoNombre.trim()) {
       setError('El nombre del negocio es obligatorio');
       return;
     }
@@ -141,17 +152,7 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
     setLoading(true);
     setError('');
     try {
-      let id_grupo: number;
-
-      if (tipoTenant === 'aislado') {
-        // Crear el grupo de negocio independiente primero
-        const nuevoGrupo = await grupoNegocioService.crear({ nombre: grupoNombre.trim(), plan: grupoPlan });
-        id_grupo = nuevoGrupo.id;
-      } else {
-        id_grupo = grupoSel!.id;
-      }
-
-      const r = await restaurantesService.crear({
+      const base = {
         ...fields,
         nit:         fields.nit       || undefined,
         descripcion: fields.descripcion || undefined,
@@ -160,9 +161,23 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
         ciudad:      fields.ciudad     || undefined,
         telefono:    fields.telefono   || undefined,
         email:       fields.email      || undefined,
-        id_grupo,
-        tipo_tenant: tipoTenant!,
-      });
+      };
+
+      let r: Restaurante;
+      if (esSA) {
+        let id_grupo: number;
+        if (tipoTenant === 'aislado') {
+          // Crear el grupo de negocio independiente primero
+          const nuevoGrupo = await grupoNegocioService.crear({ nombre: grupoNombre.trim(), plan: grupoPlan });
+          id_grupo = nuevoGrupo.id;
+        } else {
+          id_grupo = grupoSel!.id;
+        }
+        r = await restaurantesService.crear({ ...base, id_grupo, tipo_tenant: tipoTenant! });
+      } else {
+        // Admin de grupo: sin id_grupo ni tipo_tenant — el backend fuerza su grupo
+        r = await restaurantesService.crear(base as Parameters<typeof restaurantesService.crear>[0]);
+      }
       onSaved(r);
       onClose();
     } catch (err: any) {
@@ -183,13 +198,15 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
       </DialogTitle>
       <Divider />
 
-      {/* Stepper indicador */}
-      <Box sx={{ px: 3, pt: 2 }}>
-        <Stepper activeStep={step} alternativeLabel>
-          <Step><StepLabel>Tipo de negocio</StepLabel></Step>
-          <Step><StepLabel>Datos del restaurante</StepLabel></Step>
-        </Stepper>
-      </Box>
+      {/* Stepper indicador — solo aplica al flujo del superadmin */}
+      {esSA && (
+        <Box sx={{ px: 3, pt: 2 }}>
+          <Stepper activeStep={step} alternativeLabel>
+            <Step><StepLabel>Tipo de negocio</StepLabel></Step>
+            <Step><StepLabel>Datos del restaurante</StepLabel></Step>
+          </Stepper>
+        </Box>
+      )}
 
       <DialogContent sx={{ pt: 2 }}>
         {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
@@ -322,6 +339,7 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
             <RestauranteFieldsForm
               fields={fields}
               onChange={f => setFields(p => ({ ...p, ...f }))}
+              ocultarDefault={!esSA}
             />
           </Box>
         )}
@@ -330,11 +348,11 @@ function CrearRestauranteWizard({ open, onClose, onSaved }: {
       <Divider />
       <DialogActions sx={{ px: 3, py: 1.5, justifyContent: 'space-between' }}>
         <Button
-          onClick={() => step === 0 ? onClose() : setStep(0)}
+          onClick={() => (step === 0 || !esSA) ? onClose() : setStep(0)}
           startIcon={<Close fontSize="small" />}
           disabled={loading}
         >
-          {step === 0 ? 'Cancelar' : 'Volver'}
+          {(step === 0 || !esSA) ? 'Cancelar' : 'Volver'}
         </Button>
         {step === 1 && (
           <Button variant="contained" onClick={handleSave} disabled={loading}
@@ -416,7 +434,11 @@ function EditarRestauranteForm({ open, item, onClose, onSaved }: {
         <Alert severity="info" sx={{ mb: 2 }} icon={false}>
           El tipo de tenant (<strong>{TENANT_LABELS[item.tipo_tenant ?? 'compartido']?.label}</strong>) no puede modificarse después de la creación.
         </Alert>
-        <RestauranteFieldsForm fields={fields} onChange={f => setFields(p => ({ ...p, ...f }))} />
+        <RestauranteFieldsForm
+          fields={fields}
+          onChange={f => setFields(p => ({ ...p, ...f }))}
+          ocultarDefault={!useAuthStore.getState().isSuperAdmin()}
+        />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose} startIcon={<Close />} disabled={loading}>Cancelar</Button>

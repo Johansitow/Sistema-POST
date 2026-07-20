@@ -17,19 +17,33 @@ import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import { socketGateway } from '../config/socket.gateway';
 import { resolveAsignacion } from '../lib/flagContexto';
+import { contextosDelGrupo, assertContextoDelGrupo } from './grupoContexto.helper';
 
 const KEY_ALL  = 'ff:all';
 const keyOne   = (nombre: string) => `ff:${nombre}`;
 
 export const featureFlagService = {
-  async listar() {
-    return cacheGetOrSet(KEY_ALL, CACHE_TTL.MID, () => featureFlagRepository.findAll());
+  /** @param grupoId — admin de grupo: las asignaciones se filtran a su grupo/sedes */
+  async listar(grupoId?: number) {
+    const flags = await cacheGetOrSet(KEY_ALL, CACHE_TTL.MID, () => featureFlagRepository.findAll());
+    if (!grupoId) return flags;
+    const visibles = await contextosDelGrupo(grupoId);
+    return flags.map((f: any) => ({
+      ...f,
+      asignaciones: (f.asignaciones ?? []).filter((a: any) => visibles.has(a.contexto)),
+    }));
   },
 
-  async obtenerPorId(id: number) {
+  /** @param grupoId — admin de grupo: las asignaciones se filtran a su grupo/sedes */
+  async obtenerPorId(id: number, grupoId?: number) {
     const flag = await featureFlagRepository.findById(id);
     if (!flag) throw new NotFoundError('Feature Flag');
-    return flag;
+    if (!grupoId) return flag;
+    const visibles = await contextosDelGrupo(grupoId);
+    return {
+      ...flag,
+      asignaciones: (flag.asignaciones ?? []).filter((a: { contexto: string }) => visibles.has(a.contexto)),
+    };
   },
 
   /**
@@ -134,7 +148,9 @@ export const featureFlagService = {
     socketGateway.emitFeatureFlagChanged({ nombre: existente.nombre, habilitado: false, accion: 'eliminar' });
   },
 
-  async setAsignacion(id: number, contexto: string, habilitado: boolean) {
+  /** @param grupoId — admin de grupo: solo contextos de su grupo/sedes */
+  async setAsignacion(id: number, contexto: string, habilitado: boolean, grupoId?: number) {
+    await assertContextoDelGrupo(contexto, grupoId);
     const flag = await this.obtenerPorId(id);
     const asignacion = await featureFlagRepository.setAsignacion(id, contexto, habilitado);
     await cacheDel(KEY_ALL, keyOne(flag.nombre), `${keyOne(flag.nombre)}:${contexto}`);
@@ -142,7 +158,8 @@ export const featureFlagService = {
     return asignacion;
   },
 
-  async eliminarAsignacion(id: number, contexto: string) {
+  async eliminarAsignacion(id: number, contexto: string, grupoId?: number) {
+    await assertContextoDelGrupo(contexto, grupoId);
     const flag = await this.obtenerPorId(id);
     await featureFlagRepository.deleteAsignacion(id, contexto);
     await cacheDel(KEY_ALL, keyOne(flag.nombre), `${keyOne(flag.nombre)}:${contexto}`);

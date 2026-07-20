@@ -4,6 +4,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
 import {
@@ -22,17 +23,23 @@ import { restauranteService } from '../services/restaurante.service';
 const router = Router();
 router.use(authenticate);
 
-router.get('/',              listar);           // ?todos=true → incluye inactivos (superadmin)
+router.get('/',              listar);           // ?todos=true → incluye inactivos (scoped por grupo si no es superadmin)
 router.get('/default',       obtenerDefault);   // Restaurante marcado como default
-router.get('/:id',           obtener);
-router.post('/',             requireSuperAdmin, crear);
-router.put('/:id',           requireSuperAdmin, actualizar);
-router.patch('/:id/toggle',  requireSuperAdmin, toggleActivo);
 
-// ── Gestión de usuarios por restaurante (superadmin) ──────────────────────────
-router.get('/:id/usuarios',              requireSuperAdmin, listarUsuarios);
-router.post('/:id/usuarios',             requireSuperAdmin, asignarUsuario);
-router.delete('/:id/usuarios/:userId',   requireSuperAdmin, removerUsuario);
+// Mutaciones: superadmin (global) o admin de grupo con sedes.gestionar (scoped a su grupo).
+// Absorbe el antiguo módulo "Mi Grupo": whitelist de campos, límite de plan y
+// anti-IDOR viven en restauranteService (grupoScope del controller).
+const sedesAdmin = [tenantContextOptional, requireAdminAccess('sedes.gestionar')] as const;
+
+router.get('/:id',           obtener);
+router.post('/',             ...sedesAdmin, crear);
+router.put('/:id',           ...sedesAdmin, actualizar);
+router.patch('/:id/toggle',  ...sedesAdmin, toggleActivo);
+
+// ── Gestión de usuarios por restaurante ───────────────────────────────────────
+router.get('/:id/usuarios',              ...sedesAdmin, listarUsuarios);
+router.post('/:id/usuarios',             ...sedesAdmin, asignarUsuario);
+router.delete('/:id/usuarios/:userId',   ...sedesAdmin, removerUsuario);
 
 // ── Configuración por restaurante ─────────────────────────────────────────────
 // Accesible por el propio tenant (tenantContext) o por superadmin

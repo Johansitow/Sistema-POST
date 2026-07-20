@@ -30,6 +30,10 @@ export interface UsuarioAuth {
    * SIEMPRE usar este campo para decisiones de acceso en el frontend.
    */
   es_super_admin: boolean;
+  /** Permisos efectivos: rol (RolPermiso) ∪ directos (UsuarioPermiso) */
+  permisos?: string[];
+  /** Grupos donde el usuario es owner/admin — habilita el panel de administración de grupo */
+  grupos_admin?: { id_grupo: number; rol_en_grupo: string }[];
   rol: RolUsuario;
   restaurantes: { id: number; nombre: string; es_default: boolean; id_grupo: number }[];
 }

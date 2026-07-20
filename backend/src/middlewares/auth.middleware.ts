@@ -43,6 +43,10 @@ export interface TokenPayload {
   nombre_completo?: string;
   /** Flag de identidad del super admin — viene de Usuario.es_super_admin, NO del rol */
   es_super_admin:  boolean;
+  /** Permisos efectivos: rol (RolPermiso) ∪ directos (UsuarioPermiso) */
+  permisos?:       string[];
+  /** Grupos donde el usuario es owner/admin — para el panel de administración */
+  grupos_admin?:   { id_grupo: number; rol_en_grupo: string }[];
   rol: {
     id:             number;
     nombre:         string;

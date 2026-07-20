@@ -41,8 +41,18 @@ export interface TokenPayload {
   nombre_completo: string;
   /** Identidad del super admin — viene de Usuario.es_super_admin, NO del rol */
   es_super_admin:  boolean;
-  /** Códigos de permiso (Permiso.codigo) asignados al rol del usuario — vacío para superadmin (bypasea todo) */
+  /**
+   * Códigos de permiso (Permiso.codigo) efectivos del usuario:
+   * permisos del rol (RolPermiso) ∪ permisos directos (UsuarioPermiso).
+   * Vacío para superadmin (bypasea todo).
+   */
   permisos:        string[];
+  /**
+   * Grupos donde el usuario es owner/admin (UsuarioGrupo activo).
+   * El frontend lo usa para decidir si mostrar el panel de administración
+   * sin hacer peticiones adicionales.
+   */
+  grupos_admin:    { id_grupo: number; rol_en_grupo: string }[];
   rol: {
     id:             number;
     nombre:         string;
@@ -99,6 +109,8 @@ const buildPayload = (user: {
   restaurantes?: Array<{
     restaurante: { id: number; nombre: string; es_default: boolean; activo: boolean; id_grupo: number };
   }>;
+  permisos_directos?: Array<{ permiso: { codigo: string } }>;
+  grupos?: Array<{ id_grupo: number; rol_en_grupo: string }>;
 }): TokenPayload => ({
   id:              user.id,
   uuid:            user.uuid,
@@ -107,7 +119,15 @@ const buildPayload = (user: {
   nombre_completo: user.nombre_completo,
   // ─── FUENTE DE VERDAD: es_super_admin del usuario, no del rol ───────────────
   es_super_admin:  user.es_super_admin,
-  permisos:        (user.rol.permisos ?? []).map(rp => rp.permiso.codigo),
+  // Permisos efectivos = rol ∪ directos (sin duplicados)
+  permisos: [...new Set([
+    ...(user.rol.permisos ?? []).map(rp => rp.permiso.codigo),
+    ...(user.permisos_directos ?? []).map(up => up.permiso.codigo),
+  ])],
+  grupos_admin: (user.grupos ?? []).map(g => ({
+    id_grupo:     g.id_grupo,
+    rol_en_grupo: g.rol_en_grupo,
+  })),
   restaurantes: (user.restaurantes ?? [])
     .filter(ur => ur.restaurante.activo)
     .map(ur => ({

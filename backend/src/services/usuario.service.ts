@@ -28,8 +28,9 @@
  */
 
 import bcrypt from 'bcrypt';
-import { EstadoGeneral } from '@prisma/client';
+import { EstadoGeneral, RolGrupo } from '@prisma/client';
 import { usuarioRepository } from '../repositories/usuario.repository';
+import { grupoNegocioRepository } from '../repositories/grupo-negocio.repository';
 import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '../exceptions/HttpErrors';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { config } from '../config/env';
@@ -63,26 +64,43 @@ const protegerSuperAdmin = (target: { uuid: string; es_super_admin: boolean }) =
   }
 };
 
+/**
+ * assertUsuarioDelGrupo — anti-IDOR para admins de grupo.
+ * Si hay scope de grupo (admin de grupo, no superadmin) y el usuario objetivo
+ * no pertenece a ese grupo, responde NotFound (no revela su existencia).
+ */
+const assertUsuarioDelGrupo = async (idUsuario: number, grupoId?: number) => {
+  if (!grupoId) return; // superadmin — sin scope
+  const pertenece = await usuarioRepository.perteneceAGrupo(idUsuario, grupoId);
+  if (!pertenece) throw new NotFoundError('Usuario');
+};
+
 // ─── SERVICE ─────────────────────────────────────────────────────────────────
 
 export const usuarioService = {
 
   // ── USUARIOS ──────────────────────────────────────────────────────────────
 
+  /**
+   * @param grupoId — scope multi-tenant: presente cuando administra un admin
+   *                  de grupo (req.grupoAdminId); undefined para superadmin.
+   */
   async listar(params: {
     page?: unknown; limit?: unknown;
     search?: string; estado?: EstadoGeneral; id_rol?: number;
-  }) {
+  }, grupoId?: number) {
     const pagination = getPaginationParams(params.page, params.limit);
     const [usuarios, total] = await usuarioRepository.findAll(pagination, {
-      search: params.search,
-      estado: params.estado,
-      id_rol: params.id_rol,
+      search:   params.search,
+      estado:   params.estado,
+      id_rol:   params.id_rol,
+      id_grupo: grupoId,
     });
     return buildPaginatedResult(usuarios, total, pagination);
   },
 
-  async obtenerPorId(id: number) {
+  async obtenerPorId(id: number, grupoId?: number) {
+    await assertUsuarioDelGrupo(id, grupoId);
     const usuario = await usuarioRepository.findById(id);
     if (!usuario) throw new NotFoundError('Usuario');
     return usuario;
@@ -93,7 +111,8 @@ export const usuarioService = {
       nombre_completo: string; email: string; usuario: string;
       password: string; telefono?: string; id_rol: number;
     },
-    creadoPorId: number
+    creadoPorId: number,
+    grupoId?: number
   ) {
     const existeEmail = await usuarioRepository.findByEmail(data.email);
     if (existeEmail) throw new ConflictError('El email ya está registrado');
@@ -106,6 +125,11 @@ export const usuarioService = {
 
     // Nadie puede crear usuarios con es_super_admin (no está en el DTO por diseño)
     // es_super_admin solo se asigna en seed con UUID fijo
+
+    // Un admin de grupo solo puede crear usuarios con roles operativos
+    if (grupoId && rol.es_super_admin) {
+      throw new ForbiddenError('No puedes asignar el rol de super administrador');
+    }
 
     // Si el rol tiene es_super_admin (rol informativo), verificar que no haya
     // otro usuario activo con ese rol
@@ -120,7 +144,7 @@ export const usuarioService = {
     }
 
     const password_hash = await bcrypt.hash(data.password, 10);
-    return usuarioRepository.create({
+    const usuario = await usuarioRepository.create({
       nombre_completo: data.nombre_completo,
       email:           data.email,
       usuario:         data.usuario,
@@ -130,6 +154,14 @@ export const usuarioService = {
       creado_por:      creadoPorId,
       // es_super_admin NO se puede asignar desde esta función (solo en seed)
     });
+
+    // Un usuario creado por un admin de grupo nace como operador de SU grupo
+    // (así queda dentro del scope y visible en su panel)
+    if (grupoId) {
+      await grupoNegocioRepository.upsertMiembro(usuario.id, grupoId, RolGrupo.operador);
+    }
+
+    return usuario;
   },
 
   async actualizar(
@@ -142,8 +174,10 @@ export const usuarioService = {
       turno: string; tipo_contrato: string;
       contacto_emergencia_nombre:  string; contacto_emergencia_telefono: string;
       notas: string;
-    }>
+    }>,
+    grupoId?: number
   ) {
+    await assertUsuarioDelGrupo(id, grupoId);
     const target = await usuarioRepository.findById(id);
     if (!target) throw new NotFoundError('Usuario');
 
@@ -164,7 +198,7 @@ export const usuarioService = {
       const rol = await usuarioRepository.findRolById(data.id_rol);
       if (!rol) throw new NotFoundError('Rol');
       // Si se cambia el rol via actualizar(), redirige a asignarRol
-      return this.asignarRol(id, data.id_rol, id);
+      return this.asignarRol(id, data.id_rol, id, grupoId);
     }
 
     // Cast necesario: Zod puede enviar fechas como string; Prisma las convierte correctamente
@@ -175,10 +209,11 @@ export const usuarioService = {
    * cambiarEstado — no permite desactivar al superadmin.
    * @param solicitanteId — ID del usuario que hace la petición (de req.user)
    */
-  async cambiarEstado(id: number, estado: EstadoGeneral, solicitanteId: number) {
+  async cambiarEstado(id: number, estado: EstadoGeneral, solicitanteId: number, grupoId?: number) {
     if (id === solicitanteId)
       throw new BadRequestError('No puedes cambiar tu propio estado');
 
+    await assertUsuarioDelGrupo(id, grupoId);
     const usuario = await usuarioRepository.findById(id);
     if (!usuario) throw new NotFoundError('Usuario');
 
@@ -211,7 +246,8 @@ export const usuarioService = {
    * resetPassword — no permite resetear la contraseña del superadmin
    * desde el panel de administración.
    */
-  async resetPassword(id: number, newPassword: string) {
+  async resetPassword(id: number, newPassword: string, grupoId?: number) {
+    await assertUsuarioDelGrupo(id, grupoId);
     const target = await usuarioRepository.findById(id);
     if (!target) throw new NotFoundError('Usuario');
 
@@ -231,10 +267,11 @@ export const usuarioService = {
    * Valida además las dos direcciones del cambio de rol superadmin.
    * @param solicitanteId — ID del usuario que hace la petición
    */
-  async asignarRol(id: number, id_rol: number, solicitanteId: number) {
+  async asignarRol(id: number, id_rol: number, solicitanteId: number, grupoId?: number) {
     if (id === solicitanteId)
       throw new BadRequestError('No puedes cambiar tu propio rol');
 
+    await assertUsuarioDelGrupo(id, grupoId);
     const usuario = await usuarioRepository.findById(id);
     if (!usuario) throw new NotFoundError('Usuario');
 
@@ -243,6 +280,11 @@ export const usuarioService = {
 
     const rolNuevo = await usuarioRepository.findRolById(id_rol);
     if (!rolNuevo) throw new NotFoundError('Rol');
+
+    // Un admin de grupo solo puede asignar roles operativos
+    if (grupoId && rolNuevo.es_super_admin) {
+      throw new ForbiddenError('No puedes asignar el rol de super administrador');
+    }
 
     // Sin cambio real — evitar operación innecesaria
     if ((usuario as any).rol.id === id_rol) {
@@ -280,25 +322,27 @@ export const usuarioService = {
     return { message: `Rol "${rolNuevo.nombre}" asignado correctamente`, usuario: actualizado };
   },
 
-  async listarRoles() {
-    return usuarioRepository.findRoles();
+  async listarRoles(grupoId?: number) {
+    const roles = await usuarioRepository.findRoles();
+    // Un admin de grupo no ve (ni puede asignar) el rol superadmin
+    return grupoId ? roles.filter(r => !r.es_super_admin) : roles;
   },
 
-  async estadisticas() {
+  async estadisticas(grupoId?: number) {
     const [total, activos, inactivos] = await Promise.all([
-      usuarioRepository.count(),
-      usuarioRepository.countByEstado(EstadoGeneral.activo),
-      usuarioRepository.countByEstado(EstadoGeneral.inactivo),
+      usuarioRepository.count(grupoId),
+      usuarioRepository.countByEstado(EstadoGeneral.activo, grupoId),
+      usuarioRepository.countByEstado(EstadoGeneral.inactivo, grupoId),
     ]);
     return { total, activos, inactivos };
   },
 
-  async getNomina(id: number) {
-    await this.obtenerPorId(id);
+  async getNomina(id: number, grupoId?: number) {
+    await this.obtenerPorId(id, grupoId);
     return usuarioRepository.findNomina(id);
   },
 
-  async upsertNomina(id: number, data: {
+  async upsertNomina(id: number, grupoId: number | undefined, data: {
     salario_base:   number;
     tipo_pago:      string;
     banco?:         string;
@@ -306,8 +350,36 @@ export const usuarioService = {
     numero_cuenta?: string;
     observaciones?: string;
   }) {
-    await this.obtenerPorId(id);
+    await this.obtenerPorId(id, grupoId);
     return usuarioRepository.upsertNomina(id, data);
+  },
+
+  // ── PERMISOS DIRECTOS (UsuarioPermiso) — solo superadmin ──────────────────
+  // El SA decide, admin por admin, qué módulos del panel de administración
+  // puede usar cada dueño de grupo. Se reflejan en el JWT al refresh/re-login.
+
+  async listarAdminsDeGrupo() {
+    return usuarioRepository.findAdminsDeGrupo();
+  },
+
+  async listarPermisosDirectos(id: number) {
+    await this.obtenerPorId(id); // 404 si no existe
+    const asignaciones = await usuarioRepository.findPermisosDirectos(id);
+    return asignaciones.map(a => a.permiso);
+  },
+
+  async sincronizarPermisosDirectos(id: number, ids_permisos: number[]) {
+    const target = await usuarioRepository.findById(id);
+    if (!target) throw new NotFoundError('Usuario');
+    // El superadmin no necesita permisos (bypasa todo) — evitar asignaciones sin sentido
+    protegerSuperAdmin(target as any);
+
+    const permisos = await usuarioRepository.findPermisosByIds(ids_permisos);
+    if (permisos.length !== ids_permisos.length)
+      throw new BadRequestError('Uno o más permisos no existen');
+
+    const asignaciones = await usuarioRepository.syncPermisosDirectos(id, ids_permisos);
+    return asignaciones.map(a => a.permiso);
   },
 
   // ── ROLES ─────────────────────────────────────────────────────────────────

@@ -44,8 +44,10 @@ export interface UsuarioAuth {
    * SIEMPRE usar este campo para decisiones de acceso en el frontend.
    */
   es_super_admin: boolean;
-  /** Códigos de permiso (Permiso.codigo) asignados al rol — vacío para superadmin (bypasea todo) */
+  /** Permisos efectivos: rol (RolPermiso) ∪ directos (UsuarioPermiso) — vacío para superadmin (bypasea todo) */
   permisos: string[];
+  /** Grupos donde el usuario es owner/admin — habilita el panel de administración de grupo */
+  grupos_admin?: { id_grupo: number; rol_en_grupo: string }[];
   rol: RolBasico;
   /** Restaurantes a los que tiene acceso este usuario (viene del JWT) */
   restaurantes: { id: number; nombre: string; es_default: boolean; id_grupo: number }[];

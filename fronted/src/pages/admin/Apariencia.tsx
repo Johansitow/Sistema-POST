@@ -20,6 +20,7 @@ import {
 import { DragIndicator, Palette, Save, Add, DeleteOutline } from '@mui/icons-material';
 import { uiConfigService } from '../../services/ui-config.service';
 import { useBrandingStore } from '../../store/brandingStore';
+import { useAuthStore } from '../../store/useStore';
 import { menuService, type GuardarMenuGrupo } from '../../services/menu.service';
 import { useMenuStore } from '../../store/menuStore';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS } from '../../config/menuCatalog';
@@ -35,25 +36,34 @@ function AparienciaPanel() {
   const [toast,   setToast]   = useState('');
   const colorRef = useRef<HTMLInputElement>(null);
 
+  // Superadmin edita la apariencia GLOBAL (sin contexto).
+  // Un admin de grupo edita la de SU grupo: el backend exige contexto grupo_<id>
+  // (assertContextoDelGrupo) para que nunca pueda tocar la config global.
+  const { user, isSuperAdmin } = useAuthStore();
+  const contexto = isSuperAdmin()
+    ? undefined
+    : user?.grupos_admin?.[0] ? `grupo_${user.grupos_admin[0].id_grupo}` : undefined;
+
   useEffect(() => {
     Promise.all([
-      uiConfigService.getConfig('apariencia', 'nombre_sistema'),
-      uiConfigService.getConfig('apariencia', 'color_primario'),
-      uiConfigService.getConfig('apariencia', 'logo_url'),
+      uiConfigService.getConfig('apariencia', 'nombre_sistema', contexto),
+      uiConfigService.getConfig('apariencia', 'color_primario', contexto),
+      uiConfigService.getConfig('apariencia', 'logo_url',       contexto),
     ]).then(([nombre, color, logo]) => {
       if (nombre?.valor) setNombreSistema(String(nombre.valor));
       if (color?.valor)  setColorPrimario(String(color.valor));
       if (logo?.valor)   setLogoUrl(String(logo.valor));
     }).catch(() => {}).finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
       await Promise.all([
-        uiConfigService.setConfig('apariencia', 'nombre_sistema', nombreSistema),
-        uiConfigService.setConfig('apariencia', 'color_primario', colorPrimario),
-        uiConfigService.setConfig('apariencia', 'logo_url',       logoUrl),
+        uiConfigService.setConfig('apariencia', 'nombre_sistema', nombreSistema, contexto),
+        uiConfigService.setConfig('apariencia', 'color_primario', colorPrimario, contexto),
+        uiConfigService.setConfig('apariencia', 'logo_url',       logoUrl,       contexto),
       ]);
       // Refleja el cambio de inmediato en sidebar/login — sin esto solo se vería tras recargar.
       useBrandingStore.getState().setBranding({ nombreSistema, colorPrimario, logoUrl });
@@ -601,6 +611,9 @@ function MenuLateralPanel() {
 
 export default function Apariencia() {
   const [tab, setTab] = useState(0);
+  // El menú lateral es configuración GLOBAL (PUT /menu es solo superadmin);
+  // los admins de grupo solo ven la pestaña Apariencia (scoped a su grupo).
+  const { isSuperAdmin } = useAuthStore();
 
   return (
     <Box>
@@ -624,11 +637,13 @@ export default function Apariencia() {
           sx={{ px: 2, borderBottom: '1px solid', borderColor: 'divider' }}
         >
           <Tab icon={<Palette fontSize="small" />} iconPosition="start" label="Apariencia" />
-          <Tab icon={<DragIndicator fontSize="small" />} iconPosition="start" label="Menú lateral" />
+          {isSuperAdmin() && (
+            <Tab icon={<DragIndicator fontSize="small" />} iconPosition="start" label="Menú lateral" />
+          )}
         </Tabs>
         <Box sx={{ p: 3 }}>
           {tab === 0 && <AparienciaPanel />}
-          {tab === 1 && <MenuLateralPanel />}
+          {tab === 1 && isSuperAdmin() && <MenuLateralPanel />}
         </Box>
       </Paper>
     </Box>

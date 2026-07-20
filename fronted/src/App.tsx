@@ -62,9 +62,6 @@ const Apariencia      = lazy(() => import('./pages/admin/Apariencia'));
 const GruposNegocio   = lazy(() => import('./pages/admin/GruposNegocio'));
 const OnboardingPrueba = lazy(() => import('./pages/admin/OnboardingPrueba').then(m => ({ default: m.OnboardingPrueba })));
 
-// Panel del dueño/admin del grupo — no requiere superadmin (la API valida el rol)
-const MiGrupo = lazy(() => import('./pages/MiGrupo'));
-
 // ── Fallback mientras el chunk lazy se descarga ────────────────────────────────
 
 const PageFallback = () => (
@@ -85,18 +82,19 @@ const PrivateGuard: React.FC = () => {
 };
 
 /**
- * AdminGuard — Bloquea rutas /admin si el usuario no es superadmin.
+ * AdminGuard — Bloquea rutas /admin según la jerarquía de administración.
  * Se coloca como wrapper del element de cada ruta admin (no como layout).
  *
- * `permiso` (opcional): si se indica, además de superadmin también pasan
- * los usuarios cuyo rol tenga ese código de permiso — igual que hace el
- * backend vía `requirePermission()`. Sin `permiso`, el comportamiento es
- * el de siempre: solo superadmin.
+ * Sin `permiso`: solo superadmin (módulos globales del sistema, ej. Grupos).
+ * Con `permiso`: superadmin, o un admin de grupo (owner/admin de un
+ * GrupoNegocio) al que el SA le otorgó ese permiso — espejo del backend
+ * `requireAdminAccess()` (los datos igualmente llegan scoped a su grupo).
  */
 const AdminGuard: React.FC<{ children: React.ReactNode; permiso?: string }> = ({ children, permiso }) => {
-  const { isAuthenticated, isSuperAdmin, hasPermission } = useAuthStore();
+  const { isAuthenticated, isSuperAdmin, esAdminGrupo, hasPermission } = useAuthStore();
   if (!isAuthenticated) return <Navigate to="/login"     replace />;
-  const autorizado = permiso ? hasPermission(permiso) : isSuperAdmin();
+  const autorizado = isSuperAdmin() ||
+    (permiso !== undefined && esAdminGrupo() && hasPermission(permiso));
   if (!autorizado) return <Navigate to="/dashboard" replace />;
   return <>{children}</>;
 };
@@ -168,8 +166,6 @@ export default function App() {
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
               {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
               <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
-              {/* Panel del grupo: compartido entre sucursales (como Reportes) */}
-              <Route path="/mi-grupo"      element={<Suspense fallback={<PageFallback />}><MiGrupo /></Suspense>} />
               <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}
@@ -178,7 +174,7 @@ export default function App() {
               <Route
                 path="/admin/usuarios"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="usuarios.gestionar">
                     <Suspense fallback={<PageFallback />}><Usuarios /></Suspense>
                   </AdminGuard>
                 }
@@ -186,7 +182,7 @@ export default function App() {
               <Route
                 path="/admin/auditoria"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="auditoria.ver">
                     <Suspense fallback={<PageFallback />}><Auditoria /></Suspense>
                   </AdminGuard>
                 }
@@ -202,7 +198,7 @@ export default function App() {
               <Route
                 path="/admin/restaurantes"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="sedes.gestionar">
                     <Suspense fallback={<PageFallback />}><Restaurantes /></Suspense>
                   </AdminGuard>
                 }
@@ -210,7 +206,7 @@ export default function App() {
               <Route
                 path="/admin/categorias"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="categorias.gestionar">
                     <Suspense fallback={<PageFallback />}><Categorias /></Suspense>
                   </AdminGuard>
                 }
@@ -218,7 +214,7 @@ export default function App() {
               <Route
                 path="/admin/feature-flags"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="funciones.gestionar">
                     <Suspense fallback={<PageFallback />}><FeatureFlags /></Suspense>
                   </AdminGuard>
                 }
@@ -226,7 +222,7 @@ export default function App() {
               <Route
                 path="/admin/plantillas"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="plantillas.gestionar">
                     <Suspense fallback={<PageFallback />}><Plantillas /></Suspense>
                   </AdminGuard>
                 }
@@ -234,7 +230,7 @@ export default function App() {
               <Route
                 path="/admin/ui-config"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="apariencia.gestionar">
                     <Suspense fallback={<PageFallback />}><UiConfiguracion /></Suspense>
                   </AdminGuard>
                 }
@@ -242,7 +238,7 @@ export default function App() {
               <Route
                 path="/admin/permisos"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="permisos.gestionar">
                     <Suspense fallback={<PageFallback />}><Permisos /></Suspense>
                   </AdminGuard>
                 }
@@ -250,7 +246,7 @@ export default function App() {
               <Route
                 path="/admin/apariencia"
                 element={
-                  <AdminGuard>
+                  <AdminGuard permiso="apariencia.gestionar">
                     <Suspense fallback={<PageFallback />}><Apariencia /></Suspense>
                   </AdminGuard>
                 }

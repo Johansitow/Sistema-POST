@@ -4,6 +4,8 @@
 
 import { Router } from 'express';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
+import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { getAll, getByScope, getConfig, setConfig, deleteConfig, getPublicBranding } from '../controller/uiConfiguracion.controller';
 
 const router = Router();
@@ -135,10 +137,14 @@ router.use(authenticate);
  *       400: { description: ID inválido }
  *       404: { description: No encontrada }
  */
-router.get('/',              requireSuperAdmin, getAll);
+// Gestión: superadmin (global) o admin de grupo con apariencia.gestionar
+// (el admin de grupo solo puede escribir configs con contexto de su grupo/sedes)
+const aparienciaAdmin = [tenantContextOptional, requireAdminAccess('apariencia.gestionar')] as const;
+
+router.get('/',              ...aparienciaAdmin, getAll);
 router.get('/:scope',        getByScope);
 router.get('/:scope/:clave', getConfig);
-router.put('/:scope/:clave', requireSuperAdmin, setConfig);
+router.put('/:scope/:clave', ...aparienciaAdmin, setConfig);
 router.delete('/:id',        requireSuperAdmin, deleteConfig);
 
 export default router;

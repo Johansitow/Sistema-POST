@@ -42,7 +42,8 @@ model Permiso {
   es_sistema     Boolean  @default(false)
   fecha_creacion DateTime @default(now())
 
-  roles RolPermiso[]
+  roles    RolPermiso[]
+  usuarios UsuarioPermiso[]
 
   @@map("permisos")
 }
@@ -58,6 +59,24 @@ model RolPermiso {
 
   @@unique([id_rol, id_permiso])
   @@map("rol_permisos")
+}
+
+// ── UsuarioPermiso — permisos directos por usuario ───────────────────────────
+// Override individual sobre los permisos del rol: el super admin habilita
+// módulos de administración a cada admin de grupo (dueño) persona por persona.
+// Los permisos efectivos de un usuario = RolPermiso(rol) ∪ UsuarioPermiso.
+model UsuarioPermiso {
+  id               Int      @id @default(autoincrement())
+  id_usuario       Int
+  id_permiso       Int
+  fecha_asignacion DateTime @default(now())
+
+  usuario Usuario @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [id_permiso], references: [id], onDelete: Cascade)
+
+  @@unique([id_usuario, id_permiso])
+  @@index([id_usuario])
+  @@map("usuario_permisos")
 }
 
 // ── GrupoNegocio — tenant raíz del sistema SaaS ──────────────────────────────
@@ -219,6 +238,7 @@ model Usuario {
   nomina           NominaEmpleado?
   restaurantes     UsuarioRestaurante[]
   grupos           UsuarioGrupo[]
+  permisos_directos UsuarioPermiso[]
 
   @@map("usuarios")
 }

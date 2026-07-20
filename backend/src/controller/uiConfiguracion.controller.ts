@@ -5,6 +5,7 @@
 import { Request, Response } from 'express';
 import { z }                  from 'zod';
 import { uiConfiguracionService } from '../services/uiConfiguracion.service';
+import { contextosDelGrupo, assertContextoDelGrupo } from '../services/grupoContexto.helper';
 import { asyncHandler }           from '../middlewares/error.middleware';
 import { registrarAuditoria }     from '../repositories/auditoria.repository';
 import { BadRequestError }        from '../exceptions/HttpErrors';
@@ -16,10 +17,23 @@ const upsertSchema = z.object({
   contexto: z.string().max(100).optional(),
 });
 
-/** GET /ui-config  — todas las configs (superadmin) */
-export const getAll = asyncHandler(async (_req: Request, res: Response) => {
-  const data = await uiConfiguracionService.getAll();
-  res.json({ success: true, data });
+/**
+ * Scope multi-tenant: undefined para superadmin; el grupo administrado
+ * (req.grupoAdminId de requireAdminAccess) para admins de grupo.
+ */
+const grupoScope = (req: Request): number | undefined =>
+  req.esSuperAdmin ? undefined : req.grupoAdminId;
+
+/** GET /ui-config — todas las configs (SA) o globales + las del grupo (admin de grupo) */
+export const getAll = asyncHandler(async (req: Request, res: Response) => {
+  const data    = await uiConfiguracionService.getAll();
+  const grupoId = grupoScope(req);
+  if (!grupoId) { res.json({ success: true, data }); return; }
+  const visibles = await contextosDelGrupo(grupoId);
+  const filtradas = (data as Array<{ contexto?: string | null }>).filter(
+    c => !c.contexto || visibles.has(c.contexto)
+  );
+  res.json({ success: true, data: filtradas });
 });
 
 /**
@@ -50,12 +64,16 @@ export const getConfig = asyncHandler(async (req: Request, res: Response) => {
   res.json({ success: true, data: data ?? null });
 });
 
-/** PUT /ui-config/:scope/:clave  — crear/actualizar (superadmin) */
+/** PUT /ui-config/:scope/:clave — crear/actualizar.
+ *  Superadmin: cualquier config (global o con contexto).
+ *  Admin de grupo (apariencia.gestionar): SOLO con contexto de su grupo/sedes —
+ *  nunca puede tocar la configuración global del sistema. */
 export const setConfig = asyncHandler(async (req: Request, res: Response) => {
   const scope = str(req.params.scope);
   const clave = str(req.params.clave);
   if (!scope || !clave) throw new BadRequestError('scope y clave son requeridos');
   const { valor, contexto } = upsertSchema.parse(req.body);
+  await assertContextoDelGrupo(contexto, grupoScope(req));
   const data = await uiConfiguracionService.setConfig(scope, clave, valor, contexto);
 
   registrarAuditoria({

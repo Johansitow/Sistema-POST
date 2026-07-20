@@ -169,14 +169,24 @@ export const configuracionService = {
     return rol.permisos.map(rp => rp.permiso);
   },
 
-  /** Asigna un permiso a un rol (solo superadmin puede llamar esto) */
-  async asignarPermiso(id_rol: number, id_permiso: number) {
+  /**
+   * Asigna un permiso a un rol.
+   * @param esSuperAdmin — un admin de grupo (false) no puede tocar roles de
+   *   sistema/superadmin ni otorgar permisos del módulo 'administracion'
+   *   (evitaría que se escale privilegios a sí mismo vía su propio rol).
+   */
+  async asignarPermiso(id_rol: number, id_permiso: number, esSuperAdmin = true) {
     const [rol, permiso] = await Promise.all([
       prisma.rol.findUnique({ where: { id: id_rol } }),
       prisma.permiso.findUnique({ where: { id: id_permiso } }),
     ]);
     if (!rol)     throw new NotFoundError('Rol');
     if (!permiso) throw new NotFoundError('Permiso');
+
+    assertRolEditablePorNoSA(rol, esSuperAdmin);
+    if (!esSuperAdmin && permiso.modulo === 'administracion') {
+      throw new ForbiddenError('Los permisos de administración solo los otorga el super administrador');
+    }
 
     // Verificar que no exista ya
     const existente = await prisma.rolPermiso.findFirst({
@@ -188,7 +198,11 @@ export const configuracionService = {
   },
 
   /** Revoca un permiso de un rol */
-  async revocarPermiso(id_rol: number, id_permiso: number) {
+  async revocarPermiso(id_rol: number, id_permiso: number, esSuperAdmin = true) {
+    const rol = await prisma.rol.findUnique({ where: { id: id_rol } });
+    if (!rol) throw new NotFoundError('Rol');
+    assertRolEditablePorNoSA(rol, esSuperAdmin);
+
     const rolPermiso = await prisma.rolPermiso.findFirst({
       where: { id_rol, id_permiso },
     });
@@ -197,14 +211,19 @@ export const configuracionService = {
   },
 
   /** Reemplaza todos los permisos de un rol en una sola operación */
-  async sincronizarPermisos(id_rol: number, ids_permisos: number[]) {
+  async sincronizarPermisos(id_rol: number, ids_permisos: number[], esSuperAdmin = true) {
     const rol = await prisma.rol.findUnique({ where: { id: id_rol } });
     if (!rol) throw new NotFoundError('Rol');
+    assertRolEditablePorNoSA(rol, esSuperAdmin);
 
     // Verificar que todos los permisos existen
     const permisos = await prisma.permiso.findMany({ where: { id: { in: ids_permisos } } });
     if (permisos.length !== ids_permisos.length)
       throw new BadRequestError('Uno o más permisos no existen');
+
+    if (!esSuperAdmin && permisos.some(p => p.modulo === 'administracion')) {
+      throw new ForbiddenError('Los permisos de administración solo los otorga el super administrador');
+    }
 
     return prisma.$transaction(async (tx) => {
       await tx.rolPermiso.deleteMany({ where: { id_rol } });
@@ -218,3 +237,17 @@ export const configuracionService = {
     });
   },
 };
+
+/**
+ * Un no-superadmin (admin de grupo con permisos.gestionar) solo puede editar
+ * roles operativos: nunca el rol superadmin ni roles de sistema.
+ */
+function assertRolEditablePorNoSA(
+  rol: { es_super_admin: boolean; es_sistema: boolean },
+  esSuperAdmin: boolean
+) {
+  if (esSuperAdmin) return;
+  if (rol.es_super_admin || rol.es_sistema) {
+    throw new ForbiddenError('Este rol solo puede ser gestionado por el super administrador');
+  }
+}

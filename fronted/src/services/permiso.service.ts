@@ -8,8 +8,13 @@
  *   DELETE /configuracion/permisos/rol/:id/:permiso  → revocar permiso
  *   PUT    /configuracion/permisos/rol/:id/sync      → sincronizar todos
  *
- * Todos requieren: authenticate + requirePermission('config.sistema')
+ * Requieren: superadmin, o admin de grupo con permiso permisos.gestionar.
  * Respuesta estándar: { success: true, data: [...] }
+ *
+ * Permisos por administrador de grupo (SOLO superadmin, bajo /usuarios):
+ *   GET /usuarios/admins-grupo     → owners/admins de grupos
+ *   GET /usuarios/:id/permisos     → permisos directos (UsuarioPermiso)
+ *   PUT /usuarios/:id/permisos     → sincronizar permisos directos
  */
 
 import api from './api';
@@ -57,6 +62,21 @@ export interface PermisoUpdateDTO {
 export interface PermisosParams {
   modulo?:     string;
   es_sistema?: boolean;
+}
+
+/** Usuario owner/admin de algún grupo — candidato a permisos de administración */
+export interface AdminDeGrupo {
+  id:              number;
+  uuid:            string;
+  nombre_completo: string;
+  email:           string;
+  usuario:         string;
+  estado:          string;
+  grupos: Array<{
+    id_grupo:     number;
+    rol_en_grupo: string;
+    grupo:        { nombre: string };
+  }>;
 }
 
 // ─── Base path ────────────────────────────────────────────────────────────────
@@ -134,6 +154,41 @@ class PermisoServiceFrontend {
       return res.data.data ?? [];
     } catch (error) {
       console.error(`Error al sincronizar permisos del rol ${id_rol}:`, error);
+      throw this.handleError(error);
+    }
+  }
+
+  // ── Permisos por administrador de grupo (solo superadmin) ─────────────────
+
+  /** Lista los usuarios que son owner/admin de algún grupo de negocio */
+  async getAdminsGrupo(): Promise<AdminDeGrupo[]> {
+    try {
+      const res = await api.get('/usuarios/admins-grupo');
+      return res.data.admins ?? [];
+    } catch (error) {
+      console.error('Error al obtener administradores de grupo:', error);
+      throw this.handleError(error);
+    }
+  }
+
+  /** Permisos directos (UsuarioPermiso) de un usuario */
+  async getPermisosUsuario(id_usuario: number): Promise<Permiso[]> {
+    try {
+      const res = await api.get(`/usuarios/${id_usuario}/permisos`);
+      return res.data.permisos ?? [];
+    } catch (error) {
+      console.error(`Error al obtener permisos del usuario ${id_usuario}:`, error);
+      throw this.handleError(error);
+    }
+  }
+
+  /** Reemplaza los permisos directos del usuario con los ids enviados */
+  async sincronizarPermisosUsuario(id_usuario: number, ids_permisos: number[]): Promise<Permiso[]> {
+    try {
+      const res = await api.put(`/usuarios/${id_usuario}/permisos`, { ids_permisos });
+      return res.data.permisos ?? [];
+    } catch (error) {
+      console.error(`Error al sincronizar permisos del usuario ${id_usuario}:`, error);
       throw this.handleError(error);
     }
   }

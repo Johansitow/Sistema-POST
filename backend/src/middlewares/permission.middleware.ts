@@ -20,16 +20,25 @@ export const requirePermission = (codigoPermiso: string) =>
 
       if (!user?.rol?.id) return next(new ForbiddenError('No autorizado'));
 
-      // Buscar si el rol tiene el permiso requerido
-      const rolPermiso = await prisma.rolPermiso.findFirst({
-        where: {
-          id_rol:  user.rol.id,
-          permiso: { codigo: codigoPermiso },
-        },
-        include: { permiso: true },
-      });
+      // Permiso efectivo = del rol (RolPermiso) O directo del usuario (UsuarioPermiso)
+      const [rolPermiso, usuarioPermiso] = await Promise.all([
+        prisma.rolPermiso.findFirst({
+          where: {
+            id_rol:  user.rol.id,
+            permiso: { codigo: codigoPermiso },
+          },
+          select: { id: true },
+        }),
+        prisma.usuarioPermiso.findFirst({
+          where: {
+            id_usuario: user.id,
+            permiso:    { codigo: codigoPermiso },
+          },
+          select: { id: true },
+        }),
+      ]);
 
-      if (!rolPermiso) {
+      if (!rolPermiso && !usuarioPermiso) {
         return next(new ForbiddenError(`No tienes el permiso requerido: ${codigoPermiso}`));
       }
 
