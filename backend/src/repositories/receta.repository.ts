@@ -12,11 +12,21 @@ import prisma from '../config/database';
 import { TenantRepository } from './base/TenantRepository';
 import type { TenantCtx } from '../lib/tenantCtx';
 
+// Precios de compra del insumo — única fuente válida para calcular rentabilidad.
+// Preferido primero; el service toma el primero disponible.
+const proveedorPreciosSelect = {
+  where:   { estado: 'activo' as never },
+  select:  { precio_unitario: true, es_proveedor_preferido: true },
+  orderBy: { es_proveedor_preferido: 'desc' as never },
+  take:    5,
+} as const;
+
 const ingredienteSelect = {
   include: {
     producto: {
       select: { id: true, nombre: true, sku: true, precio_unitario: true,
-                unidad_medida: true, stock_actual: true, tipo_materia: true },
+                unidad_medida: true, stock_actual: true, tipo_materia: true,
+                proveedor_productos: proveedorPreciosSelect },
     },
   },
   orderBy: { orden: 'asc' as const },
@@ -107,7 +117,9 @@ class RecetaRepositoryImpl extends TenantRepository {
       },
       include: {
         ingredientes: {
-          include: { producto: true },
+          include: {
+            producto: { include: { proveedor_productos: proveedorPreciosSelect } },
+          },
           orderBy: { orden: 'asc' },
         },
         fases: { orderBy: { numero_fase: 'asc' }, where: { estado: 'activo' } },
@@ -320,16 +332,7 @@ class RecetaRepositoryImpl extends TenantRepository {
         },
         ingredientes: {
           include: {
-            producto: {
-              include: {
-                proveedor_productos: {
-                  where:   { estado: 'activo' as never },
-                  select:  { precio_unitario: true, es_proveedor_preferido: true },
-                  orderBy: { es_proveedor_preferido: 'desc' as never },
-                  take: 5,
-                },
-              },
-            },
+            producto: { include: { proveedor_productos: proveedorPreciosSelect } },
           },
           orderBy: { orden: 'asc' },
         },

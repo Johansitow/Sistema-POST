@@ -205,6 +205,8 @@ export interface RecetaIngrediente {
     nombre:          string;
     sku:             string;
     precio_unitario: number;
+    /** Precio bruto de compra del proveedor; null si aún no se asocia. Base de costo. */
+    precio_compra?:  number | null;
     unidad_medida:   string;
     stock_actual:    number;
     tipo_materia:    string;
@@ -221,6 +223,10 @@ export interface Rentabilidad {
   es_rentable:              boolean;
   diferencia_precio:        number;
   alerta_rentabilidad:      string | null;
+  /** true mientras falte el precio de compra de algún insumo — el margen llega en 0%. */
+  datos_incompletos?:       boolean;
+  ingredientes_sin_precio?: number;
+  advertencias?:            { ingrediente: string; mensaje: string }[];
 }
 
 export interface Receta {

@@ -357,8 +357,11 @@ describe('recetaService._calcularRentabilidad', () => {
       unidad:   i.unidad ?? 'unidad',
       producto: {
         nombre:        i.nombre ?? 'Ingrediente',
-        precio_unitario: i.precio_unitario,
         unidad_medida: i.unidad_medida ?? i.unidad ?? 'unidad',
+        // El costo solo sale del precio de compra pactado con el proveedor
+        proveedor_productos: [
+          { precio_unitario: i.precio_unitario, es_proveedor_preferido: true },
+        ],
       },
     })),
     merma_esperada_porcentaje: merma > 0 ? merma : null,
@@ -425,6 +428,95 @@ describe('recetaService._calcularRentabilidad', () => {
     expect(r.advertencias).toHaveLength(1);
     expect(r.advertencias[0].ingrediente).toBe('Lechuga');
     expect(r.advertencias[0].mensaje).toContain('incompatible');
+  });
+
+  // ── Rentabilidad en 0% mientras falte el precio de compra ──────────────────
+
+  const makeRecetaSinProveedor = (nombre = 'Tomate') => ({
+    ingredientes: [{
+      cantidad: 2,
+      unidad:   'unidad',
+      producto: { nombre, unidad_medida: 'unidad', proveedor_productos: [] },
+    }],
+    merma_esperada_porcentaje: null,
+    cantidad_producida: 1,
+    producto_final: { precio_venta: 9000, precio_unitario: 9000 },
+  });
+
+  it('ingrediente sin proveedor asociado → margen 0% y datos_incompletos', () => {
+    const r = recetaService._calcularRentabilidad(makeRecetaSinProveedor());
+
+    expect(r.margen_actual_porcentaje).toBe(0);
+    expect(r.es_rentable).toBe(false);
+    expect(r.datos_incompletos).toBe(true);
+    expect(r.ingredientes_sin_precio).toBe(1);
+    expect(r.costo_unitario).toBe(0);
+    expect(r.precio_sugerido_minimo).toBe(0);
+    expect(r.advertencias[0].mensaje).toContain('Sin precio de compra');
+  });
+
+  it('no inventa margen a partir de precio_unitario del catálogo', () => {
+    // El producto tiene precio_unitario en el catálogo, pero sin ProveedorProducto
+    // el costo se desconoce: no debe salir un margen del 100%.
+    const receta = makeRecetaSinProveedor();
+    (receta.ingredientes[0].producto as Record<string, unknown>).precio_unitario = 3000;
+
+    const r = recetaService._calcularRentabilidad(receta);
+
+    expect(r.margen_actual_porcentaje).toBe(0);
+    expect(r.costo_ingredientes).toBe(0);
+  });
+
+  it('margen parcial no cuenta: si un solo ingrediente no tiene precio, todo queda en 0%', () => {
+    const r = recetaService._calcularRentabilidad({
+      ingredientes: [
+        {
+          cantidad: 1, unidad: 'unidad',
+          producto: {
+            nombre: 'Pan', unidad_medida: 'unidad',
+            proveedor_productos: [{ precio_unitario: 1000, es_proveedor_preferido: true }],
+          },
+        },
+        {
+          cantidad: 1, unidad: 'unidad',
+          producto: { nombre: 'Queso', unidad_medida: 'unidad', proveedor_productos: [] },
+        },
+      ],
+      merma_esperada_porcentaje: null,
+      cantidad_producida: 1,
+      producto_final: { precio_venta: 10000, precio_unitario: 10000 },
+    });
+
+    expect(r.datos_incompletos).toBe(true);
+    expect(r.margen_actual_porcentaje).toBe(0);
+    expect(r.ingredientes_sin_precio).toBe(1);
+  });
+
+  it('con todos los precios de compra cargados el margen vuelve a calcularse', () => {
+    const r = recetaService._calcularRentabilidad(makeRecetaRent([{ cantidad: 2, precio_unitario: 1000 }], 4000));
+
+    expect(r.datos_incompletos).toBe(false);
+    expect(r.margen_actual_porcentaje).toBeCloseTo(50, 1);
+  });
+
+  it('usa el precio del proveedor preferido cuando hay varios', () => {
+    const r = recetaService._calcularRentabilidad({
+      ingredientes: [{
+        cantidad: 1, unidad: 'unidad',
+        producto: {
+          nombre: 'Carne', unidad_medida: 'unidad',
+          proveedor_productos: [
+            { precio_unitario: 5000, es_proveedor_preferido: false },
+            { precio_unitario: 2000, es_proveedor_preferido: true },
+          ],
+        },
+      }],
+      merma_esperada_porcentaje: null,
+      cantidad_producida: 1,
+      producto_final: { precio_venta: 10000, precio_unitario: 10000 },
+    });
+
+    expect(r.costo_ingredientes).toBe(2000);
   });
 });
 

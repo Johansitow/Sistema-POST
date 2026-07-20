@@ -28,6 +28,9 @@ export interface DesgloseRentabilidad {
   costo_con_merma:    number;
   precio_venta:       number | null;
   margen_porcentaje:  number | null;
+  /** true mientras falte el precio de compra de algún insumo — el margen llega en 0%. */
+  datos_incompletos?: boolean;
+  ingredientes_sin_precio?: number;
   advertencias:       { ingrediente: string; mensaje: string }[];
 }
 
@@ -44,8 +47,10 @@ interface Props {
 }
 
 export default function TablaDesgloseRentabilidad({ desglose }: Props) {
+  const incompleto = desglose.datos_incompletos === true;
   const margen = desglose.margen_porcentaje;
-  const margenColor = margen == null ? 'text.secondary'
+  const margenColor = incompleto ? '#94a3b8'
+    : margen == null ? 'text.secondary'
     : margen >= 40  ? '#10b981'
     : margen >= 0   ? '#f59e0b'
     : '#ef4444';
@@ -141,7 +146,14 @@ export default function TablaDesgloseRentabilidad({ desglose }: Props) {
 
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="subtitle2" fontWeight={700}>Margen</Typography>
-          {margen != null ? (
+          {incompleto ? (
+            <Chip
+              icon={<Warning fontSize="small" />}
+              label="0% — faltan precios de compra"
+              size="small"
+              sx={{ bgcolor: '#94a3b820', color: '#64748b', fontWeight: 700, '& .MuiChip-icon': { color: '#94a3b8' } }}
+            />
+          ) : margen != null ? (
             <Chip
               icon={margen >= 0 ? <TrendingUp fontSize="small" /> : <TrendingDown fontSize="small" />}
               label={`${margen.toFixed(1)}%`}
@@ -158,7 +170,7 @@ export default function TablaDesgloseRentabilidad({ desglose }: Props) {
           )}
         </Box>
 
-        {margen != null && margen < 0 && (
+        {!incompleto && margen != null && margen < 0 && (
           <Alert severity="error" sx={{ mt: 1.5, py: 0.5, borderRadius: 1.5 }}>
             <Typography variant="caption">
               Receta no rentable — el costo supera el precio de venta. Revisa los precios de los proveedores o el precio de venta.

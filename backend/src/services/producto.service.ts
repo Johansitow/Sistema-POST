@@ -11,6 +11,7 @@ import { toDecimal } from '../lib/decimal';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import { assertGrupoId } from '../lib/tenantQuery';
+import { precioCompra, type PrecioProveedor } from '../lib/costoProveedor';
 
 const keyOne  = (id: number)  => `prod:${id}`;
 const keySKU  = (sku: string) => `prod:sku:${sku}`;
@@ -36,6 +37,18 @@ function aplicarStockSede<T extends { stocks?: ProductoStock[] }>(producto: T) {
   };
 }
 
+/**
+ * Colapsa los ProveedorProducto del insumo en un único `precio_compra`.
+ * null = todavía no se ha pactado precio con ningún proveedor, que es lo que
+ * hace que la rentabilidad se reporte en 0%. Nunca se cae a `precio_unitario`
+ * del catálogo: ese campo no refleja lo que realmente se paga al proveedor.
+ */
+function aplicarPrecioCompra<T extends { proveedor_productos?: PrecioProveedor[] }>(producto: T) {
+  const { proveedor_productos, ...resto } = producto;
+  if (proveedor_productos === undefined) return producto;
+  return { ...resto, precio_compra: precioCompra(proveedor_productos) };
+}
+
 export const productoService = {
   async listar(params: {
     page?: unknown; limit?: unknown;
@@ -52,7 +65,10 @@ export const productoService = {
       id_grupo:       params.id_grupo,
       id_restaurante: params.id_restaurante,
     });
-    return buildPaginatedResult(productos.map(aplicarStockSede), total, pagination);
+    return buildPaginatedResult(
+      productos.map(p => aplicarPrecioCompra(aplicarStockSede(p))),
+      total, pagination
+    );
   },
 
   async obtenerPorId(id: number, id_restaurante?: number) {
@@ -62,10 +78,12 @@ export const productoService = {
       () => productoRepository.findById(id)
     );
     if (!producto) throw new NotFoundError('Producto');
-    if (!id_restaurante) return producto;
+    if (!id_restaurante) return aplicarPrecioCompra(producto);
     // Stock de la sede siempre fresco (no cacheado): cambia con cada movimiento
     const stockSede = await productoStockRepository.findOne(id, id_restaurante);
-    return aplicarStockSede({ ...producto, stocks: stockSede ? [stockSede] : [] });
+    return aplicarPrecioCompra(
+      aplicarStockSede({ ...producto, stocks: stockSede ? [stockSede] : [] })
+    );
   },
 
   async obtenerPorSKU(sku: string) {
