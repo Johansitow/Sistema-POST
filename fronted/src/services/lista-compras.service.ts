@@ -77,6 +77,27 @@ class ListaComprasServiceFrontend {
     };
   }
 
+  /** Crea una lista manual eligiendo productos y cantidades. */
+  async crearManual(data: {
+    notas?: string;
+    id_proveedor_asignado?: number;
+    items: {
+      id_producto:           number;
+      cantidad_sugerida:     number;
+      id_proveedor_sugerido?: number;
+      precio_estimado?:       number;
+      observaciones?:         string;
+    }[];
+  }): Promise<{ lista?: ListaCompras; total_items: number; message: string }> {
+    const res = await api.post(this.base, data);
+    const body = res.data;
+    return {
+      lista:       body.data?.lista ? this.parse(body.data.lista) : undefined,
+      total_items: body.data?.total_items ?? 0,
+      message:     body.message ?? 'OK',
+    };
+  }
+
   async cambiarEstado(id: number, estado: EstadoListaCompras): Promise<ListaCompras> {
     const res = await api.patch(`${this.base}/${id}/estado`, { estado });
     return this.parse(res.data.data ?? res.data);
