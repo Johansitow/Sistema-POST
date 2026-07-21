@@ -172,6 +172,7 @@ model Restaurante {
   lotes            Lote[]
   listasCompras    ListaCompras[]
   usuarios         UsuarioRestaurante[]
+  empleados_base   Usuario[]                  @relation("EmpleadoSedeBase")
   movimientos      Movimiento[]
   recetas          Receta[]
   stocks           ProductoStock[]
@@ -201,15 +202,48 @@ model Usuario {
   creado_por         Int?
 
   // ── Datos personales del empleado ──────────────────────────────────────────
+  tipo_documento                TipoDocumento? // reutiliza el enum de Cliente
   documento_identidad           String?   @db.VarChar(20)
   fecha_nacimiento              DateTime?
   direccion                     String?   @db.VarChar(300)
+  foto_url                      String?   @db.VarChar(500)
+
+  // ── Identidad laboral ──────────────────────────────────────────────────────
+  // codigo_empleado es consecutivo POR GRUPO, generado en usuarioService.
+  // No lleva UNIQUE en DB porque Usuario no tiene columna id_grupo (la
+  // pertenencia es vía UsuarioGrupo/UsuarioRestaurante); la unicidad se
+  // valida en el service dentro de la transacción de creación.
+  codigo_empleado               String?   @db.VarChar(20)
 
   // ── Datos laborales ────────────────────────────────────────────────────────
   cargo                         String?   @db.VarChar(100)
   fecha_ingreso                 DateTime?
   turno                         String?   @db.VarChar(20)   // mañana | tarde | noche | mixto
-  tipo_contrato                 String?   @db.VarChar(20)   // fijo | parcial | temporal
+  tipo_contrato                 String?   @db.VarChar(20)   // indefinido | fijo | obra_labor | aprendizaje
+  jornada                       String?   @db.VarChar(20)   // completa | parcial | por_horas
+
+  // Estado LABORAL — distinto de `estado`, que es el de la CUENTA de acceso.
+  // Un empleado en vacaciones sigue teniendo cuenta activa; uno retirado
+  // conserva su ficha (historial, certificados) aunque pierda el acceso.
+  estado_laboral                EstadoLaboral @default(activo)
+  fecha_retiro                  DateTime?
+  motivo_retiro                 String?   @db.VarChar(300)
+
+  // Sede de nómina — ancla de tenant para liquidación y documentos.
+  // Un usuario puede tener acceso a N sedes (UsuarioRestaurante); esta es
+  // la sede que asume su costo laboral.
+  id_restaurante_base           Int?
+
+  // Jefe directo — organigrama y flujo de aprobaciones
+  id_jefe_directo               Int?
+
+  // ── Seguridad social (obligatorio para PILA y certificados) ────────────────
+  eps                           String?   @db.VarChar(100)
+  afp                           String?   @db.VarChar(100)  // fondo de pensiones
+  arl                           String?   @db.VarChar(100)
+  nivel_riesgo_arl              String?   @db.VarChar(5)    // I | II | III | IV | V
+  fondo_cesantias               String?   @db.VarChar(100)
+  caja_compensacion             String?   @db.VarChar(100)
 
   // ── Contacto de emergencia ─────────────────────────────────────────────────
   contacto_emergencia_nombre    String?   @db.VarChar(200)
@@ -230,6 +264,10 @@ model Usuario {
   creador          Usuario?  @relation("UsuarioCreador", fields: [creado_por], references: [id])
   usuarios_creados Usuario[] @relation("UsuarioCreador")
 
+  restaurante_base Restaurante? @relation("EmpleadoSedeBase", fields: [id_restaurante_base], references: [id])
+  jefe_directo     Usuario?  @relation("JefeDirecto", fields: [id_jefe_directo], references: [id])
+  subordinados     Usuario[] @relation("JefeDirecto")
+
   auditorias       Auditoria[]
   ordenes          Orden[]
   cierres_caja     CierreCaja[]
@@ -240,6 +278,13 @@ model Usuario {
   grupos           UsuarioGrupo[]
   permisos_directos UsuarioPermiso[]
 
+  historial_salarios   HistorialSalario[] @relation("HistorialSalarioEmpleado")
+  salarios_registrados HistorialSalario[] @relation("HistorialSalarioAutor")
+
+  @@index([codigo_empleado])
+  @@index([estado_laboral])
+  @@index([id_restaurante_base])
+  @@index([id_jefe_directo])
   @@map("usuarios")
 }
 
@@ -277,6 +322,30 @@ model NominaEmpleado {
   usuario Usuario @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
 
   @@map("nomina_empleados")
+}
+
+// ── HistorialSalario — trazabilidad de cambios salariales ────────────────────
+// NominaEmpleado guarda el salario VIGENTE (una fila por empleado); esta tabla
+// guarda cada cambio con su vigencia y motivo. Sin este histórico no se puede
+// liquidar un periodo pasado ni sustentar una liquidación definitiva.
+// Se escribe automáticamente desde usuarioService.upsertNomina().
+
+model HistorialSalario {
+  id                Int      @id @default(autoincrement())
+  id_usuario        Int
+  salario_anterior  Decimal? @db.Decimal(12, 2)   // null en el registro inicial
+  salario_nuevo     Decimal  @db.Decimal(12, 2)
+  tipo_pago         String   @db.VarChar(20)
+  vigencia_desde    DateTime
+  motivo            String?  @db.VarChar(300)
+  id_registrado_por Int?
+  fecha_registro    DateTime @default(now())
+
+  usuario        Usuario  @relation("HistorialSalarioEmpleado", fields: [id_usuario],        references: [id], onDelete: Cascade)
+  registrado_por Usuario? @relation("HistorialSalarioAutor",    fields: [id_registrado_por], references: [id])
+
+  @@index([id_usuario, vigencia_desde])
+  @@map("historial_salarios")
 }
 
 model Auditoria {
@@ -1261,6 +1330,19 @@ enum EstadoGeneral {
   activo
   inactivo
   eliminado
+}
+
+// Estado LABORAL del empleado — ortogonal a EstadoGeneral (estado de la cuenta).
+// Un empleado en vacaciones o incapacidad sigue vinculado y cuesta nómina;
+// uno retirado conserva ficha e historial pero ya no se liquida.
+enum EstadoLaboral {
+  activo
+  periodo_prueba
+  vacaciones
+  incapacidad
+  licencia
+  suspendido
+  retirado
 }
 
 // Agregar este enum al bloque de enums:

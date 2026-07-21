@@ -6,9 +6,72 @@
  * - findByCredencial: usa include completo porque necesita password_hash para bcrypt
  */
 
-import { EstadoGeneral } from '@prisma/client';
+import { EstadoGeneral, EstadoLaboral, TipoDocumento, Prisma } from '@prisma/client';
 import prisma from '../config/database';
 import { PaginationParams, getSkip } from '../lib/pagination';
+
+/**
+ * Cliente Prisma o cliente transaccional. Permite que create/update/nómina
+ * participen de una $transaction sin duplicar los métodos del repositorio.
+ */
+type PrismaTx = Prisma.TransactionClient | typeof prisma;
+
+/**
+ * Campos de EMPLEADO — fuente única de verdad, compartida por create y update.
+ * Las fechas se aceptan como Date (el service normaliza los strings del DTO).
+ */
+export interface EmpleadoFields {
+  // Personales
+  tipo_documento:                TipoDocumento | null;
+  documento_identidad:           string | null;
+  fecha_nacimiento:              Date | null;
+  direccion:                     string | null;
+  foto_url:                      string | null;
+  // Identidad y datos laborales
+  codigo_empleado:               string | null;
+  cargo:                         string | null;
+  fecha_ingreso:                 Date | null;
+  turno:                         string | null;
+  tipo_contrato:                 string | null;
+  jornada:                       string | null;
+  estado_laboral:                EstadoLaboral;
+  fecha_retiro:                  Date | null;
+  motivo_retiro:                 string | null;
+  id_restaurante_base:           number | null;
+  id_jefe_directo:               number | null;
+  // Seguridad social
+  eps:                           string | null;
+  afp:                           string | null;
+  arl:                           string | null;
+  nivel_riesgo_arl:              string | null;
+  fondo_cesantias:               string | null;
+  caja_compensacion:             string | null;
+  // Contacto de emergencia
+  contacto_emergencia_nombre:    string | null;
+  contacto_emergencia_telefono:  string | null;
+  // Notas internas
+  notas:                         string | null;
+}
+
+export type UsuarioCreateData = {
+  nombre_completo: string;
+  email:           string;
+  usuario:         string;
+  password_hash:   string;
+  telefono?:       string;
+  id_rol:          number;
+  creado_por?:     number;
+} & Partial<EmpleadoFields>;
+
+export type UsuarioUpdateData = Partial<{
+  nombre_completo: string;
+  email:           string;
+  telefono:        string;
+  id_rol:          number;
+  estado:          EstadoGeneral;
+  password_hash:   string;
+  ultimo_acceso:   Date;
+} & EmpleadoFields>;
 
 const selectPublico = {
   id:                 true,
@@ -24,14 +87,31 @@ const selectPublico = {
   // Flag de identidad del superadmin único del sistema
   es_super_admin:     true,
   // Datos personales del empleado
+  tipo_documento:               true,
   documento_identidad:          true,
   fecha_nacimiento:             true,
   direccion:                    true,
+  foto_url:                     true,
+  // Identidad laboral
+  codigo_empleado:              true,
   // Datos laborales
   cargo:                        true,
   fecha_ingreso:                true,
   turno:                        true,
   tipo_contrato:                true,
+  jornada:                      true,
+  estado_laboral:               true,
+  fecha_retiro:                 true,
+  motivo_retiro:                true,
+  id_restaurante_base:          true,
+  id_jefe_directo:              true,
+  // Seguridad social
+  eps:                          true,
+  afp:                          true,
+  arl:                          true,
+  nivel_riesgo_arl:             true,
+  fondo_cesantias:              true,
+  caja_compensacion:            true,
   // Contacto de emergencia
   contacto_emergencia_nombre:   true,
   contacto_emergencia_telefono: true,
@@ -51,6 +131,20 @@ const selectPublico = {
       id:              true,
       nombre_completo: true,
       usuario:         true,
+    },
+  },
+  jefe_directo: {
+    select: {
+      id:              true,
+      nombre_completo: true,
+      cargo:           true,
+    },
+  },
+  restaurante_base: {
+    select: {
+      id:       true,
+      nombre:   true,
+      id_grupo: true,
     },
   },
 };
@@ -242,41 +336,54 @@ export const usuarioRepository = {
       select: { id: true, usuario: true, nombre_completo: true },
     }),
 
-  create: (data: {
-    nombre_completo: string;
-    email:           string;
-    usuario:         string;
-    password_hash:   string;
-    telefono?:       string;
-    id_rol:          number;
-    creado_por?:     number;
-  }) => prisma.usuario.create({ data, select: selectPublico }),
+  /** El parámetro `tx` permite participar de una $transaction del service. */
+  create: (data: UsuarioCreateData, tx: PrismaTx = prisma) =>
+    tx.usuario.create({ data, select: selectPublico }),
 
-  update: (id: number, data: Partial<{
-    nombre_completo: string;
-    email:           string;
-    telefono:        string;
-    id_rol:          number;
-    estado:          EstadoGeneral;
-    password_hash:   string;
-    ultimo_acceso:   Date;
-    // Empleado
-    documento_identidad:          string;
-    fecha_nacimiento:              Date;
-    direccion:                     string;
-    cargo:                         string;
-    fecha_ingreso:                 Date;
-    turno:                         string;
-    tipo_contrato:                 string;
-    contacto_emergencia_nombre:    string;
-    contacto_emergencia_telefono:  string;
-    notas:                         string;
-  }>) => prisma.usuario.update({ where: { id }, data, select: selectPublico }),
+  update: (id: number, data: UsuarioUpdateData, tx: PrismaTx = prisma) =>
+    tx.usuario.update({ where: { id }, data, select: selectPublico }),
+
+  // ── Código de empleado — consecutivo por grupo ─────────────────────────────
+
+  /**
+   * Devuelve los códigos de empleado ya usados en el scope indicado.
+   * Se comparan numéricamente en el service (no se ordena en SQL) porque el
+   * orden lexicográfico rompería al pasar de EMP-9999 a EMP-10000.
+   */
+  findCodigosEmpleado: (id_grupo?: number, tx: PrismaTx = prisma) =>
+    tx.usuario.findMany({
+      where: {
+        codigo_empleado: { not: null },
+        ...(id_grupo ? perteneceAGrupoWhere(id_grupo) : {}),
+      },
+      select: { codigo_empleado: true },
+    }),
+
+  // ── Historial salarial ─────────────────────────────────────────────────────
+
+  findHistorialSalarios: (id_usuario: number) =>
+    prisma.historialSalario.findMany({
+      where:   { id_usuario },
+      orderBy: { vigencia_desde: 'desc' },
+      include: {
+        registrado_por: { select: { id: true, nombre_completo: true } },
+      },
+    }),
+
+  createHistorialSalario: (data: {
+    id_usuario:        number;
+    salario_anterior?: Prisma.Decimal | number | null;
+    salario_nuevo:     Prisma.Decimal | number;
+    tipo_pago:         string;
+    vigencia_desde:    Date;
+    motivo?:           string;
+    id_registrado_por?: number;
+  }, tx: PrismaTx = prisma) => tx.historialSalario.create({ data }),
 
   // ── Nómina ─────────────────────────────────────────────────────────────────
 
-  findNomina: (id_usuario: number) =>
-    prisma.nominaEmpleado.findUnique({ where: { id_usuario } }),
+  findNomina: (id_usuario: number, tx: PrismaTx = prisma) =>
+    tx.nominaEmpleado.findUnique({ where: { id_usuario } }),
 
   upsertNomina: (id_usuario: number, data: {
     salario_base:   number;
@@ -285,8 +392,8 @@ export const usuarioRepository = {
     tipo_cuenta?:   string;
     numero_cuenta?: string;
     observaciones?: string;
-  }) =>
-    prisma.nominaEmpleado.upsert({
+  }, tx: PrismaTx = prisma) =>
+    tx.nominaEmpleado.upsert({
       where:  { id_usuario },
       update: data,
       create: { id_usuario, ...data },

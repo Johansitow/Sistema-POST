@@ -18,7 +18,10 @@ import {
   Badge, AccountBalance, Shield,
 } from '@mui/icons-material';
 import { usuariosService } from '../../services/usuarios.service';
-import type { Usuario, NominaDto, NominaEmpleado, RolBasico, EstadoGeneral } from '../../types';
+import type {
+  Usuario, NominaDto, NominaEmpleado, RolBasico, EstadoGeneral,
+  Turno, TipoContrato, Jornada,
+} from '../../types';
 import { useAuthStore } from '../../store/useStore';
 
 // ← CAMBIO 1: importar desde utils en lugar de definir inline
@@ -56,8 +59,10 @@ interface UnifiedForm {
   direccion:                     string;
   cargo:                         string;
   fecha_ingreso:                 string;
-  turno:                         string;
-  tipo_contrato:                 string;
+  // '' representa "sin asignar"; se convierte a undefined al guardar
+  turno:                         Turno | '';
+  tipo_contrato:                 TipoContrato | '';
+  jornada:                       Jornada | '';
   contacto_emergencia_nombre:    string;
   contacto_emergencia_telefono:  string;
   notas:                         string;
@@ -73,7 +78,7 @@ interface UnifiedForm {
 const FORM_EMPTY: UnifiedForm = {
   nombre_completo: '', email: '', usuario: '', password: '', telefono: '', id_rol: 0,
   documento_identidad: '', fecha_nacimiento: '', direccion: '', cargo: '',
-  fecha_ingreso: '', turno: '', tipo_contrato: '',
+  fecha_ingreso: '', turno: '', tipo_contrato: '', jornada: '',
   contacto_emergencia_nombre: '', contacto_emergencia_telefono: '', notas: '',
   salario_base: '', tipo_pago: 'mensual', banco: '', tipo_cuenta: '', numero_cuenta: '', nomina_obs: '',
 };
@@ -116,8 +121,9 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
         direccion:                     usuario.direccion || '',
         cargo:                         usuario.cargo || '',
         fecha_ingreso:                 usuario.fecha_ingreso ? usuario.fecha_ingreso.substring(0, 10) : '',
-        turno:                         usuario.turno || '',
+        turno:                         usuario.turno         || '',
         tipo_contrato:                 usuario.tipo_contrato || '',
+        jornada:                       usuario.jornada       || '',
         contacto_emergencia_nombre:    usuario.contacto_emergencia_nombre || '',
         contacto_emergencia_telefono:  usuario.contacto_emergencia_telefono || '',
         notas:                         usuario.notas || '',
@@ -177,6 +183,7 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
         fecha_ingreso:                 form.fecha_ingreso      || undefined,
         turno:                         form.turno              || undefined,
         tipo_contrato:                 form.tipo_contrato      || undefined,
+        jornada:                       form.jornada            || undefined,
         contacto_emergencia_nombre:    form.contacto_emergencia_nombre   || undefined,
         contacto_emergencia_telefono:  form.contacto_emergencia_telefono || undefined,
         notas:                         form.notas              || undefined,
@@ -324,12 +331,24 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
                 <InputLabel>Tipo de contrato</InputLabel>
                 <Select value={form.tipo_contrato} label="Tipo de contrato" onChange={set('tipo_contrato')}>
                   <MenuItem value="">Sin asignar</MenuItem>
+                  <MenuItem value="indefinido">Término indefinido</MenuItem>
                   <MenuItem value="fijo">Término fijo</MenuItem>
-                  <MenuItem value="parcial">Tiempo parcial</MenuItem>
-                  <MenuItem value="temporal">Temporal</MenuItem>
+                  <MenuItem value="obra_labor">Obra o labor</MenuItem>
+                  <MenuItem value="aprendizaje">Aprendizaje</MenuItem>
                 </Select>
               </FormControl>
             </FieldRow>
+            {/* La jornada es independiente del tipo de contrato: "medio tiempo"
+                no es un tipo de contrato sino una jornada. */}
+            <FormControl fullWidth>
+              <InputLabel>Jornada</InputLabel>
+              <Select value={form.jornada} label="Jornada" onChange={set('jornada')}>
+                <MenuItem value="">Sin asignar</MenuItem>
+                <MenuItem value="completa">Tiempo completo</MenuItem>
+                <MenuItem value="parcial">Medio tiempo</MenuItem>
+                <MenuItem value="por_horas">Por horas</MenuItem>
+              </Select>
+            </FormControl>
 
             <Divider sx={{ my: 0.5 }} />
             <Typography variant="subtitle2" color="text.secondary" fontWeight={600}>Contacto de emergencia</Typography>

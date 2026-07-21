@@ -3,8 +3,11 @@
  */
 
 import prisma from '../config/database';
-import { PlanSaaS } from '@prisma/client';
+import { PlanSaaS, Prisma } from '@prisma/client';
 import { PaginationParams, getSkip } from '../lib/pagination';
+
+/** Cliente Prisma o transaccional — permite participar de una $transaction. */
+type PrismaTx = Prisma.TransactionClient | typeof prisma;
 
 const includeRestaurantes = {
   restaurantes: {
@@ -110,8 +113,8 @@ export const grupoNegocioRepository = {
     }),
 
   /** Asignar o actualizar el rol de un usuario en el grupo */
-  upsertMiembro: (id_usuario: number, id_grupo: number, rol_en_grupo: string) =>
-    prisma.usuarioGrupo.upsert({
+  upsertMiembro: (id_usuario: number, id_grupo: number, rol_en_grupo: string, tx: PrismaTx = prisma) =>
+    tx.usuarioGrupo.upsert({
       where:  { id_usuario_id_grupo: { id_usuario, id_grupo } },
       update: { rol_en_grupo: rol_en_grupo as any, es_activo: true },
       create: { id_usuario, id_grupo, rol_en_grupo: rol_en_grupo as any },

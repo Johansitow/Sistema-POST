@@ -124,6 +124,16 @@ export const getNomina = asyncHandler(async (req: Request, res: Response) => {
 
 export const upsertNomina = asyncHandler(async (req: Request, res: Response) => {
   const data   = nominaSchema.parse(req.body);
-  const nomina = await usuarioService.upsertNomina(pid(req.params.id), grupoScope(req), data);
+  const nomina = await usuarioService.upsertNomina(
+    pid(req.params.id),
+    grupoScope(req),
+    data,
+    (req as any).user!.id,   // queda registrado quién cambió el salario
+  );
   res.json({ message: 'Nómina guardada correctamente', nomina });
+});
+
+export const listarHistorialSalarios = asyncHandler(async (req: Request, res: Response) => {
+  const historial = await usuarioService.listarHistorialSalarios(pid(req.params.id), grupoScope(req));
+  res.json({ historial });
 });

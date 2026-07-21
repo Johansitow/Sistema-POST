@@ -11,7 +11,9 @@
  */
 
 import api from './api';
-import type { CreateUsuarioDto, UpdateUsuarioDto, NominaDto, NominaEmpleado } from '../types';
+import type {
+  CreateUsuarioDto, UpdateUsuarioDto, NominaDto, NominaEmpleado, HistorialSalario,
+} from '../types';
 
 export const usuariosService = {
 
@@ -62,9 +64,12 @@ export const usuariosService = {
 
   /**
    * resetPassword — respuesta { message }
+   *
+   * La ruta es /reset-password (antes se llamaba a /password, que no existe
+   * en el backend: el botón del panel devolvía 404).
    */
   async resetPassword(id: number, password: string) {
-    const res = await api.patch(`/usuarios/${id}/password`, { newPassword: password });
+    const res = await api.patch(`/usuarios/${id}/reset-password`, { newPassword: password });
     // ← nota: el backend espera 'newPassword' no 'password'
     return res.data;
   },
@@ -107,5 +112,15 @@ export const usuariosService = {
   async guardarNomina(id: number, data: NominaDto): Promise<NominaEmpleado> {
     const res = await api.put(`/usuarios/${id}/nomina`, data);
     return res.data.nomina;
+  },
+
+  /**
+   * historialSalarios — trazabilidad de cambios de salario del empleado.
+   * Es solo lectura: el backend escribe el historial automáticamente al
+   * guardar la nómina.
+   */
+  async historialSalarios(id: number): Promise<HistorialSalario[]> {
+    const res = await api.get(`/usuarios/${id}/historial-salarios`);
+    return res.data.historial ?? [];
   },
 };

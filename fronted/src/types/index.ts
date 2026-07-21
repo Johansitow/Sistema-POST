@@ -99,7 +99,62 @@ export interface LoginResponse {
 /**
  * Usuario — entidad completa devuelta por /usuarios
  */
-export interface Usuario {
+// ─── EMPLEADO ─────────────────────────────────────────────────────────────────
+
+export type TipoDocumento  = 'cc' | 'ce' | 'nit' | 'pasaporte' | 'sin_documento';
+export type Turno          = 'mañana' | 'tarde' | 'noche' | 'mixto';
+export type TipoContrato   = 'indefinido' | 'fijo' | 'obra_labor' | 'aprendizaje';
+export type Jornada        = 'completa' | 'parcial' | 'por_horas';
+export type NivelRiesgoARL = 'I' | 'II' | 'III' | 'IV' | 'V';
+
+/**
+ * Estado LABORAL — independiente de `estado`, que es el de la cuenta de acceso.
+ * Un empleado en vacaciones conserva cuenta activa; uno retirado conserva
+ * su ficha e historial aunque pierda el acceso.
+ */
+export type EstadoLaboral =
+  | 'activo' | 'periodo_prueba' | 'vacaciones' | 'incapacidad'
+  | 'licencia' | 'suspendido' | 'retirado';
+
+/**
+ * Campos de empleado — fuente única de verdad.
+ * Usuario, CreateUsuarioDto y UpdateUsuarioDto los reutilizan en vez de
+ * repetir la lista tres veces (antes se desincronizaban con facilidad).
+ * Admiten null para poder LIMPIAR un dato desde el formulario.
+ */
+export interface EmpleadoFields {
+  // Personales
+  tipo_documento?:               TipoDocumento | null;
+  documento_identidad?:          string | null;
+  fecha_nacimiento?:             string | null;
+  direccion?:                    string | null;
+  foto_url?:                     string | null;
+  // Laborales
+  cargo?:                        string | null;
+  fecha_ingreso?:                string | null;
+  turno?:                        Turno | null;
+  tipo_contrato?:                TipoContrato | null;
+  jornada?:                      Jornada | null;
+  estado_laboral?:               EstadoLaboral;
+  fecha_retiro?:                 string | null;
+  motivo_retiro?:                string | null;
+  id_restaurante_base?:          number | null;
+  id_jefe_directo?:              number | null;
+  // Seguridad social
+  eps?:                          string | null;
+  afp?:                          string | null;
+  arl?:                          string | null;
+  nivel_riesgo_arl?:             NivelRiesgoARL | null;
+  fondo_cesantias?:              string | null;
+  caja_compensacion?:            string | null;
+  // Contacto de emergencia
+  contacto_emergencia_nombre?:   string | null;
+  contacto_emergencia_telefono?: string | null;
+  // Notas internas del administrador
+  notas?:                        string | null;
+}
+
+export interface Usuario extends EmpleadoFields {
   id: number;
   uuid: string;
   nombre_completo: string;
@@ -112,26 +167,25 @@ export interface Usuario {
   ultimo_acceso?: string;
   fecha_creacion: string;
   fecha_modificacion: string;
-  // Datos personales del empleado
-  documento_identidad?:          string;
-  fecha_nacimiento?:              string;
-  direccion?:                     string;
-  // Datos laborales
-  cargo?:                         string;
-  fecha_ingreso?:                 string;
-  turno?:                         'mañana' | 'tarde' | 'noche' | 'mixto';
-  tipo_contrato?:                 'fijo' | 'parcial' | 'temporal';
-  // Contacto de emergencia
-  contacto_emergencia_nombre?:    string;
-  contacto_emergencia_telefono?:  string;
-  // Notas
-  notas?:                         string;
+  /** Consecutivo EMP-#### generado por grupo al crear el empleado. */
+  codigo_empleado?: string | null;
   rol: RolBasico & { _count?: { usuarios: number } };
   creador?: {
     id: number;
     nombre_completo: string;
     usuario: string;
   };
+  jefe_directo?: {
+    id: number;
+    nombre_completo: string;
+    cargo?: string | null;
+  } | null;
+  /** Sede que asume el costo laboral — ancla de tenant para nómina. */
+  restaurante_base?: {
+    id: number;
+    nombre: string;
+    id_grupo: number;
+  } | null;
 }
 
 /** Datos de nómina del empleado */
@@ -147,44 +201,25 @@ export interface NominaEmpleado {
   fecha_modificacion: string;
 }
 
-/** Para crear un usuario nuevo — password obligatorio */
-export interface CreateUsuarioDto {
+/**
+ * Para crear un usuario nuevo — password obligatorio.
+ * El código de empleado NO se envía: lo genera el backend por grupo.
+ */
+export interface CreateUsuarioDto extends EmpleadoFields {
   nombre_completo: string;
   email: string;
   usuario: string;
   password: string;
   telefono?: string;
   id_rol: number;
-  // Empleado (opcional al crear)
-  documento_identidad?:          string;
-  fecha_nacimiento?:              string;
-  direccion?:                     string;
-  cargo?:                         string;
-  fecha_ingreso?:                 string;
-  turno?:                         string;
-  tipo_contrato?:                 string;
-  contacto_emergencia_nombre?:    string;
-  contacto_emergencia_telefono?:  string;
-  notas?:                         string;
 }
 
 /** Para editar — password excluido, se cambia por endpoint separado */
-export interface UpdateUsuarioDto {
+export interface UpdateUsuarioDto extends EmpleadoFields {
   nombre_completo?: string;
   email?: string;
   telefono?: string;
   id_rol?: number;
-  // Empleado
-  documento_identidad?:          string;
-  fecha_nacimiento?:              string;
-  direccion?:                     string;
-  cargo?:                         string;
-  fecha_ingreso?:                 string;
-  turno?:                         string;
-  tipo_contrato?:                 string;
-  contacto_emergencia_nombre?:    string;
-  contacto_emergencia_telefono?:  string;
-  notas?:                         string;
 }
 
 /** Para guardar/actualizar nómina */
@@ -195,6 +230,28 @@ export interface NominaDto {
   tipo_cuenta?: 'ahorros' | 'corriente';
   numero_cuenta?: string;
   observaciones?: string;
+  /** Metadatos del cambio — alimentan el historial salarial, no la nómina */
+  vigencia_desde?: string;
+  motivo?: string;
+}
+
+/**
+ * Registro del historial salarial. Se escribe automáticamente en el backend
+ * cada vez que cambia el salario o la frecuencia de pago.
+ */
+export interface HistorialSalario {
+  id: number;
+  id_usuario: number;
+  salario_anterior: number | null;
+  salario_nuevo: number;
+  tipo_pago: 'mensual' | 'quincenal' | 'semanal';
+  vigencia_desde: string;
+  motivo?: string | null;
+  fecha_registro: string;
+  registrado_por?: {
+    id: number;
+    nombre_completo: string;
+  } | null;
 }
 
 // ─── PRODUCTOS ────────────────────────────────────────────────────────────────

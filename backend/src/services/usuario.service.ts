@@ -28,12 +28,13 @@
  */
 
 import bcrypt from 'bcrypt';
-import { EstadoGeneral, RolGrupo } from '@prisma/client';
-import { usuarioRepository } from '../repositories/usuario.repository';
+import { EstadoGeneral, EstadoLaboral, RolGrupo } from '@prisma/client';
+import { usuarioRepository, type EmpleadoFields } from '../repositories/usuario.repository';
 import { grupoNegocioRepository } from '../repositories/grupo-negocio.repository';
 import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '../exceptions/HttpErrors';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { config } from '../config/env';
+import prisma from '../config/database';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
 
@@ -75,6 +76,67 @@ const assertUsuarioDelGrupo = async (idUsuario: number, grupoId?: number) => {
   if (!pertenece) throw new NotFoundError('Usuario');
 };
 
+// ─── EMPLEADO — normalización y código consecutivo ───────────────────────────
+
+/** Prefijo del código de empleado. EMP-0001, EMP-0002, … */
+const CODIGO_EMPLEADO_PREFIJO = 'EMP-';
+const CODIGO_EMPLEADO_PADDING = 4;
+
+/**
+ * Datos de empleado tal como llegan del DTO: las fechas son strings ISO.
+ * Se convierten a Date antes de tocar Prisma.
+ */
+export type EmpleadoInput = Partial<
+  Omit<EmpleadoFields, 'fecha_nacimiento' | 'fecha_ingreso' | 'fecha_retiro' | 'codigo_empleado'>
+> & {
+  fecha_nacimiento?: string | Date | null;
+  fecha_ingreso?:    string | Date | null;
+  fecha_retiro?:     string | Date | null;
+};
+
+const aFecha = (v: string | Date | null | undefined): Date | null | undefined => {
+  if (v === undefined) return undefined;   // no enviado → no tocar
+  if (v === null || v === '') return null; // enviado vacío → limpiar
+  const d = v instanceof Date ? v : new Date(v);
+  if (isNaN(d.getTime())) throw new BadRequestError('Fecha inválida');
+  return d;
+};
+
+/**
+ * normalizarEmpleado — convierte el input del DTO en datos aptos para Prisma.
+ * Solo incluye las claves realmente enviadas, para no sobreescribir con
+ * undefined campos que el cliente no quiso tocar.
+ */
+const normalizarEmpleado = (data: EmpleadoInput) => {
+  const { fecha_nacimiento, fecha_ingreso, fecha_retiro, ...resto } = data;
+  const out: Record<string, unknown> = { ...resto };
+
+  if ('fecha_nacimiento' in data) out.fecha_nacimiento = aFecha(fecha_nacimiento);
+  if ('fecha_ingreso'    in data) out.fecha_ingreso    = aFecha(fecha_ingreso);
+  if ('fecha_retiro'     in data) out.fecha_retiro     = aFecha(fecha_retiro);
+
+  return out;
+};
+
+/**
+ * assertCoherenciaRetiro — un empleado retirado necesita fecha de retiro, y
+ * una fecha de retiro sin estado retirado es un dato inconsistente. Se valida
+ * sobre el resultado de fusionar lo que ya está en base con lo que llega.
+ */
+const assertCoherenciaRetiro = (
+  estadoLaboral: EstadoLaboral | null | undefined,
+  fechaRetiro:   Date | null | undefined,
+) => {
+  if (estadoLaboral === EstadoLaboral.retirado && !fechaRetiro) {
+    throw new BadRequestError('Un empleado retirado requiere fecha de retiro');
+  }
+  if (fechaRetiro && estadoLaboral !== EstadoLaboral.retirado) {
+    throw new BadRequestError(
+      'La fecha de retiro solo aplica a empleados con estado laboral "retirado"'
+    );
+  }
+};
+
 // ─── SERVICE ─────────────────────────────────────────────────────────────────
 
 export const usuarioService = {
@@ -106,11 +168,33 @@ export const usuarioService = {
     return usuario;
   },
 
+  /**
+   * generarCodigoEmpleado — siguiente consecutivo EMP-#### del grupo.
+   *
+   * Se comparan los códigos NUMÉRICAMENTE (no por orden lexicográfico, que
+   * pondría EMP-10000 antes que EMP-9999). Se ignoran los códigos con formato
+   * distinto para no romper si alguien cargó uno manual.
+   *
+   * Nota: el código es un identificador de presentación, no una clave de
+   * negocio, y Usuario no tiene columna id_grupo sobre la que poner un UNIQUE
+   * compuesto. Por eso la unicidad se resuelve aquí, dentro de la transacción
+   * de creación, en lugar de con una restricción de base de datos.
+   */
+  async generarCodigoEmpleado(grupoId?: number, tx?: Parameters<typeof usuarioRepository.findCodigosEmpleado>[1]) {
+    const existentes = await usuarioRepository.findCodigosEmpleado(grupoId, tx);
+    const maximo = existentes.reduce((max, { codigo_empleado }) => {
+      const m = codigo_empleado?.match(/^EMP-(\d+)$/);
+      if (!m) return max;
+      return Math.max(max, parseInt(m[1], 10));
+    }, 0);
+    return `${CODIGO_EMPLEADO_PREFIJO}${String(maximo + 1).padStart(CODIGO_EMPLEADO_PADDING, '0')}`;
+  },
+
   async crear(
     data: {
       nombre_completo: string; email: string; usuario: string;
       password: string; telefono?: string; id_rol: number;
-    },
+    } & EmpleadoInput,
     creadoPorId: number,
     grupoId?: number
   ) {
@@ -144,22 +228,48 @@ export const usuarioService = {
     }
 
     const password_hash = await bcrypt.hash(data.password, 10);
-    const usuario = await usuarioRepository.create({
-      nombre_completo: data.nombre_completo,
-      email:           data.email,
-      usuario:         data.usuario,
-      password_hash,
-      telefono:        data.telefono,
-      id_rol:          data.id_rol,
-      creado_por:      creadoPorId,
-      // es_super_admin NO se puede asignar desde esta función (solo en seed)
-    });
 
-    // Un usuario creado por un admin de grupo nace como operador de SU grupo
-    // (así queda dentro del scope y visible en su panel)
-    if (grupoId) {
-      await grupoNegocioRepository.upsertMiembro(usuario.id, grupoId, RolGrupo.operador);
-    }
+    // Los campos de empleado viajan en el mismo DTO que los de cuenta.
+    // Antes se descartaban aquí y solo se guardaban al editar: los datos que
+    // el administrador llenaba en el formulario de alta se perdían.
+    const {
+      nombre_completo, email, usuario: nombreUsuario, password, telefono, id_rol,
+      ...empleado
+    } = data;
+
+    const empleadoData = normalizarEmpleado(empleado);
+    assertCoherenciaRetiro(
+      empleadoData.estado_laboral as EstadoLaboral | undefined,
+      empleadoData.fecha_retiro   as Date | null | undefined,
+    );
+
+    // Código consecutivo + creación + membresía de grupo en una sola
+    // transacción: si algo falla no queda un código "quemado" ni un usuario
+    // sin grupo.
+    const usuario = await prisma.$transaction(async (tx) => {
+      const codigo_empleado = await this.generarCodigoEmpleado(grupoId, tx);
+
+      const creado = await usuarioRepository.create({
+        nombre_completo,
+        email,
+        usuario:    nombreUsuario,
+        password_hash,
+        telefono,
+        id_rol,
+        creado_por: creadoPorId,
+        codigo_empleado,
+        ...empleadoData,
+        // es_super_admin NO se puede asignar desde esta función (solo en seed)
+      }, tx);
+
+      // Un usuario creado por un admin de grupo nace como operador de SU grupo
+      // (así queda dentro del scope y visible en su panel)
+      if (grupoId) {
+        await grupoNegocioRepository.upsertMiembro(creado.id, grupoId, RolGrupo.operador, tx);
+      }
+
+      return creado;
+    });
 
     return usuario;
   },
@@ -168,13 +278,7 @@ export const usuarioService = {
     id: number,
     data: Partial<{
       nombre_completo: string; email: string; telefono: string; id_rol: number;
-      // Campos de empleado — fecha puede venir como string desde Zod o como Date
-      documento_identidad:         string; fecha_nacimiento: string | Date;
-      direccion: string; cargo: string; fecha_ingreso: string | Date;
-      turno: string; tipo_contrato: string;
-      contacto_emergencia_nombre:  string; contacto_emergencia_telefono: string;
-      notas: string;
-    }>,
+    }> & EmpleadoInput,
     grupoId?: number
   ) {
     await assertUsuarioDelGrupo(id, grupoId);
@@ -201,8 +305,28 @@ export const usuarioService = {
       return this.asignarRol(id, data.id_rol, id, grupoId);
     }
 
-    // Cast necesario: Zod puede enviar fechas como string; Prisma las convierte correctamente
-    return usuarioRepository.update(id, data as any);
+    const { nombre_completo, email, telefono, id_rol, ...empleado } = data;
+    const empleadoData = normalizarEmpleado(empleado);
+
+    // La coherencia se valida sobre el ESTADO RESULTANTE (lo que ya hay en
+    // base fusionado con lo que llega), no solo sobre el payload: marcar a
+    // alguien como retirado sin enviar fecha debe fallar aunque la fecha no
+    // venga en esta petición.
+    assertCoherenciaRetiro(
+      ('estado_laboral' in empleadoData
+        ? empleadoData.estado_laboral
+        : target.estado_laboral) as EstadoLaboral | undefined,
+      ('fecha_retiro' in empleadoData
+        ? empleadoData.fecha_retiro
+        : target.fecha_retiro) as Date | null | undefined,
+    );
+
+    return usuarioRepository.update(id, {
+      ...(nombre_completo !== undefined && { nombre_completo }),
+      ...(email           !== undefined && { email }),
+      ...(telefono        !== undefined && { telefono }),
+      ...empleadoData,
+    });
   },
 
   /**
@@ -342,6 +466,18 @@ export const usuarioService = {
     return usuarioRepository.findNomina(id);
   },
 
+  /**
+   * upsertNomina — guarda el salario VIGENTE y deja rastro del cambio.
+   *
+   * NominaEmpleado tiene una sola fila por empleado, así que sobreescribir el
+   * salario borraba el valor anterior sin dejar evidencia. Aquí cada cambio
+   * (y el alta inicial) escribe además una fila en HistorialSalario dentro de
+   * la misma transacción: sin ese histórico no se puede liquidar un periodo
+   * pasado ni sustentar una liquidación definitiva.
+   *
+   * Si el salario y la frecuencia no cambian, no se registra historial: evita
+   * llenar la tabla de ruido al editar solo el banco o las observaciones.
+   */
   async upsertNomina(id: number, grupoId: number | undefined, data: {
     salario_base:   number;
     tipo_pago:      string;
@@ -349,9 +485,42 @@ export const usuarioService = {
     tipo_cuenta?:   string;
     numero_cuenta?: string;
     observaciones?: string;
-  }) {
+    vigencia_desde?: string | Date;
+    motivo?:        string;
+  }, registradoPorId?: number) {
     await this.obtenerPorId(id, grupoId);
-    return usuarioRepository.upsertNomina(id, data);
+
+    const { vigencia_desde, motivo, ...nominaData } = data;
+
+    return prisma.$transaction(async (tx) => {
+      const anterior = await usuarioRepository.findNomina(id, tx);
+      const nomina   = await usuarioRepository.upsertNomina(id, nominaData, tx);
+
+      const salarioAnterior = anterior ? Number(anterior.salario_base) : null;
+      const huboCambio =
+        salarioAnterior === null ||
+        salarioAnterior !== nominaData.salario_base ||
+        anterior?.tipo_pago !== nominaData.tipo_pago;
+
+      if (huboCambio) {
+        await usuarioRepository.createHistorialSalario({
+          id_usuario:        id,
+          salario_anterior:  salarioAnterior,
+          salario_nuevo:     nominaData.salario_base,
+          tipo_pago:         nominaData.tipo_pago,
+          vigencia_desde:    aFecha(vigencia_desde) ?? new Date(),
+          motivo:            motivo ?? (anterior ? 'Cambio de salario' : 'Salario inicial'),
+          id_registrado_por: registradoPorId,
+        }, tx);
+      }
+
+      return nomina;
+    });
+  },
+
+  async listarHistorialSalarios(id: number, grupoId?: number) {
+    await this.obtenerPorId(id, grupoId);
+    return usuarioRepository.findHistorialSalarios(id);
   },
 
   // ── PERMISOS DIRECTOS (UsuarioPermiso) — solo superadmin ──────────────────
