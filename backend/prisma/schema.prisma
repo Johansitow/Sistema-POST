@@ -113,6 +113,7 @@ model GrupoNegocio {
   plantillas            PlantillaImpresion[]
   auditorias            Auditoria[]          @relation("AuditoriaGrupo")
   configuraciones_grupo ConfiguracionGrupo[]
+  periodos_nomina       PeriodoNomina[]
   documentos            DocumentoEmitido[]
 
   @@map("grupo_negocio")
@@ -182,6 +183,7 @@ model Restaurante {
   plantillas       PlantillaImpresion[]
   configuraciones  ConfiguracionRestaurante[]
   documentos       DocumentoEmitido[]
+  periodos_nomina  PeriodoNomina[]
   auditorias       Auditoria[]                @relation("AuditoriaRestaurante")
 
   @@index([id_grupo])
@@ -285,6 +287,12 @@ model Usuario {
 
   documentos_recibidos DocumentoEmitido[] @relation("DocumentoEmpleado")
   documentos_emitidos  DocumentoEmitido[] @relation("DocumentoEmisor")
+
+  nomina_detalles      NominaDetalle[]   @relation("DetalleEmpleado")
+  novedades_nomina     NovedadNomina[]   @relation("NovedadEmpleado")
+  novedades_registradas NovedadNomina[]  @relation("NovedadAutor")
+  periodos_liquidados  PeriodoNomina[]   @relation("PeriodoLiquidador")
+  periodos_aprobados   PeriodoNomina[]   @relation("PeriodoAprobador")
 
   @@index([codigo_empleado])
   @@index([estado_laboral])
@@ -1352,8 +1360,239 @@ model DocumentoEmitido {
 }
 
 // ============================================================================
+// NÓMINA
+// ============================================================================
+
+// ── ParametroNomina — valores legales versionados por año ────────────────────
+//
+// Salario mínimo, auxilio de transporte, porcentajes de aportes y recargos NO
+// se codifican: viven aquí, una fila por año. Cuando el Gobierno fija el
+// salario del año siguiente es un INSERT, no un despliegue.
+//
+// `verificado` es el seguro contra liquidar con cifras equivocadas: un año
+// sembrado por copia queda en false y el motor se niega a liquidar hasta que
+// un administrador confirme los valores oficiales.
+
+model ParametroNomina {
+  id     Int  @id @default(autoincrement())
+  anio   Int  @unique
+
+  salario_minimo        Decimal @db.Decimal(12, 2)
+  auxilio_transporte    Decimal @db.Decimal(12, 2)
+  /// Tope en SMMLV hasta el cual se paga auxilio de transporte (2 por ley)
+  tope_auxilio_smmlv    Int     @default(2)
+  uvt                   Decimal @db.Decimal(12, 2)
+
+  // Aportes del trabajador (porcentaje sobre el salario base de cotización)
+  porc_salud_empleado   Decimal @db.Decimal(5, 2) @default(4)
+  porc_pension_empleado Decimal @db.Decimal(5, 2) @default(4)
+
+  // Aportes del empleador
+  porc_salud_empleador   Decimal @db.Decimal(5, 2) @default(8.5)
+  porc_pension_empleador Decimal @db.Decimal(5, 2) @default(12)
+  porc_caja_compensacion Decimal @db.Decimal(5, 2) @default(4)
+  porc_icbf              Decimal @db.Decimal(5, 2) @default(3)
+  porc_sena              Decimal @db.Decimal(5, 2) @default(2)
+
+  // Recargos y horas extra — porcentaje ADICIONAL sobre el valor de la hora
+  porc_recargo_nocturno       Decimal @db.Decimal(5, 2) @default(35)
+  porc_extra_diurna           Decimal @db.Decimal(5, 2) @default(25)
+  porc_extra_nocturna         Decimal @db.Decimal(5, 2) @default(75)
+  porc_dominical              Decimal @db.Decimal(5, 2) @default(75)
+  porc_extra_dominical_diurna Decimal @db.Decimal(5, 2) @default(100)
+
+  /// Horas de la jornada mensual usada para calcular el valor de la hora
+  horas_mensuales       Int     @default(230)
+
+  // Provisiones de prestaciones sociales (porcentaje sobre la base)
+  porc_cesantias        Decimal @db.Decimal(5, 2) @default(8.33)
+  porc_interes_cesantias Decimal @db.Decimal(5, 2) @default(1)
+  porc_prima            Decimal @db.Decimal(5, 2) @default(8.33)
+  porc_vacaciones       Decimal @db.Decimal(5, 2) @default(4.17)
+
+  /// Falso mientras nadie confirme que los valores son los oficiales del año
+  verificado            Boolean  @default(false)
+  verificado_por        Int?
+  fecha_verificacion    DateTime?
+  notas                 String?  @db.Text
+
+  fecha_creacion        DateTime @default(now())
+  fecha_modificacion    DateTime @updatedAt
+
+  @@map("parametros_nomina")
+}
+
+// ── PeriodoNomina — ciclo de liquidación ─────────────────────────────────────
+//
+// Máquina de estados: borrador → en_revision → aprobada → pagada.
+// Una vez aprobada no se reliquida: se corrige con un periodo de ajuste.
+// La aprobación exige que apruebe alguien distinto de quien liquidó.
+
+model PeriodoNomina {
+  id             Int    @id @default(autoincrement())
+  id_grupo       Int
+  id_restaurante Int?              // null = todas las sedes del grupo
+
+  nombre         String @db.VarChar(100)   // "Julio 2026", "Quincena 1 - Julio 2026"
+  tipo_periodo   String @db.VarChar(20)    // mensual | quincenal | semanal
+  fecha_inicio   DateTime
+  fecha_fin      DateTime
+  anio           Int                        // resuelve los parámetros legales aplicables
+
+  estado         EstadoPeriodoNomina @default(borrador)
+
+  // Totales — snapshot al liquidar, para no recalcular en cada listado
+  total_devengado   Decimal @default(0) @db.Decimal(14, 2)
+  total_deducciones Decimal @default(0) @db.Decimal(14, 2)
+  total_neto        Decimal @default(0) @db.Decimal(14, 2)
+  total_aportes_empleador Decimal @default(0) @db.Decimal(14, 2)
+  total_provisiones Decimal @default(0) @db.Decimal(14, 2)
+  empleados_liquidados Int  @default(0)
+
+  id_liquidado_por Int?
+  fecha_liquidacion DateTime?
+  id_aprobado_por  Int?
+  fecha_aprobacion DateTime?
+  fecha_pago       DateTime?
+  observaciones    String? @db.Text
+
+  fecha_creacion   DateTime @default(now())
+
+  grupo        GrupoNegocio @relation(fields: [id_grupo],       references: [id])
+  restaurante  Restaurante? @relation(fields: [id_restaurante], references: [id])
+  liquidado_por Usuario?    @relation("PeriodoLiquidador", fields: [id_liquidado_por], references: [id])
+  aprobado_por Usuario?     @relation("PeriodoAprobador",  fields: [id_aprobado_por],  references: [id])
+
+  detalles  NominaDetalle[]
+  novedades NovedadNomina[]
+
+  @@index([id_grupo, anio])
+  @@index([estado])
+  @@map("periodos_nomina")
+}
+
+// ── NovedadNomina — lo que altera la liquidación de un empleado ──────────────
+//
+// Horas extra, incapacidades, vacaciones, bonificaciones, préstamos… Se
+// registran sobre un periodo en borrador y se consumen al liquidar.
+
+model NovedadNomina {
+  id          Int    @id @default(autoincrement())
+  id_periodo  Int
+  id_empleado Int
+
+  tipo        TipoNovedadNomina
+  /// Cantidad en la unidad del tipo: horas, días o 1 para valores fijos
+  cantidad    Decimal @db.Decimal(10, 2) @default(0)
+  /// Valor fijo cuando el tipo no se calcula por cantidad (bonos, préstamos)
+  valor       Decimal @db.Decimal(12, 2) @default(0)
+
+  fecha_inicio DateTime?
+  fecha_fin    DateTime?
+  observaciones String? @db.VarChar(500)
+
+  id_registrado_por Int?
+  fecha_registro    DateTime @default(now())
+
+  periodo  PeriodoNomina @relation(fields: [id_periodo],  references: [id], onDelete: Cascade)
+  empleado Usuario       @relation("NovedadEmpleado", fields: [id_empleado], references: [id])
+  registrado_por Usuario? @relation("NovedadAutor",   fields: [id_registrado_por], references: [id])
+
+  @@index([id_periodo, id_empleado])
+  @@map("novedades_nomina")
+}
+
+// ── NominaDetalle — liquidación de UN empleado en UN periodo ─────────────────
+//
+// Guarda el salario CONGELADO al momento de liquidar: si mañana sube el
+// sueldo, el periodo ya liquidado no cambia.
+
+model NominaDetalle {
+  id          Int @id @default(autoincrement())
+  id_periodo  Int
+  id_empleado Int
+
+  salario_base       Decimal @db.Decimal(12, 2)   // congelado
+  dias_trabajados    Decimal @db.Decimal(5, 2)
+  /// Salario base de cotización — base de salud y pensión
+  ibc                Decimal @db.Decimal(12, 2)
+
+  total_devengado    Decimal @db.Decimal(12, 2)
+  total_deducciones  Decimal @db.Decimal(12, 2)
+  neto_pagar         Decimal @db.Decimal(12, 2)
+  /// Costo del empleador aparte del neto (aportes + provisiones)
+  aportes_empleador  Decimal @db.Decimal(12, 2) @default(0)
+  provisiones        Decimal @db.Decimal(12, 2) @default(0)
+
+  /// Datos bancarios congelados para la dispersión
+  banco          String? @db.VarChar(100)
+  tipo_cuenta    String? @db.VarChar(20)
+  numero_cuenta  String? @db.VarChar(30)
+
+  periodo   PeriodoNomina @relation(fields: [id_periodo],  references: [id], onDelete: Cascade)
+  empleado  Usuario       @relation("DetalleEmpleado", fields: [id_empleado], references: [id])
+  conceptos NominaDetalleConcepto[]
+
+  @@unique([id_periodo, id_empleado])
+  @@index([id_empleado])
+  @@map("nomina_detalles")
+}
+
+// ── NominaDetalleConcepto — las líneas del desprendible ──────────────────────
+
+model NominaDetalleConcepto {
+  id        Int @id @default(autoincrement())
+  id_detalle Int
+
+  /// Código estable del concepto: salario, auxilio_transporte, salud, …
+  codigo    String @db.VarChar(50)
+  nombre    String @db.VarChar(150)
+  tipo      TipoConceptoNomina
+  cantidad  Decimal @db.Decimal(10, 2) @default(0)
+  valor     Decimal @db.Decimal(12, 2)
+  orden     Int     @default(0)
+
+  detalle NominaDetalle @relation(fields: [id_detalle], references: [id], onDelete: Cascade)
+
+  @@index([id_detalle])
+  @@map("nomina_detalle_conceptos")
+}
+
+// ============================================================================
 // ENUMS
 // ============================================================================
+
+enum EstadoPeriodoNomina {
+  borrador     // se registran novedades y se puede reliquidar
+  en_revision  // liquidado, esperando aprobación de otra persona
+  aprobada     // aprobada; ya no se reliquida
+  pagada       // dispersada al banco
+  anulada
+}
+
+enum TipoConceptoNomina {
+  devengado
+  deduccion
+  aporte_empleador  // costo de la empresa, no se descuenta al trabajador
+  provision         // prestaciones sociales causadas
+}
+
+enum TipoNovedadNomina {
+  hora_extra_diurna
+  hora_extra_nocturna
+  hora_extra_dominical
+  recargo_nocturno
+  dominical_festivo
+  incapacidad_comun
+  incapacidad_laboral
+  licencia_no_remunerada
+  vacaciones
+  bonificacion
+  comision
+  prestamo          // deducción
+  anticipo          // deducción
+  descuento_otro    // deducción
+}
 
 enum TipoDocumento {
   cc          // Cédula de ciudadanía

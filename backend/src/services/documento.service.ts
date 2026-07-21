@@ -18,7 +18,7 @@ import { usuarioRepository } from '../repositories/usuario.repository';
 import { plantillaRepository } from '../repositories/plantilla.repository';
 import { NotFoundError, BadRequestError, ForbiddenError } from '../exceptions/HttpErrors';
 import { CATALOGO_DOCUMENTOS, esTipoDocumento, type TipoDocumento, type DocumentoConfig } from '../lib/documentos/catalogo';
-import { renderizarDocumento } from '../lib/documentos/documentoRenderer';
+import { renderizarDocumento, renderizarDesprendible } from '../lib/documentos/documentoRenderer';
 import { listarVariablesDisponibles, type ContextoDocumento } from '../lib/documentos/variables';
 import { config } from '../config/env';
 
@@ -64,9 +64,54 @@ export const documentoService = {
 
   /** Catálogo de tipos disponibles, para el selector del frontend. */
   listarTipos() {
-    return Object.values(CATALOGO_DOCUMENTOS).map(({ tipo, nombre, descripcion, requiereRetiro }) => ({
-      tipo, nombre, descripcion, requiereRetiro,
-    }));
+    return Object.values(CATALOGO_DOCUMENTOS).map(
+      ({ tipo, nombre, descripcion, requiereRetiro, requierePeriodo }) => ({
+        tipo, nombre, descripcion, requiereRetiro, requierePeriodo: !!requierePeriodo,
+      }));
+  },
+
+  /**
+   * Datos de la liquidación para el desprendible de pago.
+   * Se exige que el periodo esté APROBADO o PAGADO: emitir una colilla de una
+   * liquidación en borrador sería entregar cifras que aún pueden cambiar.
+   */
+  async _datosDesprendible(idEmpleado: number, idPeriodo: number, grupoId?: number) {
+    const detalle = await prisma.nominaDetalle.findUnique({
+      where:   { id_periodo_id_empleado: { id_periodo: idPeriodo, id_empleado: idEmpleado } },
+      include: { periodo: true, conceptos: { orderBy: { orden: 'asc' } } },
+    });
+
+    if (!detalle) {
+      throw new BadRequestError(
+        'El empleado no tiene liquidación en ese periodo. Liquida el periodo antes de emitir el desprendible.'
+      );
+    }
+    if (grupoId && detalle.periodo.id_grupo !== grupoId) throw new NotFoundError('Periodo de nómina');
+
+    if (detalle.periodo.estado !== 'aprobada' && detalle.periodo.estado !== 'pagada') {
+      throw new BadRequestError(
+        `El periodo está "${detalle.periodo.estado}". El desprendible solo se emite ` +
+        `sobre una nómina aprobada: antes de eso las cifras todavía pueden cambiar.`
+      );
+    }
+
+    return {
+      periodo_nombre: detalle.periodo.nombre,
+      fecha_inicio:   detalle.periodo.fecha_inicio,
+      fecha_fin:      detalle.periodo.fecha_fin,
+      dias:           Number(detalle.dias_trabajados),
+      salario_base:   Number(detalle.salario_base),
+      ibc:            Number(detalle.ibc),
+      conceptos: detalle.conceptos.map(c => ({
+        codigo: c.codigo, nombre: c.nombre, tipo: c.tipo,
+        cantidad: Number(c.cantidad), valor: Number(c.valor),
+      })),
+      total_devengado:   Number(detalle.total_devengado),
+      total_deducciones: Number(detalle.total_deducciones),
+      neto_pagar:        Number(detalle.neto_pagar),
+      banco:             detalle.banco,
+      numero_cuenta:     detalle.numero_cuenta,
+    };
   },
 
   listarVariables() {
@@ -213,12 +258,22 @@ export const documentoService = {
    * simultáneas no reciban el mismo número.
    */
   async emitir(tipo: string, idEmpleado: number, opciones: {
-    observaciones?: string;
+    observaciones?: string; id_periodo?: number;
   }, emisor: { id: number; nombre: string }, grupoId?: number) {
     if (!esTipoDocumento(tipo)) throw new BadRequestError('Tipo de documento inválido');
 
     const base = await this._construirContexto(tipo, idEmpleado, grupoId);
     const anio = new Date().getFullYear();
+
+    // El desprendible se arma con la liquidación real, no con párrafos
+    const datosNomina = base.meta.requierePeriodo
+      ? await (async () => {
+          if (!opciones.id_periodo) {
+            throw new BadRequestError('Indica el periodo de nómina del desprendible');
+          }
+          return this._datosDesprendible(idEmpleado, opciones.id_periodo, grupoId);
+        })()
+      : null;
 
     return prisma.$transaction(async (tx) => {
       const ultimo = await documentoRepository.findUltimoDelAnio(tipo, base.idGrupo, anio, tx);
@@ -238,13 +293,21 @@ export const documentoService = {
       const dias = base.plantilla.documento.vigencia_dias;
       const vigenciaHasta = dias > 0 ? new Date(Date.now() + dias * 86_400_000) : null;
 
-      const { html, variables } = await renderizarDocumento({
-        plantilla:       base.plantilla,
-        contexto:        ctx,
-        urlVerificacion: urlVerificacion(codigo),
-        vigenciaHasta,
-        logoUrl:         base.sede?.logo_url ?? base.grupo.logo_url,
-      });
+      const { html, variables } = datosNomina
+        ? await renderizarDesprendible({
+            plantilla:       base.plantilla,
+            contexto:        ctx,
+            datos:           datosNomina,
+            urlVerificacion: urlVerificacion(codigo),
+            logoUrl:         base.sede?.logo_url ?? base.grupo.logo_url,
+          })
+        : await renderizarDocumento({
+            plantilla:       base.plantilla,
+            contexto:        ctx,
+            urlVerificacion: urlVerificacion(codigo),
+            vigenciaHasta,
+            logoUrl:         base.sede?.logo_url ?? base.grupo.logo_url,
+          });
 
       return documentoRepository.create({
         tipo,

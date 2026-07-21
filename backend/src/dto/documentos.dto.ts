@@ -10,6 +10,8 @@ export const emitirDocumentoSchema = z.object({
   id_empleado: z.number().int().positive('Empleado inválido'),
   /** Texto libre que la plantilla inserta en {{documento.observaciones}}. */
   observaciones: z.string().max(2000).optional(),
+  /** Solo para el desprendible de pago: el periodo liquidado del que sale. */
+  id_periodo:    z.number().int().positive().optional(),
 });
 
 export const anularDocumentoSchema = z.object({

@@ -28,7 +28,7 @@ import {
   ManageSearch, Settings, ChevronLeft,
   Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount,
-  PlayCircleOutline,
+  PlayCircleOutline, Paid,
 } from '@mui/icons-material';
 import { useAuthStore, useStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
@@ -68,7 +68,8 @@ const ADMIN_GROUPS: { label: string; items: AdminItem[] }[] = [
   {
     label: 'Gestión',
     items: [
-      { text: 'Usuarios',     icon: <People />,         path: '/admin/usuarios',     permiso: 'usuarios.gestionar' },
+      { text: 'Personal',     icon: <People />,         path: '/admin/usuarios',     permiso: 'usuarios.gestionar' },
+      { text: 'Nómina',       icon: <Paid />,           path: '/admin/nomina',       permiso: 'usuarios.gestionar' },
       { text: 'Restaurantes', icon: <Business />,       path: '/admin/restaurantes', permiso: 'sedes.gestionar'    },
       { text: 'Grupos',       icon: <AccountTree />,    path: '/admin/grupos'        /* solo superadmin */         },
       { text: 'Permisos',     icon: <Lock />,           path: '/admin/permisos',     permiso: 'permisos.gestionar' },

@@ -131,6 +131,162 @@ async function bloqueVerificacion(
 
 // ─── Render principal ─────────────────────────────────────────────────────────
 
+// ─── Desprendible de pago ─────────────────────────────────────────────────────
+
+export interface LineaDesprendible {
+  codigo:   string;
+  nombre:   string;
+  tipo:     string;
+  cantidad: number;
+  valor:    number;
+}
+
+export interface DatosDesprendible {
+  periodo_nombre: string;
+  fecha_inicio:   Date;
+  fecha_fin:      Date;
+  dias:           number;
+  salario_base:   number;
+  ibc:            number;
+  conceptos:      LineaDesprendible[];
+  total_devengado:   number;
+  total_deducciones: number;
+  neto_pagar:        number;
+  banco?:         string | null;
+  numero_cuenta?: string | null;
+}
+
+const money = (v: number) => '$ ' + Math.round(v).toLocaleString('es-CO');
+
+/**
+ * renderizarDesprendible — comprobante de nómina.
+ *
+ * No usa el cuerpo de párrafos de los demás documentos: un desprendible es una
+ * tabla de devengados y deducciones. Comparte el membrete, el bloque de
+ * verificación y el consecutivo con el resto de documentos laborales.
+ *
+ * Muestra las líneas del trabajador (devengados y deducciones). Los aportes
+ * del empleador y las provisiones NO aparecen: son costo de la empresa, no
+ * conceptos del trabajador, y ponerlos confundiría a quien lee su colilla.
+ */
+export async function renderizarDesprendible(opts: {
+  plantilla:       DocumentoConfig;
+  contexto:        ContextoDocumento;
+  datos:           DatosDesprendible;
+  urlVerificacion: string;
+  logoUrl?:        string | null;
+}): Promise<{ html: string; variables: Record<string, string> }> {
+  const { plantilla, contexto, datos, urlVerificacion, logoUrl } = opts;
+  const vars = construirVariables(contexto);
+
+  const filas = (tipo: string) => datos.conceptos
+    .filter(c => c.tipo === tipo)
+    .map(c => `
+      <tr>
+        <td>${escaparHtml(c.nombre)}</td>
+        <td class="num">${c.cantidad > 0 ? c.cantidad.toLocaleString('es-CO') : ''}</td>
+        <td class="num">${money(c.valor)}</td>
+      </tr>`)
+    .join('');
+
+  const fecha = (d: Date) => d.toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  const cuerpo = `
+    <table class="datos-empleado">
+      <tr>
+        <td><strong>Empleado:</strong> ${escaparHtml(contexto.empleado.nombre_completo)}</td>
+        <td><strong>Documento:</strong> ${escaparHtml(contexto.empleado.documento_identidad ?? '—')}</td>
+      </tr>
+      <tr>
+        <td><strong>Cargo:</strong> ${escaparHtml(contexto.empleado.cargo ?? '—')}</td>
+        <td><strong>Código:</strong> ${escaparHtml(contexto.empleado.codigo_empleado ?? '—')}</td>
+      </tr>
+      <tr>
+        <td><strong>Periodo:</strong> ${escaparHtml(datos.periodo_nombre)}</td>
+        <td><strong>Del</strong> ${fecha(datos.fecha_inicio)} <strong>al</strong> ${fecha(datos.fecha_fin)}</td>
+      </tr>
+      <tr>
+        <td><strong>Días liquidados:</strong> ${datos.dias}</td>
+        <td><strong>Salario base:</strong> ${money(datos.salario_base)}</td>
+      </tr>
+    </table>
+
+    <table class="conceptos">
+      <thead>
+        <tr><th colspan="3">DEVENGADOS</th></tr>
+        <tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
+      </thead>
+      <tbody>
+        ${filas('devengado')}
+        <tr class="subtotal">
+          <td colspan="2">Total devengado</td>
+          <td class="num">${money(datos.total_devengado)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="conceptos">
+      <thead>
+        <tr><th colspan="3">DEDUCCIONES</th></tr>
+        <tr><th>Concepto</th><th class="num">Cant.</th><th class="num">Valor</th></tr>
+      </thead>
+      <tbody>
+        ${filas('deduccion') || '<tr><td colspan="3">Sin deducciones</td></tr>'}
+        <tr class="subtotal">
+          <td colspan="2">Total deducciones</td>
+          <td class="num">${money(datos.total_deducciones)}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <table class="neto">
+      <tr>
+        <td>NETO A PAGAR</td>
+        <td class="num">${money(datos.neto_pagar)}</td>
+      </tr>
+    </table>
+
+    ${datos.banco ? `<p class="pago">Pago por ${escaparHtml(datos.banco)}${
+      datos.numero_cuenta ? ` — cuenta terminada en ${escaparHtml(datos.numero_cuenta.slice(-4))}` : ''
+    }.</p>` : ''}
+
+    <p class="nota">Base de cotización (IBC): ${money(datos.ibc)}.</p>
+  `;
+
+  const verificacion = plantilla.documento.mostrar_qr
+    ? await bloqueVerificacion(contexto, urlVerificacion, null)
+    : '';
+
+  const cssExtra = `
+    .datos-empleado { width: 100%; margin-bottom: 18px; font-size: .9em; }
+    .datos-empleado td { padding: 3px 0; }
+    .conceptos { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: .9em; }
+    .conceptos th, .conceptos td { border: 1px solid #999; padding: 5px 7px; text-align: left; }
+    .conceptos thead th { background: #eee; font-weight: bold; }
+    .conceptos .num { text-align: right; }
+    .conceptos .subtotal td { font-weight: bold; background: #f6f6f6; }
+    .neto { width: 100%; border-collapse: collapse; margin-top: 6px; }
+    .neto td { border: 2px solid #111; padding: 9px; font-size: 1.1em; font-weight: bold; }
+    .neto .num { text-align: right; }
+    .pago, .nota { font-size: .82em; color: #444; margin-top: 10px; }
+  `;
+
+  const body = `
+    ${membrete(contexto, plantilla.config.showLogo, logoUrl)}
+    <div class="consecutivo">${escaparHtml(contexto.consecutivo)}</div>
+    <div class="titulo">${sustituir(plantilla.documento.titulo, vars)}</div>
+    ${cuerpo}
+    <div class="despedida">${sustituir(plantilla.documento.despedida, vars)}</div>
+    ${verificacion}
+  `;
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8">`
+    + `<title>${sustituir(plantilla.documento.titulo, vars)}</title>`
+    + `<style>${buildCSS(plantilla.config)}${cssExtra}</style></head><body>${body}</body></html>`;
+
+  return { html, variables: { ...vars, 'periodo.nombre': datos.periodo_nombre } };
+}
+
 export interface RenderOpciones {
   plantilla:       DocumentoConfig;
   contexto:        ContextoDocumento;

@@ -22,6 +22,7 @@ export const TIPOS_DOCUMENTO = [
   'documento_carta_terminacion',
   'documento_paz_y_salvo',
   'documento_acta_dotacion',
+  'documento_desprendible_pago',
 ] as const;
 
 export type TipoDocumento = typeof TIPOS_DOCUMENTO[number];
@@ -57,6 +58,11 @@ export interface TipoDocumentoMeta {
   prefijo:     string;
   /** Si true, solo puede emitirse a empleados con estado_laboral = retirado. */
   requiereRetiro: boolean;
+  /**
+   * Si true, necesita un periodo de nómina liquidado: no se arma con párrafos
+   * sino con las líneas reales de la liquidación.
+   */
+  requierePeriodo?: boolean;
   plantilla:   DocumentoConfig;
 }
 
@@ -140,6 +146,28 @@ export const CATALOGO_DOCUMENTOS: Record<TipoDocumento, TipoDocumentoMeta> = {
         vigencia_dias: 0,
         mostrar_qr:    true,
         firma: FIRMA_DEFAULT,
+      },
+    },
+  },
+
+  documento_desprendible_pago: {
+    tipo:        'documento_desprendible_pago',
+    nombre:      'Desprendible de pago',
+    descripcion: 'Comprobante de nómina con los devengados y las deducciones del periodo. Requiere un periodo de nómina liquidado.',
+    prefijo:     'DP',
+    requiereRetiro: false,
+    requierePeriodo: true,
+    plantilla: {
+      config: CONFIG_A4,
+      documento: {
+        titulo: 'COMPROBANTE DE NÓMINA',
+        // El cuerpo de este documento no son párrafos: es la tabla de conceptos
+        // de la liquidación, que arma renderizarDesprendible().
+        cuerpo: [],
+        despedida: 'Este comprobante se genera a partir de la liquidación del periodo y no requiere firma autógrafa.',
+        vigencia_dias: 0,
+        mostrar_qr:    true,
+        firma: { mostrar: false, nombre: '', cargo: '' },
       },
     },
   },

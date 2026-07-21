@@ -41,11 +41,11 @@ export const previsualizar = asyncHandler(async (req: Request, res: Response) =>
 });
 
 export const emitir = asyncHandler(async (req: Request, res: Response) => {
-  const { tipo, id_empleado, observaciones } = emitirDocumentoSchema.parse(req.body);
+  const { tipo, id_empleado, observaciones, id_periodo } = emitirDocumentoSchema.parse(req.body);
   const usuario = (req as any).user!;
 
   const documento = await documentoService.emitir(
-    tipo, id_empleado, { observaciones },
+    tipo, id_empleado, { observaciones, id_periodo },
     { id: usuario.id, nombre: usuario.nombre_completo ?? '' },
     grupoScope(req),
   );

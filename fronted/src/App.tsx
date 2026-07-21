@@ -52,6 +52,7 @@ import { VerificarDocumento } from './pages/VerificarDocumento';
 
 const Usuarios        = lazy(() => import('./pages/admin/Usuarios'));
 const FichaEmpleado   = lazy(() => import('./pages/admin/FichaEmpleado'));
+const Nomina          = lazy(() => import('./pages/admin/Nomina'));
 const Auditoria       = lazy(() => import('./pages/admin/Auditoria').then(m => ({ default: m.Auditoria })));
 const Configuracion   = lazy(() => import('./pages/admin/Configuracion').then(m => ({ default: m.Configuracion })));
 const Restaurantes    = lazy(() => import('./pages/admin/Restaurantes').then(m => ({ default: m.Restaurantes })));
@@ -183,6 +184,15 @@ export default function App() {
                 element={
                   <AdminGuard permiso="usuarios.gestionar">
                     <Suspense fallback={<PageFallback />}><Usuarios /></Suspense>
+                  </AdminGuard>
+                }
+              />
+              {/* Nómina — mismo permiso que la gestión de personal */}
+              <Route
+                path="/admin/nomina"
+                element={
+                  <AdminGuard permiso="usuarios.gestionar">
+                    <Suspense fallback={<PageFallback />}><Nomina /></Suspense>
                   </AdminGuard>
                 }
               />
