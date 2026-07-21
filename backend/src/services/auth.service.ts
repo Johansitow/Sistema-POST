@@ -204,6 +204,40 @@ export const authService = {
   },
 
   /**
+   * getMiNomina — el trabajador consulta SU PROPIO salario e historial.
+   *
+   * Existe aparte de GET /usuarios/:id/nomina porque esa ruta exige el permiso
+   * usuarios.gestionar: un mesero no puede entrar por ahí, pero sí tiene
+   * derecho a ver lo suyo. El id sale del token, nunca de la URL, así que no
+   * hay forma de pedir la nómina de otra persona.
+   */
+  async getMiNomina(userId: number) {
+    const [nomina, historial] = await Promise.all([
+      usuarioRepository.findNomina(userId),
+      usuarioRepository.findHistorialSalarios(userId),
+    ]);
+    return { nomina, historial };
+  },
+
+  /**
+   * actualizarMiPerfil — autogestión de datos de contacto.
+   *
+   * Whitelist deliberadamente corta: el trabajador corrige cómo contactarlo,
+   * NO su cargo, salario, estado laboral, sede ni fechas del contrato. Esos
+   * son datos del vínculo laboral y solo los cambia administración.
+   */
+  async actualizarMiPerfil(userId: number, data: {
+    telefono?:                     string | null;
+    direccion?:                    string | null;
+    contacto_emergencia_nombre?:   string | null;
+    contacto_emergencia_telefono?: string | null;
+  }) {
+    const existe = await usuarioRepository.findById(userId);
+    if (!existe) throw new NotFoundError('Usuario');
+    return usuarioRepository.update(userId, data);
+  },
+
+  /**
    * changePassword — cambia contraseña verificando la actual.
    *
    * Requiere dos consultas porque:

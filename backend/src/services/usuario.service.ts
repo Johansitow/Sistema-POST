@@ -35,6 +35,7 @@ import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '.
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { config } from '../config/env';
 import prisma from '../config/database';
+import { getEstadoFinalId } from '../lib/estadoOrden';
 
 // ─── CONSTANTES ──────────────────────────────────────────────────────────────
 
@@ -521,6 +522,37 @@ export const usuarioService = {
   async listarHistorialSalarios(id: number, grupoId?: number) {
     await this.obtenerPorId(id, grupoId);
     return usuarioRepository.findHistorialSalarios(id);
+  },
+
+  /**
+   * obtenerResumen — KPIs del empleado para la cabecera de su ficha.
+   *
+   * Solo agrega datos que EXISTEN en el sistema (órdenes atendidas y cierres
+   * de caja). No hay modelo de asistencia ni de turnos trabajados, así que no
+   * se reportan horas ni ausencias: preferible una ficha con menos tarjetas
+   * que con cifras inventadas.
+   *
+   * La antigüedad se calcula en el frontend a partir de fecha_ingreso.
+   *
+   * @param dias ventana de análisis; 30 por defecto.
+   */
+  async obtenerResumen(id: number, grupoId?: number, dias = 30) {
+    await this.obtenerPorId(id, grupoId);
+
+    const desde = new Date();
+    desde.setDate(desde.getDate() - dias);
+
+    const idEstadoFinal = await getEstadoFinalId();
+    const resumen = await usuarioRepository.resumenEmpleado(id, desde, idEstadoFinal, grupoId);
+
+    return {
+      ...resumen,
+      // Decimal → number para que el JSON no lleve objetos de Prisma
+      ventas_generadas:     Number(resumen.ventas_generadas),
+      diferencia_acumulada: Number(resumen.diferencia_acumulada),
+      periodo_dias:         dias,
+      desde:                desde.toISOString(),
+    };
   },
 
   // ── PERMISOS DIRECTOS (UsuarioPermiso) — solo superadmin ──────────────────

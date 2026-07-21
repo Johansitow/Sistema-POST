@@ -5,7 +5,7 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { loginSchema, refreshTokenSchema, changePasswordSchema } from '../dto/auth.dto';
+import { loginSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema } from '../dto/auth.dto';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
@@ -32,6 +32,30 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
   const user = await authService.getProfile((req as any).user!.id);
   res.json({ user });
+});
+
+export const getMiNomina = asyncHandler(async (req: Request, res: Response) => {
+  const data = await authService.getMiNomina((req as any).user!.id);
+  res.json(data);
+});
+
+export const actualizarMiPerfil = asyncHandler(async (req: Request, res: Response) => {
+  const data = miPerfilSchema.parse(req.body);
+  const usuarioId = (req as any).user!.id;
+  const user = await authService.actualizarMiPerfil(usuarioId, data);
+
+  registrarAuditoria({
+    id_usuario:     usuarioId,
+    accion:         'ACTUALIZAR_MI_PERFIL',
+    modulo:         'auth',
+    tabla_afectada: 'usuarios',
+    id_registro_afectado: usuarioId,
+    datos_nuevos:   data,
+    ip_address:     req.auditContext?.ip,
+    user_agent:     req.auditContext?.userAgent,
+  });
+
+  res.json({ message: 'Datos actualizados correctamente', user });
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {

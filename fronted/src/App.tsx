@@ -50,6 +50,7 @@ import { Perfil }       from './pages/Perfil';
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
 
 const Usuarios        = lazy(() => import('./pages/admin/Usuarios'));
+const FichaEmpleado   = lazy(() => import('./pages/admin/FichaEmpleado'));
 const Auditoria       = lazy(() => import('./pages/admin/Auditoria').then(m => ({ default: m.Auditoria })));
 const Configuracion   = lazy(() => import('./pages/admin/Configuracion').then(m => ({ default: m.Configuracion })));
 const Restaurantes    = lazy(() => import('./pages/admin/Restaurantes').then(m => ({ default: m.Restaurantes })));
@@ -176,6 +177,15 @@ export default function App() {
                 element={
                   <AdminGuard permiso="usuarios.gestionar">
                     <Suspense fallback={<PageFallback />}><Usuarios /></Suspense>
+                  </AdminGuard>
+                }
+              />
+              {/* Ficha 360 del empleado — mismo permiso que el listado */}
+              <Route
+                path="/admin/personal/:id"
+                element={
+                  <AdminGuard permiso="usuarios.gestionar">
+                    <Suspense fallback={<PageFallback />}><FichaEmpleado /></Suspense>
                   </AdminGuard>
                 }
               />

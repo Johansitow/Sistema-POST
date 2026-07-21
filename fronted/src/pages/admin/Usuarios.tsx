@@ -4,22 +4,23 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box, Button, Card, CardContent, Chip, CircularProgress,
   Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, IconButton, InputAdornment, InputLabel,
-  MenuItem, Paper, Select, Snackbar, Alert, Table, TableBody,
+  MenuItem, Paper, Select, Snackbar, Alert, Stack, Table, TableBody,
   TableCell, TableContainer, TableHead, TablePagination, TableRow,
   TextField, Tooltip, Typography, Avatar, Divider, Tabs, Tab,
 } from '@mui/material';
 import {
-  Add, Search, Edit, LockReset, PersonOff, PersonAdd,
+  Add, Search, ChevronRight, LockReset, PersonOff, PersonAdd,
   ManageAccounts, Refresh, Close, Visibility, VisibilityOff,
   Badge, AccountBalance, Shield,
 } from '@mui/icons-material';
 import { usuariosService } from '../../services/usuarios.service';
 import type {
-  Usuario, NominaDto, NominaEmpleado, RolBasico, EstadoGeneral,
+  Usuario, NominaDto, RolBasico, EstadoGeneral,
   Turno, TipoContrato, Jornada,
 } from '../../types';
 import { useAuthStore } from '../../store/useStore';
@@ -27,9 +28,11 @@ import { useAuthStore } from '../../store/useStore';
 // ← CAMBIO 1: importar desde utils en lugar de definir inline
 import { getInitials, formatDateTime } from '../../utils/format';
 import { MESSAGES, VALIDATION }        from '../../utils/constants';
+import { ESTADO_LABORAL_LABEL, ESTADO_LABORAL_COLOR } from '../../utils/empleado';
 
 // ← CAMBIO 2: importar componentes comunes
 import { ConfirmDialog, LoadingScreen, EmptyState, StatusChip } from '../../components/common';
+import { ResetPasswordDialog } from '../../components/personal';
 
 // ← ELIMINADO: const getInitials = ...  (viene de utils/format.ts)
 // ← ELIMINADO: const estadoColor = ...  (reemplazado por <StatusChip>)
@@ -83,71 +86,30 @@ const FORM_EMPTY: UnifiedForm = {
   salario_base: '', tipo_pago: 'mensual', banco: '', tipo_cuenta: '', numero_cuenta: '', nomina_obs: '',
 };
 
-// ─── Dialogo: Crear / Editar ──────────────────────────────────────────────
+// ─── Dialogo: Alta de empleado ────────────────────────────────────────────
+// Solo CREA. La edición vive en la ficha del empleado (/admin/personal/:id):
+// tener dos formularios que editan lo mismo garantizaba que se desincronizaran.
 interface FormDialogProps {
   open: boolean;
-  usuario: Usuario | null;
   roles: RolBasico[];
   onClose: () => void;
-  onSave: () => void;
+  /** Recibe el id del empleado creado para poder abrir su ficha. */
+  onSave: (idCreado: number) => void;
 }
 
-function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) {
-  const isEdit   = !!usuario;
-  const editingSA = !!usuario?.es_super_admin;
+function FormDialog({ open, roles, onClose, onSave }: FormDialogProps) {
   const [tab, setTab]               = useState(0);
   const [form, setForm]             = useState<UnifiedForm>(FORM_EMPTY);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState('');
-  const [nomina, setNomina]         = useState<NominaEmpleado | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setTab(0);
     setError('');
-    setNomina(null);
-
-    if (usuario) {
-      setForm({
-        nombre_completo: usuario.nombre_completo,
-        email:           usuario.email,
-        usuario:         usuario.usuario,
-        password:        '',
-        telefono:        usuario.telefono || '',
-        id_rol:          usuario.rol.id,
-        documento_identidad:          usuario.documento_identidad || '',
-        fecha_nacimiento:              usuario.fecha_nacimiento ? usuario.fecha_nacimiento.substring(0, 10) : '',
-        direccion:                     usuario.direccion || '',
-        cargo:                         usuario.cargo || '',
-        fecha_ingreso:                 usuario.fecha_ingreso ? usuario.fecha_ingreso.substring(0, 10) : '',
-        turno:                         usuario.turno         || '',
-        tipo_contrato:                 usuario.tipo_contrato || '',
-        jornada:                       usuario.jornada       || '',
-        contacto_emergencia_nombre:    usuario.contacto_emergencia_nombre || '',
-        contacto_emergencia_telefono:  usuario.contacto_emergencia_telefono || '',
-        notas:                         usuario.notas || '',
-        salario_base: '', tipo_pago: 'mensual', banco: '', tipo_cuenta: '', numero_cuenta: '', nomina_obs: '',
-      });
-      // Cargar nómina existente
-      usuariosService.getNomina(usuario.id).then(n => {
-        if (n) {
-          setForm(prev => ({
-            ...prev,
-            salario_base:  String(n.salario_base),
-            tipo_pago:     n.tipo_pago,
-            banco:         n.banco || '',
-            tipo_cuenta:   n.tipo_cuenta || '',
-            numero_cuenta: n.numero_cuenta || '',
-            nomina_obs:    n.observaciones || '',
-          }));
-          setNomina(n);
-        }
-      }).catch(() => {});
-    } else {
-      setForm({ ...FORM_EMPTY, id_rol: roles[0]?.id || 0 });
-    }
-  }, [open, usuario, roles]);
+    setForm({ ...FORM_EMPTY, id_rol: roles[0]?.id || 0 });
+  }, [open, roles]);
 
   const set = (name: keyof UnifiedForm) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement> | any) => {
@@ -162,43 +124,41 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
       setError('Completa los campos obligatorios en la pestaña Cuenta');
       return;
     }
-    if (!isEdit && !form.password) {
+    if (!form.password) {
       setTab(0);
       setError('La contraseña es obligatoria');
       return;
     }
-    if (!isEdit && form.password.length < VALIDATION.PASSWORD_MIN_LENGTH) {
+    if (form.password.length < VALIDATION.PASSWORD_MIN_LENGTH) {
       setTab(0);
       setError(`La contraseña debe tener al menos ${VALIDATION.PASSWORD_MIN_LENGTH} caracteres`);
       return;
     }
     setLoading(true);
     try {
-      const empleadoData = {
-        telefono:                    form.telefono      || undefined,
-        documento_identidad:          form.documento_identidad || undefined,
-        fecha_nacimiento:              form.fecha_nacimiento   || undefined,
-        direccion:                     form.direccion          || undefined,
-        cargo:                         form.cargo              || undefined,
-        fecha_ingreso:                 form.fecha_ingreso      || undefined,
-        turno:                         form.turno              || undefined,
-        tipo_contrato:                 form.tipo_contrato      || undefined,
-        jornada:                       form.jornada            || undefined,
+      const creado = await usuariosService.crear({
+        nombre_completo: form.nombre_completo,
+        email:           form.email,
+        usuario:         form.usuario,
+        password:        form.password,
+        id_rol:          form.id_rol,
+        telefono:                      form.telefono            || undefined,
+        documento_identidad:           form.documento_identidad || undefined,
+        fecha_nacimiento:              form.fecha_nacimiento    || undefined,
+        direccion:                     form.direccion           || undefined,
+        cargo:                         form.cargo               || undefined,
+        fecha_ingreso:                 form.fecha_ingreso       || undefined,
+        turno:                         form.turno               || undefined,
+        tipo_contrato:                 form.tipo_contrato       || undefined,
+        jornada:                       form.jornada             || undefined,
         contacto_emergencia_nombre:    form.contacto_emergencia_nombre   || undefined,
         contacto_emergencia_telefono:  form.contacto_emergencia_telefono || undefined,
-        notas:                         form.notas              || undefined,
-      };
+        notas:                         form.notas               || undefined,
+      });
 
-      let savedId = usuario?.id;
-      if (isEdit) {
-        await usuariosService.actualizar(usuario!.id, { nombre_completo: form.nombre_completo, email: form.email, id_rol: form.id_rol, ...empleadoData });
-      } else {
-        const created = await usuariosService.crear({ nombre_completo: form.nombre_completo, email: form.email, usuario: form.usuario, password: form.password, id_rol: form.id_rol, ...empleadoData });
-        savedId = created.id;
-      }
-
-      // Guardar nómina si se llenaron datos
-      if (savedId && form.salario_base) {
+      // La nómina es opcional al dar de alta; si se llenó, se guarda aparte
+      // (el backend registra además la primera fila del historial salarial).
+      if (form.salario_base) {
         const nominaData: NominaDto = {
           salario_base:  parseFloat(form.salario_base) || 0,
           tipo_pago:     form.tipo_pago as NominaDto['tipo_pago'],
@@ -207,13 +167,13 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
           numero_cuenta: form.numero_cuenta || undefined,
           observaciones: form.nomina_obs || undefined,
         };
-        await usuariosService.guardarNomina(savedId, nominaData);
+        await usuariosService.guardarNomina(creado.id, nominaData);
       }
 
-      onSave();
+      onSave(creado.id);
       onClose();
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Error al guardar usuario');
+      setError(err.response?.data?.error || 'Error al crear el empleado');
     } finally {
       setLoading(false);
     }
@@ -223,8 +183,8 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pb: 0 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {isEdit ? <Edit fontSize="small" /> : <Add fontSize="small" />}
-          <Typography fontWeight={700}>{isEdit ? 'Editar empleado' : 'Nuevo empleado'}</Typography>
+          <Add fontSize="small" />
+          <Typography fontWeight={700}>Nuevo empleado</Typography>
         </Box>
         <IconButton size="small" onClick={onClose}><Close fontSize="small" /></IconButton>
       </DialogTitle>
@@ -241,27 +201,17 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
         {/* ── Tab 0: Cuenta del sistema ──────────────────────────────────── */}
         {tab === 0 && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {editingSA && (
-              <Alert severity="warning" icon={<Shield fontSize="small" />}>
-                Estás editando al <strong>Super Admin</strong>. El rol es inmutable y no puede modificarse.
-              </Alert>
-            )}
             <TextField fullWidth label="Nombre Completo *" value={form.nombre_completo} onChange={set('nombre_completo')} />
             <FieldRow>
               <TextField fullWidth label="Email *" type="email" value={form.email} onChange={set('email')} />
               <TextField fullWidth label="Teléfono" value={form.telefono} onChange={set('telefono')} />
             </FieldRow>
             <FieldRow>
-              <TextField fullWidth label="Usuario *" value={form.usuario} onChange={set('usuario')} disabled={isEdit}
-                helperText={isEdit ? 'El usuario no se puede cambiar' : 'Solo letras, números y _'} />
+              <TextField fullWidth label="Usuario *" value={form.usuario} onChange={set('usuario')}
+                helperText="Solo letras, números y _" />
               <FormControl fullWidth>
                 <InputLabel>Rol *</InputLabel>
-                <Select
-                  value={form.id_rol || ''}
-                  label="Rol *"
-                  onChange={set('id_rol')}
-                  disabled={editingSA}
-                >
+                <Select value={form.id_rol || ''} label="Rol *" onChange={set('id_rol')}>
                   {roles.map(r => (
                     <MenuItem key={r.id} value={r.id}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -271,26 +221,19 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
                     </MenuItem>
                   ))}
                 </Select>
-                {editingSA && (
-                  <Typography variant="caption" color="warning.main" sx={{ mt: 0.5, display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <Shield sx={{ fontSize: 12 }} /> El rol del super admin es inmutable
-                  </Typography>
-                )}
               </FormControl>
             </FieldRow>
-            {!isEdit && (
-              <TextField fullWidth label="Contraseña *" type={showPassword ? 'text' : 'password'}
-                value={form.password} onChange={set('password')}
-                helperText={`Mínimo ${VALIDATION.PASSWORD_MIN_LENGTH} caracteres`}
-                InputProps={{ endAdornment: (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setShowPassword(s => !s)} edge="end">
-                      {showPassword ? <VisibilityOff /> : <Visibility />}
-                    </IconButton>
-                  </InputAdornment>
-                )}}
-              />
-            )}
+            <TextField fullWidth label="Contraseña *" type={showPassword ? 'text' : 'password'}
+              value={form.password} onChange={set('password')}
+              helperText={`Mínimo ${VALIDATION.PASSWORD_MIN_LENGTH} caracteres`}
+              InputProps={{ endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton onClick={() => setShowPassword(s => !s)} edge="end">
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              )}}
+            />
           </Box>
         )}
 
@@ -369,18 +312,12 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
         {/* ── Tab 2: Nómina ──────────────────────────────────────────────── */}
         {tab === 2 && (
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            {!isEdit && (
-              <Alert severity="info" sx={{ mb: 1 }}>
-                Puedes completar la nómina ahora o editarla después desde el perfil del empleado.
-              </Alert>
-            )}
-            {nomina && (
-              <Alert severity="success" variant="outlined" sx={{ mb: 1 }}>
-                Nómina registrada — última actualización: {new Date(nomina.fecha_modificacion).toLocaleDateString('es-CO')}
-              </Alert>
-            )}
+            <Alert severity="info" sx={{ mb: 1 }}>
+              Opcional al dar de alta. También puedes completarla después desde
+              la ficha del empleado, donde además queda el historial salarial.
+            </Alert>
             <FieldRow>
-              <TextField fullWidth label="Salario base *" type="number"
+              <TextField fullWidth label="Salario base" type="number"
                 value={form.salario_base} onChange={set('salario_base')}
                 InputProps={{ startAdornment: <InputAdornment position="start">$</InputAdornment> }}
                 helperText="Valor mensual bruto en COP" />
@@ -424,7 +361,7 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
         <Box sx={{ display: 'flex', gap: 1 }}>
           <Button onClick={onClose} disabled={loading} startIcon={<Close />}>Cancelar</Button>
           <Button variant="contained" onClick={handleSubmit} disabled={loading}>
-            {loading ? <CircularProgress size={20} /> : isEdit ? 'Guardar cambios' : 'Crear empleado'}
+            {loading ? <CircularProgress size={20} /> : 'Crear empleado'}
           </Button>
         </Box>
       </DialogActions>
@@ -432,74 +369,17 @@ function FormDialog({ open, usuario, roles, onClose, onSave }: FormDialogProps) 
   );
 }
 
-// ─── Dialogo: Reset Password ──────────────────────────────────────────────
-function ResetPasswordDialog({ open, usuario, onClose, onDone }:
-  { open: boolean; usuario: Usuario | null; onClose: () => void; onDone: () => void }) {
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => { if (open) { setPassword(''); setError(''); } }, [open]);
-
-  const handleSubmit = async () => {
-    // ← CAMBIO 5: usa VALIDATION.PASSWORD_MIN_LENGTH en lugar del número mágico 8
-    if (password.length < VALIDATION.PASSWORD_MIN_LENGTH) {
-      setError(`Mínimo ${VALIDATION.PASSWORD_MIN_LENGTH} caracteres`);
-      return;
-    }
-    setLoading(true);
-    try {
-      await usuariosService.resetPassword(usuario!.id, password);
-      onDone();
-      onClose();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Error al resetear contraseña');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <LockReset fontSize="small" /> Resetear Contraseña
-      </DialogTitle>
-      <Divider />
-      <DialogContent sx={{ pt: 2 }}>
-        {usuario && (
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Usuario: <strong>{usuario.nombre_completo}</strong>
-          </Typography>
-        )}
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-        <TextField fullWidth label="Nueva Contraseña" type={showPassword ? 'text' : 'password'}
-          value={password} onChange={(e) => { setPassword(e.target.value); setError(''); }}
-          InputProps={{
-            endAdornment: (
-              <InputAdornment position="end">
-                <IconButton onClick={() => setShowPassword(!showPassword)} edge="end">
-                  {showPassword ? <VisibilityOff /> : <Visibility />}
-                </IconButton>
-              </InputAdornment>
-            ),
-          }}
-        />
-      </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
-        <Button onClick={onClose} disabled={loading}>Cancelar</Button>
-        <Button variant="contained" color="warning" onClick={handleSubmit} disabled={loading}>
-          {loading ? <CircularProgress size={20} /> : 'Resetear'}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
+// ResetPasswordDialog vive en components/personal: lo comparten este listado
+// y la ficha del empleado.
 
 // ─── Página Principal ─────────────────────────────────────────────────────
 export default function Usuarios() {
   const { isSuperAdmin, usuario: usuarioActual } = useAuthStore();
   const esSA = isSuperAdmin();
+  const navigate = useNavigate();
+
+  /** La ficha es la pantalla de detalle: el listado solo lleva hasta ella. */
+  const irAFicha = (id: number) => navigate(`/admin/personal/${id}`);
 
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [roles, setRoles] = useState<RolBasico[]>([]);
@@ -511,7 +391,7 @@ export default function Usuarios() {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [total, setTotal] = useState(0);
-  const [formDialog, setFormDialog] = useState<{ open: boolean; usuario: Usuario | null }>({ open: false, usuario: null });
+  const [formOpen, setFormOpen] = useState(false);
   const [resetDialog, setResetDialog] = useState<{ open: boolean; usuario: Usuario | null }>({ open: false, usuario: null });
 
   // ← CAMBIO 6: estado para ConfirmDialog en lugar de ejecutar handleToggleEstado directamente
@@ -571,14 +451,13 @@ export default function Usuarios() {
       {/* Header — sin cambios */}
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
-          <Typography variant="h5" fontWeight={700}>Gestión de Usuarios</Typography>
+          <Typography variant="h5" fontWeight={700}>Personal</Typography>
           <Typography variant="body2" color="text.secondary">
-            Administra los usuarios y sus permisos del sistema
+            Empleados del sistema — abre una ficha para ver sus datos laborales y su nómina
           </Typography>
         </Box>
-        <Button variant="contained" startIcon={<Add />}
-          onClick={() => setFormDialog({ open: true, usuario: null })}>
-          Nuevo Usuario
+        <Button variant="contained" startIcon={<Add />} onClick={() => setFormOpen(true)}>
+          Nuevo empleado
         </Button>
       </Box>
 
@@ -644,8 +523,8 @@ export default function Usuarios() {
           <Table size="small">
             <TableHead>
               <TableRow sx={{ bgcolor: 'grey.50' }}>
-                <TableCell>Usuario</TableCell>
-                <TableCell>Email</TableCell>
+                <TableCell>Empleado</TableCell>
+                <TableCell>Cargo</TableCell>
                 <TableCell>Rol</TableCell>
                 <TableCell>Estado</TableCell>
                 <TableCell>Último Acceso</TableCell>
@@ -665,22 +544,30 @@ export default function Usuarios() {
                   <TableCell colSpan={6} sx={{ py: 0, border: 0 }}>
                     {/* ← CAMBIO 11: EmptyState reemplaza Typography inline */}
                     <EmptyState
-                      message="No se encontraron usuarios"
-                      description="Intenta con otros filtros o crea un nuevo usuario"
-                      actionLabel="Nuevo Usuario"
-                      onAction={() => setFormDialog({ open: true, usuario: null })}
+                      message="No se encontraron empleados"
+                      description="Intenta con otros filtros o da de alta un empleado"
+                      actionLabel="Nuevo empleado"
+                      onAction={() => setFormOpen(true)}
                     />
                   </TableCell>
                 </TableRow>
               ) : (
                 usuarios.map((u) => (
-                  <TableRow key={u.id} hover>
+                  <TableRow
+                    key={u.id}
+                    hover
+                    onClick={() => irAFicha(u.id)}
+                    sx={{ cursor: 'pointer' }}
+                  >
                     <TableCell>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                        <Avatar sx={{
-                          width: 34, height: 34, fontSize: 13,
-                          bgcolor: u.es_super_admin ? 'warning.main' : (u.rol.color || 'primary.main'),
-                        }}>
+                        <Avatar
+                          src={u.foto_url ?? undefined}
+                          sx={{
+                            width: 34, height: 34, fontSize: 13,
+                            bgcolor: u.es_super_admin ? 'warning.main' : (u.rol.color || 'primary.main'),
+                          }}
+                        >
                           {u.es_super_admin ? <Shield fontSize="small" /> : getInitials(u.nombre_completo)}
                         </Avatar>
                         <Box>
@@ -696,15 +583,15 @@ export default function Usuarios() {
                               />
                             )}
                           </Box>
-                          <Typography variant="caption" color="text.secondary">@{u.usuario}</Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {u.codigo_empleado ? `${u.codigo_empleado} · ` : ''}@{u.usuario}
+                          </Typography>
                         </Box>
                       </Box>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="body2">{u.email}</Typography>
-                      {u.telefono && (
-                        <Typography variant="caption" color="text.secondary">{u.telefono}</Typography>
-                      )}
+                      <Typography variant="body2">{u.cargo || '—'}</Typography>
+                      <Typography variant="caption" color="text.secondary">{u.email}</Typography>
                     </TableCell>
                     <TableCell>
                       <Chip label={u.rol.nombre} size="small"
@@ -712,8 +599,19 @@ export default function Usuarios() {
                           color: u.rol.color, fontWeight: 600, fontSize: 11 }} />
                     </TableCell>
                     <TableCell>
-                      {/* ← CAMBIO 13: StatusChip reemplaza Chip con estadoColor() inline */}
-                      <StatusChip estado={u.estado} />
+                      <Stack spacing={0.5} alignItems="flex-start">
+                        <StatusChip estado={u.estado} />
+                        {/* El estado laboral solo se destaca cuando NO es el normal */}
+                        {u.estado_laboral && u.estado_laboral !== 'activo' && (
+                          <Chip
+                            label={ESTADO_LABORAL_LABEL[u.estado_laboral]}
+                            size="small"
+                            color={ESTADO_LABORAL_COLOR[u.estado_laboral]}
+                            variant="outlined"
+                            sx={{ height: 18, fontSize: 10 }}
+                          />
+                        )}
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Typography variant="caption" color="text.secondary">
@@ -721,20 +619,13 @@ export default function Usuarios() {
                         {u.ultimo_acceso ? formatDateTime(u.ultimo_acceso) : 'Nunca'}
                       </Typography>
                     </TableCell>
-                    <TableCell align="center">
-                      {/* Editar: el SA solo puede editarse a sí mismo; nadie más puede editar al SA */}
-                      <Tooltip title={
-                        u.es_super_admin && !esSA ? 'El super admin no puede ser modificado'
-                        : u.es_super_admin && usuarioActual?.id !== u.id ? 'Solo el super admin puede editarse a sí mismo'
-                        : 'Editar'
-                      }>
-                        <span>
-                          <IconButton size="small"
-                            disabled={u.es_super_admin && (!esSA || usuarioActual?.id !== u.id)}
-                            onClick={() => setFormDialog({ open: true, usuario: u })}>
-                            <Edit fontSize="small" />
-                          </IconButton>
-                        </span>
+                    {/* stopPropagation: la fila entera navega a la ficha, los
+                        botones no deben arrastrar esa navegación consigo. */}
+                    <TableCell align="center" onClick={e => e.stopPropagation()}>
+                      <Tooltip title="Abrir ficha del empleado">
+                        <IconButton size="small" color="primary" onClick={() => irAFicha(u.id)}>
+                          <ChevronRight fontSize="small" />
+                        </IconButton>
                       </Tooltip>
                       {/* Reset password: el SA puede resetear su propia; nadie puede resetear la del SA */}
                       <Tooltip title={
@@ -780,18 +671,23 @@ export default function Usuarios() {
       </Paper>
 
       <FormDialog
-        open={formDialog.open} usuario={formDialog.usuario} roles={roles}
-        onClose={() => setFormDialog({ open: false, usuario: null })}
-        onSave={() => {
-          cargarDatos();
-          // ← CAMBIO 16: usa MESSAGES de constants en lugar de strings hardcodeados
-          showSnack(formDialog.usuario ? MESSAGES.UPDATED : MESSAGES.CREATED);
+        open={formOpen} roles={roles}
+        onClose={() => setFormOpen(false)}
+        onSave={(idCreado) => {
+          showSnack(MESSAGES.CREATED);
+          // Tras el alta se abre la ficha: es donde se completan los datos
+          // laborales, la seguridad social y la nómina.
+          irAFicha(idCreado);
         }}
       />
       <ResetPasswordDialog
-        open={resetDialog.open} usuario={resetDialog.usuario}
+        open={resetDialog.open}
+        nombre={resetDialog.usuario?.nombre_completo}
         onClose={() => setResetDialog({ open: false, usuario: null })}
-        onDone={() => showSnack(MESSAGES.PASSWORD_RESET)}
+        onConfirm={async (password) => {
+          await usuariosService.resetPassword(resetDialog.usuario!.id, password);
+          showSnack(MESSAGES.PASSWORD_RESET);
+        }}
       />
 
       {/* ← CAMBIO 17: ConfirmDialog de common reemplaza el toggle directo sin confirmación */}

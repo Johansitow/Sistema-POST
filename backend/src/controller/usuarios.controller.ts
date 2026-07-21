@@ -133,6 +133,15 @@ export const upsertNomina = asyncHandler(async (req: Request, res: Response) => 
   res.json({ message: 'Nómina guardada correctamente', nomina });
 });
 
+export const obtenerResumen = asyncHandler(async (req: Request, res: Response) => {
+  const dias = qs(req.query.dias) ? parseInt(qs(req.query.dias)!, 10) : undefined;
+  if (dias !== undefined && (isNaN(dias) || dias < 1 || dias > 365)) {
+    throw new BadRequestError('El periodo debe estar entre 1 y 365 días');
+  }
+  const resumen = await usuarioService.obtenerResumen(pid(req.params.id), grupoScope(req), dias);
+  res.json({ resumen });
+});
+
 export const listarHistorialSalarios = asyncHandler(async (req: Request, res: Response) => {
   const historial = await usuarioService.listarHistorialSalarios(pid(req.params.id), grupoScope(req));
   res.json({ historial });

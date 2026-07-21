@@ -3,7 +3,7 @@
  */
 
 import { Router } from 'express';
-import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina, listarHistorialSalarios, listarAdminsDeGrupo, listarPermisosDirectos, sincronizarPermisosDirectos } from '../controller/usuarios.controller';
+import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina, listarHistorialSalarios, obtenerResumen, listarAdminsDeGrupo, listarPermisosDirectos, sincronizarPermisosDirectos } from '../controller/usuarios.controller';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
 import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
@@ -47,5 +47,8 @@ router.put('/:id/nomina',           upsertNomina);
 
 // Historial salarial — solo lectura; se escribe automáticamente al guardar nómina
 router.get('/:id/historial-salarios', listarHistorialSalarios);
+
+// KPIs para la cabecera de la ficha del empleado
+router.get('/:id/resumen',            obtenerResumen);
 
 export default router;

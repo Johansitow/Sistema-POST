@@ -66,7 +66,8 @@ export type UsuarioCreateData = {
 export type UsuarioUpdateData = Partial<{
   nombre_completo: string;
   email:           string;
-  telefono:        string;
+  // La columna es nullable: enviar null limpia el teléfono
+  telefono:        string | null;
   id_rol:          number;
   estado:          EstadoGeneral;
   password_hash:   string;
@@ -358,6 +359,67 @@ export const usuarioRepository = {
       },
       select: { codigo_empleado: true },
     }),
+
+  // ── KPIs del empleado ──────────────────────────────────────────────────────
+
+  /**
+   * resumenEmpleado — indicadores de desempeño del empleado en un periodo.
+   *
+   * Multi-tenant: cuando hay `id_grupo` (admin de grupo, no superadmin) las
+   * agregaciones se acotan a las sedes de ESE grupo. Sin este filtro un admin
+   * vería las ventas que el empleado hizo en sedes de otro grupo.
+   *
+   * @param idEstadoFinal id del estado 'ENTREGADA' (lib/estadoOrden) — mismo
+   *        criterio de "venta completada" que dashboard y reportes.
+   */
+  resumenEmpleado: async (
+    id_usuario: number,
+    desde: Date,
+    idEstadoFinal: number,
+    id_grupo?: number,
+  ) => {
+    const scopeSede = id_grupo ? { restaurante: { id_grupo } } : {};
+
+    const [ordenes, cierres, cierresConDiferencia, ultimaOrden] = await Promise.all([
+      prisma.orden.aggregate({
+        where: {
+          id_usuario,
+          id_estado:      idEstadoFinal,
+          fecha_apertura: { gte: desde },
+          ...scopeSede,
+        },
+        _count: { _all: true },
+        _sum:   { total: true },
+      }),
+      prisma.cierreCaja.aggregate({
+        where: { id_usuario, fecha_cierre: { gte: desde }, ...scopeSede },
+        _count: { _all: true },
+        _sum:   { diferencia: true },
+      }),
+      prisma.cierreCaja.count({
+        where: {
+          id_usuario,
+          fecha_cierre: { gte: desde },
+          diferencia:   { not: 0 },
+          ...scopeSede,
+        },
+      }),
+      prisma.orden.findFirst({
+        where:   { id_usuario, ...scopeSede },
+        orderBy: { fecha_apertura: 'desc' },
+        select:  { fecha_apertura: true },
+      }),
+    ]);
+
+    return {
+      ordenes_atendidas:      ordenes._count._all,
+      ventas_generadas:       ordenes._sum.total ?? new Prisma.Decimal(0),
+      cierres_caja:           cierres._count._all,
+      diferencia_acumulada:   cierres._sum.diferencia ?? new Prisma.Decimal(0),
+      cierres_con_diferencia: cierresConDiferencia,
+      ultima_actividad:       ultimaOrden?.fecha_apertura ?? null,
+    };
+  },
 
   // ── Historial salarial ─────────────────────────────────────────────────────
 

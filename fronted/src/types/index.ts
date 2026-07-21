@@ -58,7 +58,7 @@ export interface UsuarioAuth {
  * Más rica que el JWT (datos personales/laborales) pero SIN restaurantes:
  * las sedes asignadas se leen del JWT (useAuthStore().user.restaurantes).
  */
-export interface PerfilUsuario {
+export interface PerfilUsuario extends EmpleadoFields {
   id: number;
   uuid: string;
   usuario: string;
@@ -70,14 +70,31 @@ export interface PerfilUsuario {
   fecha_creacion?: string;
   es_super_admin: boolean;
   rol: RolBasico;
-  // Datos personales / laborales (opcionales)
-  documento_identidad?: string | null;
-  fecha_nacimiento?: string | null;
+  codigo_empleado?: string | null;
+  jefe_directo?: { id: number; nombre_completo: string; cargo?: string | null } | null;
+  restaurante_base?: { id: number; nombre: string; id_grupo: number } | null;
+}
+
+/**
+ * KPIs del empleado — GET /usuarios/:id/resumen.
+ * Solo agrega datos que existen en el sistema (órdenes y cierres de caja);
+ * no hay modelo de asistencia, así que no se reportan horas ni ausencias.
+ */
+export interface ResumenEmpleado {
+  ordenes_atendidas: number;
+  ventas_generadas: number;
+  cierres_caja: number;
+  diferencia_acumulada: number;
+  cierres_con_diferencia: number;
+  ultima_actividad: string | null;
+  periodo_dias: number;
+  desde: string;
+}
+
+/** Datos que el propio trabajador puede corregir desde su portal. */
+export interface MiPerfilDto {
+  telefono?: string | null;
   direccion?: string | null;
-  cargo?: string | null;
-  fecha_ingreso?: string | null;
-  turno?: string | null;
-  tipo_contrato?: string | null;
   contacto_emergencia_nombre?: string | null;
   contacto_emergencia_telefono?: string | null;
 }

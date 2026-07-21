@@ -13,6 +13,7 @@
 import api from './api';
 import type {
   CreateUsuarioDto, UpdateUsuarioDto, NominaDto, NominaEmpleado, HistorialSalario,
+  ResumenEmpleado,
 } from '../types';
 
 export const usuariosService = {
@@ -122,5 +123,14 @@ export const usuariosService = {
   async historialSalarios(id: number): Promise<HistorialSalario[]> {
     const res = await api.get(`/usuarios/${id}/historial-salarios`);
     return res.data.historial ?? [];
+  },
+
+  /**
+   * resumen — KPIs del empleado para la cabecera de su ficha.
+   * @param dias ventana de análisis (por defecto la del backend: 30)
+   */
+  async resumen(id: number, dias?: number): Promise<ResumenEmpleado> {
+    const res = await api.get(`/usuarios/${id}/resumen`, { params: dias ? { dias } : undefined });
+    return res.data.resumen;
   },
 };
