@@ -113,6 +113,7 @@ model GrupoNegocio {
   plantillas            PlantillaImpresion[]
   auditorias            Auditoria[]          @relation("AuditoriaGrupo")
   configuraciones_grupo ConfiguracionGrupo[]
+  documentos            DocumentoEmitido[]
 
   @@map("grupo_negocio")
 }
@@ -180,6 +181,7 @@ model Restaurante {
   alertas          Alerta[]
   plantillas       PlantillaImpresion[]
   configuraciones  ConfiguracionRestaurante[]
+  documentos       DocumentoEmitido[]
   auditorias       Auditoria[]                @relation("AuditoriaRestaurante")
 
   @@index([id_grupo])
@@ -280,6 +282,9 @@ model Usuario {
 
   historial_salarios   HistorialSalario[] @relation("HistorialSalarioEmpleado")
   salarios_registrados HistorialSalario[] @relation("HistorialSalarioAutor")
+
+  documentos_recibidos DocumentoEmitido[] @relation("DocumentoEmpleado")
+  documentos_emitidos  DocumentoEmitido[] @relation("DocumentoEmisor")
 
   @@index([codigo_empleado])
   @@index([estado_laboral])
@@ -1290,10 +1295,60 @@ model PlantillaImpresion {
 
   restaurante     Restaurante?  @relation(fields: [id_restaurante], references: [id])
   grupo           GrupoNegocio? @relation(fields: [id_grupo],       references: [id])
+  documentos      DocumentoEmitido[]
 
   @@index([id_restaurante])
   @@index([id_grupo])
   @@map("plantillas_impresion")
+}
+
+// ── DocumentoEmitido — documentos laborales con valor probatorio ─────────────
+//
+// Cada emisión guarda un SNAPSHOT INMUTABLE del HTML generado. Si mañana se
+// edita la plantilla, el certificado emitido hace un año sigue diciendo lo que
+// decía: sin esto el documento no tiene valor probatorio.
+//
+// codigo_verificacion alimenta el QR impreso y la ruta pública /verificar/:codigo,
+// que permite a un banco o un tercero confirmar que el documento es auténtico
+// sin exponer datos sensibles del empleado.
+
+model DocumentoEmitido {
+  id                  Int      @id @default(autoincrement())
+
+  tipo                String   @db.VarChar(50)   // documento_certificado_laboral, …
+  consecutivo         String   @db.VarChar(30)   // CL-2026-0001, por tipo y grupo
+  codigo_verificacion String   @unique @db.VarChar(24)
+  hash_contenido      String   @db.VarChar(64)   // sha256 del HTML — detecta alteraciones
+
+  contenido_html      String   @db.Text          // snapshot inmutable
+  datos               Json                        // variables resueltas al emitir
+
+  // Vigencia: los certificados para banco caducan (por defecto 30 días).
+  // null = sin vencimiento (contratos, cartas de terminación).
+  vigencia_hasta      DateTime?
+
+  anulado             Boolean  @default(false)
+  motivo_anulacion    String?  @db.VarChar(300)
+  fecha_anulacion     DateTime?
+
+  fecha_emision       DateTime @default(now())
+
+  id_empleado         Int
+  id_emisor           Int
+  id_grupo            Int                         // tenant raíz — scope obligatorio
+  id_restaurante      Int?
+  id_plantilla        Int?                        // null si se usó la plantilla por defecto del código
+
+  empleado    Usuario             @relation("DocumentoEmpleado", fields: [id_empleado],   references: [id])
+  emisor      Usuario             @relation("DocumentoEmisor",   fields: [id_emisor],     references: [id])
+  grupo       GrupoNegocio        @relation(fields: [id_grupo],       references: [id])
+  restaurante Restaurante?        @relation(fields: [id_restaurante], references: [id])
+  plantilla   PlantillaImpresion? @relation(fields: [id_plantilla],   references: [id])
+
+  @@index([id_empleado])
+  @@index([id_grupo, tipo])
+  @@index([fecha_emision])
+  @@map("documentos_emitidos")
 }
 
 // ============================================================================

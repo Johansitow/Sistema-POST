@@ -9,3 +9,4 @@ export { FichaHeader }       from './FichaHeader';
 export { TabResumen }        from './TabResumen';
 export { TabDatosEmpleado }  from './TabDatosEmpleado';
 export { TabNomina }         from './TabNomina';
+export { TabDocumentos }     from './TabDocumentos';

@@ -14,12 +14,19 @@ import { NotFoundError, ConflictError } from '../exceptions/HttpErrors';
 import { assertGrupoCtx, type TenantCtx } from '../lib/tenantCtx';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import prisma from '../config/database';
+import { TIPOS_DOCUMENTO } from '../lib/documentos/catalogo';
 
 const KEY_ALL  = 'plantillas:all';
 const keyOne   = (id: number) => `plantilla:${id}`;
 const keyDefault = (tipo: string) => `plantilla:default:${tipo}`;
 
-const TIPOS_VALIDOS = ['comanda', 'factura', 'ticket', 'cocina'];
+/**
+ * Tipos de impresión térmica (tirilla) + familia `documento_*` de documentos
+ * laborales en A4. Comparten modelo, scoping y CRUD; solo cambia el renderer:
+ * los primeros los pinta ticketRenderer.ts en el frontend, los segundos
+ * documentoRenderer.ts en el backend (ver documento.service.ts).
+ */
+const TIPOS_VALIDOS = ['comanda', 'factura', 'ticket', 'cocina', ...TIPOS_DOCUMENTO];
 
 export const plantillaService = {
   async listar(tipo?: string, tenant?: { id_restaurante?: number; id_grupo?: number }) {

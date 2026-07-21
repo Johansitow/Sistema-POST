@@ -46,6 +46,7 @@ import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
 import { Perfil }       from './pages/Perfil';
+import { VerificarDocumento } from './pages/VerificarDocumento';
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
 
@@ -124,6 +125,11 @@ export default function App() {
 
           {/* ── Pública ─────────────────────────────────────────────────── */}
           <Route path="/login" element={<Login />} />
+          {/* Verificación de documentos laborales: destino del QR impreso.  */}
+          {/* Va FUERA del guard a propósito — quien verifica (un banco, una */}
+          {/* embajada) no tiene cuenta en el sistema.                       */}
+          <Route path="/verificar/:codigo" element={<VerificarDocumento />} />
+          <Route path="/verificar"         element={<VerificarDocumento />} />
 
           {/* ── Privadas — Layout persiste en TODAS estas rutas ─────────── */}
           {/*                                                                 */}

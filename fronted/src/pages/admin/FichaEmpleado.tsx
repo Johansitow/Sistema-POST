@@ -14,7 +14,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Alert, Box, Paper, Tab, Tabs } from '@mui/material';
 import {
-  AccountBalance, Badge as BadgeIcon, Insights, VpnKey,
+  AccountBalance, Badge as BadgeIcon, Description, Insights, VpnKey,
 } from '@mui/icons-material';
 import type {
   Usuario, NominaEmpleado, HistorialSalario, ResumenEmpleado,
@@ -26,7 +26,8 @@ import { useAuthStore } from '../../store/useStore';
 import { useUIStore } from '../../store/uiStore';
 import { LoadingScreen, ConfirmDialog } from '../../components/common';
 import {
-  FichaHeader, TabResumen, TabDatosEmpleado, TabNomina, InfoRow, ResetPasswordDialog,
+  FichaHeader, TabResumen, TabDatosEmpleado, TabNomina, TabDocumentos,
+  InfoRow, ResetPasswordDialog,
 } from '../../components/personal';
 import { formatDateTime } from '../../utils/format';
 
@@ -158,6 +159,7 @@ export default function FichaEmpleado() {
           <Tab icon={<Insights fontSize="small" />}        iconPosition="start" label="Resumen" />
           <Tab icon={<BadgeIcon fontSize="small" />}       iconPosition="start" label="Datos del empleado" />
           <Tab icon={<AccountBalance fontSize="small" />}  iconPosition="start" label="Nómina" />
+          <Tab icon={<Description fontSize="small" />}     iconPosition="start" label="Documentos" />
           <Tab icon={<VpnKey fontSize="small" />}          iconPosition="start" label="Acceso al sistema" />
         </Tabs>
 
@@ -184,6 +186,14 @@ export default function FichaEmpleado() {
           )}
 
           {tab === 3 && (
+            <TabDocumentos
+              empleado={empleado}
+              onError={msg => showToast(msg, 'error')}
+              onExito={msg => showToast(msg, 'success')}
+            />
+          )}
+
+          {tab === 4 && (
             <Box sx={{ maxWidth: 520 }}>
               <InfoRow label="Usuario"        value={`@${empleado.usuario}`} mostrarVacio />
               <InfoRow label="Email"          value={empleado.email} mostrarVacio />
