@@ -19,6 +19,7 @@ export interface Lote {
   fecha_produccion:       string;
   fecha_vencimiento:      string | null;
   fecha_cierre:           string | null;
+  fecha_ultimo_reconteo:  string | null;
   vida_util_dias:         number | null;
   estado_lote:            EstadoLote;
   costo_produccion:       number | string | null;

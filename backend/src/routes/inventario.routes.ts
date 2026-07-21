@@ -6,6 +6,7 @@ import { Router } from 'express';
 import {
   getMovimientos, registrarMovimiento, getEstadisticas, getLotesVencimiento, getValorInventario,
   getLotes, getRentabilidadLote, actualizarEstadoLote, getLotesActivosPorProducto, getVidaUtilPromedio,
+  getFrecuenciaReconteo, configurarFrecuenciaReconteo, getGateReconteoLote,
 } from '../controller/inventario.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { tenantContext } from '../middlewares/tenantContext.middleware';
@@ -21,7 +22,10 @@ router.get('/movimientos/stats',   getEstadisticas);
 router.get('/lotes',                    getLotes);
 router.get('/lotes/vencimiento',        getLotesVencimiento);
 router.get('/lotes/vida-util-promedio', getVidaUtilPromedio);
+router.get('/reconteo/frecuencia',      getFrecuenciaReconteo);
+router.put('/reconteo/frecuencia',      configurarFrecuenciaReconteo);
 router.get('/lotes/:id/rentabilidad',   getRentabilidadLote);
+router.get('/lotes/:id/reconteo-gate',  getGateReconteoLote);
 router.patch('/lotes/:id',              actualizarEstadoLote);
 router.get('/productos/:id_producto/lotes-activos', getLotesActivosPorProducto);
 router.get('/valor',               getValorInventario);

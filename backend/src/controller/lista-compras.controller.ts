@@ -5,6 +5,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { listaComprasService } from '../services/lista-compras.service';
 import { successResponse }     from '../lib/response';
+import { crearListaManualSchema } from '../dto/lista-compras.dto';
 import { EstadoListaCompras }  from '@prisma/client';
 
 export const listaComprasController = {
@@ -26,7 +27,7 @@ export const listaComprasController = {
 
   async obtener(req: Request, res: Response, next: NextFunction) {
     try {
-      const data = await listaComprasService.obtenerPorId(Number(req.params.id));
+      const data = await listaComprasService.obtenerPorId(Number(req.params.id), req.restauranteId);
       res.json(successResponse(data));
     } catch (e) { next(e); }
   },
@@ -44,6 +45,19 @@ export const listaComprasController = {
     } catch (e) { next(e); }
   },
 
+  async crearManual(req: Request, res: Response, next: NextFunction) {
+    try {
+      const idUsuario = (req as any).user?.id;
+      if (!idUsuario) { res.status(401).json({ error: 'No autenticado' }); return; }
+      const body = crearListaManualSchema.parse(req.body);
+      const result = await listaComprasService.crearManual(idUsuario, {
+        ...body,
+        id_restaurante: (req.restauranteId ?? (req.body?.id_restaurante as number)),
+      });
+      res.status(201).json(successResponse(result, 'Lista de compras creada'));
+    } catch (e) { next(e); }
+  },
+
   async cambiarEstado(req: Request, res: Response, next: NextFunction) {
     try {
       const { estado, notas, fecha_envio, fecha_recepcion } = req.body;
@@ -52,7 +66,7 @@ export const listaComprasController = {
         notas,
         fecha_envio:     fecha_envio    ? new Date(fecha_envio)    : undefined,
         fecha_recepcion: fecha_recepcion ? new Date(fecha_recepcion) : undefined,
-      });
+      }, req.restauranteId);
       res.json(successResponse(data, 'Estado actualizado'));
     } catch (e) { next(e); }
   },
@@ -63,7 +77,8 @@ export const listaComprasController = {
       const data = await listaComprasService.actualizarItem(
         Number(req.params.id),
         Number(req.params.id_item),
-        { cantidad_recibida: Number(cantidad_recibida), observaciones }
+        { cantidad_recibida: Number(cantidad_recibida), observaciones },
+        req.restauranteId,
       );
       res.json(successResponse(data, 'Item actualizado'));
     } catch (e) { next(e); }

@@ -558,7 +558,7 @@ async function main() {
   // FEATURE FLAGS
   // ============================================================
   const defaultFlags = [
-    { nombre: 'variantes_productos',  descripcion: 'Permite crear variantes/presentaciones por producto',    habilitado: true  },
+    { nombre: 'variantes_productos',  descripcion: 'Variantes/presentaciones por producto (descontinuado — UI retirada)', habilitado: false },
     { nombre: 'lotes_produccion',      descripcion: 'Módulo de lotes de producción e inventario avanzado',   habilitado: true  },
     { nombre: 'listas_compras',        descripcion: 'Generación automática de listas de compras',            habilitado: true  },
     { nombre: 'clientes_fidelizacion', descripcion: 'Sistema de puntos y fidelización de clientes',          habilitado: true  },

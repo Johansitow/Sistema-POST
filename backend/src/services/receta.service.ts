@@ -10,9 +10,25 @@ import { assertRestauranteId } from '../lib/tenantQuery';
 import { getPaginationParams, getSkip, buildPaginatedResult } from '../lib/pagination';
 import { toDecimal } from '../lib/decimal';
 import { tieneStock, convertUnits, costoConvertido } from '../lib/unidadesMedida';
+import { precioCompra, MSG_SIN_PRECIO_COMPRA, type PrecioProveedor } from '../lib/costoProveedor';
 import type { TenantCtx } from '../lib/tenantCtx';
 
 const MARGEN_DEFAULT = 0.40;
+
+/**
+ * Colapsa proveedor_productos de cada ingrediente en `producto.precio_compra`
+ * (null si no hay precio) y elimina el arreglo crudo antes de responder.
+ * Deja una sola forma de dato para el frontend: precio_compra es la base de costo.
+ */
+function conPrecioCompra<T extends { ingredientes?: unknown[] }>(receta: T): T {
+  const ingredientes = (receta.ingredientes ?? []).map((ing) => {
+    const i = ing as { producto?: { proveedor_productos?: PrecioProveedor[] } };
+    if (!i.producto) return ing;
+    const { proveedor_productos, ...prod } = i.producto;
+    return { ...i, producto: { ...prod, precio_compra: precioCompra(proveedor_productos) } };
+  });
+  return { ...receta, ingredientes };
+}
 
 export const recetaService = {
 
@@ -26,7 +42,7 @@ export const recetaService = {
       id_restaurante: params.id_restaurante,
     });
     return buildPaginatedResult(
-      data.map(r => ({ ...r, rentabilidad: this._calcularRentabilidad(r as any) })),
+      data.map(r => conPrecioCompra({ ...r, rentabilidad: this._calcularRentabilidad(r as any) })),
       total, p
     );
   },
@@ -34,19 +50,19 @@ export const recetaService = {
   async obtenerPorId(id: number) {
     const receta = await recetaRepository.findById(id);
     if (!receta) throw new NotFoundError('Receta');
-    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+    return conPrecioCompra({ ...receta, rentabilidad: this._calcularRentabilidad(receta as any) });
   },
 
   /** Lookup guardado por tenant: NotFoundError si la receta es de otra sede. */
   async obtenerPorIdScoped(id: number, ctx: TenantCtx) {
     const receta = await recetaRepository.findByIdScoped(id, ctx);
-    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+    return conPrecioCompra({ ...receta, rentabilidad: this._calcularRentabilidad(receta as any) });
   },
 
   async obtenerPorProducto(id_producto: number, id_restaurante?: number) {
     const receta = await recetaRepository.findByProductoFinal(id_producto, id_restaurante);
     if (!receta) throw new NotFoundError('Receta para este producto');
-    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+    return conPrecioCompra({ ...receta, rentabilidad: this._calcularRentabilidad(receta as any) });
   },
 
   async crear(data: {
@@ -86,7 +102,7 @@ export const recetaService = {
     await this._verificarIngredientes(data.ingredientes);
 
     const receta = await recetaRepository.create(data);
-    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+    return conPrecioCompra({ ...receta, rentabilidad: this._calcularRentabilidad(receta as any) });
   },
 
   async actualizar(id: number, data: any, ctx: TenantCtx) {
@@ -98,7 +114,7 @@ export const recetaService = {
     await recetaRepository.findByIdScoped(id, ctx);
     await this._verificarIngredientes(ingredientes);
     const receta = await recetaRepository.reemplazarIngredientes(id, ingredientes);
-    return { ...receta, rentabilidad: this._calcularRentabilidad(receta as any) };
+    return conPrecioCompra({ ...receta, rentabilidad: this._calcularRentabilidad(receta as any) });
   },
 
   // ─── Fases ───────────────────────────────────────────────────────────────────
@@ -239,17 +255,16 @@ export const recetaService = {
 
     const advertencias: { ingrediente: string; mensaje: string }[] = [];
 
-    const desglose = receta.ingredientes.map(ing => {
-      const proveedores = (ing.producto as any).proveedor_productos as
-        { precio_unitario: number; es_proveedor_preferido: boolean }[];
-      const proveedor    = proveedores.find(p => p.es_proveedor_preferido) ?? proveedores[0] ?? null;
-      const precio_unitario = proveedor ? Number(proveedor.precio_unitario) : null;
+    let ingredientesSinPrecio = 0;
 
-      if (!proveedor) {
-        advertencias.push({
-          ingrediente: ing.producto.nombre,
-          mensaje:     'Sin proveedor asignado. Asigna un proveedor para un margen más exacto.',
-        });
+    const desglose = receta.ingredientes.map(ing => {
+      const precio_unitario = precioCompra(
+        (ing.producto as { proveedor_productos?: PrecioProveedor[] }).proveedor_productos,
+      );
+
+      if (precio_unitario == null) {
+        ingredientesSinPrecio++;
+        advertencias.push({ ingrediente: ing.producto.nombre, mensaje: MSG_SIN_PRECIO_COMPRA });
       }
 
       let subtotal = 0;
@@ -260,6 +275,7 @@ export const recetaService = {
         );
         if (incompatible) {
           unidad_incompatible = true;
+          ingredientesSinPrecio++;
           advertencias.push({
             ingrediente: ing.producto.nombre,
             mensaje:     `Unidad del ingrediente (${ing.unidad}) incompatible con la unidad del producto (${ing.producto.unidad_medida}). Costo no calculado.`,
@@ -288,9 +304,16 @@ export const recetaService = {
     const precio_venta    = receta.producto_final.precio_venta != null
       ? Number(receta.producto_final.precio_venta)
       : null;
-    const margen_porcentaje = precio_venta != null && precio_venta > 0
-      ? ((precio_venta - costo_con_merma) / precio_venta) * 100
-      : null;
+
+    // Mismo criterio que _calcularRentabilidad: con precios de compra faltantes
+    // el costo está subestimado, así que el margen se reporta en 0%.
+    const datos_incompletos = ingredientesSinPrecio > 0 || receta.ingredientes.length === 0;
+
+    const margen_porcentaje = datos_incompletos
+      ? 0
+      : precio_venta != null && precio_venta > 0
+        ? ((precio_venta - costo_con_merma) / precio_venta) * 100
+        : null;
 
     return {
       desglose,
@@ -302,28 +325,53 @@ export const recetaService = {
       margen_porcentaje:  margen_porcentaje != null
         ? Math.round(margen_porcentaje * 100) / 100
         : null,
+      datos_incompletos,
+      ingredientes_sin_precio: ingredientesSinPrecio,
       advertencias,
     };
   },
 
+  /**
+   * Rentabilidad de una receta a partir del precio de compra de los insumos.
+   *
+   * El costo SOLO puede salir de ProveedorProducto (precio bruto pagado al
+   * proveedor). Mientras falte el precio de algún ingrediente el costo estaría
+   * subestimado y el margen saldría inflado, así que se reporta 0% y
+   * `datos_incompletos: true` en vez de un número que engaña. En cuanto se
+   * cargan todos los precios, el margen se calcula solo.
+   */
   _calcularRentabilidad(receta: {
     ingredientes: {
       cantidad: number; unidad: string;
-      producto: { nombre?: string; precio_unitario: number; unidad_medida: string };
+      producto: {
+        nombre?: string; unidad_medida: string;
+        proveedor_productos?: PrecioProveedor[] | null;
+      };
     }[];
     merma_esperada_porcentaje?: number | null;
     cantidad_producida: number;
     producto_final: { precio_venta?: number | null; precio_unitario: number };
   }) {
     const advertencias: { ingrediente: string; mensaje: string }[] = [];
+    let ingredientesSinPrecio = 0;
 
     const costoIngredientes = receta.ingredientes.reduce((sum, ing) => {
+      const nombre = ing.producto.nombre ?? 'Ingrediente';
+      const precio = precioCompra(ing.producto.proveedor_productos);
+
+      if (precio == null) {
+        ingredientesSinPrecio++;
+        advertencias.push({ ingrediente: nombre, mensaje: MSG_SIN_PRECIO_COMPRA });
+        return sum;
+      }
+
       const { costo, incompatible } = costoConvertido(
-        Number(ing.cantidad), ing.unidad, ing.producto.unidad_medida, Number(ing.producto.precio_unitario),
+        Number(ing.cantidad), ing.unidad, ing.producto.unidad_medida, precio,
       );
       if (incompatible) {
+        ingredientesSinPrecio++;
         advertencias.push({
-          ingrediente: ing.producto.nombre ?? 'Ingrediente',
+          ingrediente: nombre,
           mensaje:     `Unidad del ingrediente (${ing.unidad}) incompatible con la unidad del producto (${ing.producto.unidad_medida}). Costo no calculado.`,
         });
         return sum;
@@ -331,12 +379,32 @@ export const recetaService = {
       return sum + (costo ?? 0);
     }, 0);
 
+    const precioActual     = Number(receta.producto_final.precio_venta ?? receta.producto_final.precio_unitario);
+    const datosIncompletos = ingredientesSinPrecio > 0 || receta.ingredientes.length === 0;
+
+    // Sin el costo completo no hay margen que reportar: todo queda en 0%.
+    if (datosIncompletos) {
+      return {
+        costo_ingredientes:       0,
+        costo_con_merma:          0,
+        costo_unitario:           0,
+        precio_sugerido_minimo:   0,
+        precio_actual:            Math.round(precioActual),
+        margen_actual_porcentaje: 0,
+        es_rentable:              false,
+        diferencia_precio:        0,
+        alerta_rentabilidad:      null,
+        datos_incompletos:        true,
+        ingredientes_sin_precio:  ingredientesSinPrecio,
+        advertencias,
+      };
+    }
+
     const merma     = Number(receta.merma_esperada_porcentaje ?? 0) / 100;
     const costoCon  = merma > 0 ? costoIngredientes / (1 - merma) : costoIngredientes;
     const costoUnit = costoCon / Number(receta.cantidad_producida);
     const precioSugeridoMinimo = Math.ceil(costoUnit / (1 - MARGEN_DEFAULT));
 
-    const precioActual = Number(receta.producto_final.precio_venta ?? receta.producto_final.precio_unitario);
     const margenActual = precioActual > 0
       ? ((precioActual - costoUnit) / precioActual) * 100
       : 0;
@@ -353,6 +421,8 @@ export const recetaService = {
       alerta_rentabilidad:      precioActual < precioSugeridoMinimo
         ? `El precio actual ($${precioActual.toLocaleString()}) está $${Math.abs(precioActual - precioSugeridoMinimo).toLocaleString()} por debajo del mínimo rentable ($${precioSugeridoMinimo.toLocaleString()})`
         : null,
+      datos_incompletos:        false,
+      ingredientes_sin_precio:  0,
       advertencias,
     };
   },

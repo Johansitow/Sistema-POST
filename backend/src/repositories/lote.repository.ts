@@ -121,11 +121,12 @@ export const loteRepository = {
     }) as unknown as Promise<any>,
 
   update: (id: number, data: Partial<{
-    estado_lote:       EstadoLote;
-    fecha_vencimiento: Date;
-    fecha_cierre:      Date;
-    observaciones:     string;
-    merma_cantidad:    any;
-    merma_porcentaje:  any;
+    estado_lote:           EstadoLote;
+    fecha_vencimiento:     Date;
+    fecha_cierre:          Date;
+    fecha_ultimo_reconteo: Date;
+    observaciones:         string;
+    merma_cantidad:        any;
+    merma_porcentaje:      any;
   }>) => prisma.lote.update({ where: { id }, data }),
 };

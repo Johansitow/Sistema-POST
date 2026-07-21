@@ -20,6 +20,13 @@ import { toDecimal } from '../lib/decimal';
 import { costoConvertido } from '../lib/unidadesMedida';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { generarNumeroLote } from '../lib/numero-generator';
+import { configuracionRestauranteRepository } from '../repositories/configuracion-restaurante.repository';
+
+/** Clave de config (por sede) que define cada cuántos días se permite reconteo. */
+const CLAVE_RECONTEO_FRECUENCIA = 'inventario.reconteo_frecuencia_dias';
+const RECONTEO_FRECUENCIA_DEFAULT = 7;   // una vez por semana
+const RECONTEO_FRECUENCIA_MIN = 1;
+const RECONTEO_FRECUENCIA_MAX = 90;
 
 /** Tipos de movimiento que incrementan stock */
 const TIPOS_ENTRADA = new Set<TipoMovimiento>([
@@ -326,19 +333,83 @@ export const inventarioService = {
     estado_lote:       EstadoLote;
     fecha_vencimiento: Date;
     observaciones:     string;
+    // true cuando la actualización es un reconteo (revisión física periódica):
+    // sujeta al límite de frecuencia y estampa fecha_ultimo_reconteo.
+    es_reconteo:       boolean;
   }>) {
     const lote = await loteRepository.findById(id);
     if (!lote) throw new NotFoundError('Lote');
+
+    // Gate de frecuencia: solo aplica a reconteos. Se bloquea si aún no pasaron
+    // los N días configurados para la sede desde el último reconteo del lote.
+    if (data.es_reconteo) {
+      const gate = await this.evaluarGateReconteo(lote.id_restaurante, lote.fecha_ultimo_reconteo);
+      if (!gate.permitido) {
+        throw new BadRequestError(
+          `Reconteo no disponible aún. Se permite cada ${gate.frecuencia_dias} día(s); ` +
+          `el próximo será el ${gate.proximo_reconteo?.toLocaleDateString('es-CO')}.`,
+        );
+      }
+    }
 
     // Estampa la duración real observada la primera vez que el lote se cierra
     const cierraAhora = data.estado_lote != null
       && ESTADOS_CIERRE_LOTE.has(data.estado_lote)
       && !lote.fecha_cierre;
 
+    const { es_reconteo, ...campos } = data;
     return loteRepository.update(id, {
-      ...data,
+      ...campos,
       ...(cierraAhora ? { fecha_cierre: new Date() } : {}),
+      ...(es_reconteo ? { fecha_ultimo_reconteo: new Date() } : {}),
     });
+  },
+
+  /**
+   * Lee la frecuencia de reconteo configurada para la sede (default 7 días),
+   * acotada a [1, 90]. Fuente: ConfiguracionRestaurante (por sede).
+   */
+  async obtenerFrecuenciaReconteo(id_restaurante: number): Promise<number> {
+    const cfg = await configuracionRestauranteRepository.findByClave(id_restaurante, CLAVE_RECONTEO_FRECUENCIA);
+    const n = cfg ? parseInt(cfg.valor, 10) : NaN;
+    if (!Number.isFinite(n)) return RECONTEO_FRECUENCIA_DEFAULT;
+    return Math.min(RECONTEO_FRECUENCIA_MAX, Math.max(RECONTEO_FRECUENCIA_MIN, n));
+  },
+
+  /** Define cada cuántos días se permite reconteo en la sede (2, 3, 7, 15, ...). */
+  async configurarFrecuenciaReconteo(id_restaurante: number, dias: number): Promise<number> {
+    if (!Number.isInteger(dias) || dias < RECONTEO_FRECUENCIA_MIN || dias > RECONTEO_FRECUENCIA_MAX) {
+      throw new BadRequestError(`La frecuencia debe ser un entero entre ${RECONTEO_FRECUENCIA_MIN} y ${RECONTEO_FRECUENCIA_MAX} días`);
+    }
+    await configuracionRestauranteRepository.upsert(id_restaurante, CLAVE_RECONTEO_FRECUENCIA, String(dias));
+    return dias;
+  },
+
+  /**
+   * Evalúa si un lote puede recontarse ya, según su último reconteo y la
+   * frecuencia de la sede. Devuelve la fecha del próximo reconteo permitido.
+   */
+  async evaluarGateReconteo(id_restaurante: number, fechaUltimoReconteo: Date | null) {
+    const frecuencia_dias = await this.obtenerFrecuenciaReconteo(id_restaurante);
+
+    if (!fechaUltimoReconteo) {
+      return { permitido: true, frecuencia_dias, proximo_reconteo: null as Date | null, ultimo_reconteo: null as Date | null };
+    }
+
+    const proximo = new Date(fechaUltimoReconteo.getTime() + frecuencia_dias * 86_400_000);
+    return {
+      permitido:        Date.now() >= proximo.getTime(),
+      frecuencia_dias,
+      proximo_reconteo: proximo,
+      ultimo_reconteo:  fechaUltimoReconteo,
+    };
+  },
+
+  /** Lote por id (lanza NotFound si no existe). */
+  async lotePorId(id: number) {
+    const lote = await loteRepository.findById(id);
+    if (!lote) throw new NotFoundError('Lote');
+    return lote;
   },
 
   /** Lotes activos de un producto — para elegir "qué lote se dañó" al registrar una salida/merma */

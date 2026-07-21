@@ -28,9 +28,22 @@ export interface ProductoData {
   estado?: EstadoGeneral;
 }
 
-const includeDefault = { categoria: true };
+// Precio de compra pactado con el proveedor — única base válida para costos.
+// Preferido primero; el service lo colapsa a `precio_compra` con precioCompra().
+const proveedorPreciosSelect = {
+  where:   { estado: EstadoGeneral.activo },
+  select:  { precio_unitario: true, es_proveedor_preferido: true },
+  orderBy: { es_proveedor_preferido: 'desc' as const },
+  take:    5,
+} as const;
+
+const includeDefault = {
+  categoria: true,
+  proveedor_productos: proveedorPreciosSelect,
+};
 const includeDetalle = {
   categoria: true,
+  proveedor_productos: proveedorPreciosSelect,
   movimientos: { orderBy: { fecha_movimiento: 'desc' as const }, take: 10 },
 };
 

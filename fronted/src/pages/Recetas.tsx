@@ -99,7 +99,11 @@ function DisponibilidadCard({ idReceta }: { idReceta: number }) {
 // ─── Card de Rentabilidad ─────────────────────────────────────────────────────
 
 function RentabilidadCard({ r }: { r: Rentabilidad }) {
-  const color = r.es_rentable ? '#10b981' : '#ef4444';
+  // Sin los precios de compra cargados el margen no significa nada: se muestra
+  // en 0% y en gris, con la instrucción de qué falta para poder calcularlo.
+  const incompleto = r.datos_incompletos === true;
+  const color = incompleto ? '#94a3b8' : r.es_rentable ? '#10b981' : '#ef4444';
+
   return (
     <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, borderColor: color, borderWidth: 2 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
@@ -108,21 +112,54 @@ function RentabilidadCard({ r }: { r: Rentabilidad }) {
           <Typography variant="subtitle2" fontWeight={700}>Análisis de rentabilidad</Typography>
         </Box>
         <Chip
-          icon={r.es_rentable ? <TrendingUp fontSize="small" /> : <TrendingDown fontSize="small" />}
-          label={r.es_rentable ? `Rentable · ${r.margen_actual_porcentaje}% margen` : `Sin margen suficiente · ${r.margen_actual_porcentaje}%`}
+          icon={incompleto ? <Info fontSize="small" /> : r.es_rentable ? <TrendingUp fontSize="small" /> : <TrendingDown fontSize="small" />}
+          label={
+            incompleto ? '0% — sin precios de compra'
+            : r.es_rentable ? `Rentable · ${r.margen_actual_porcentaje}% margen`
+            : `Sin margen suficiente · ${r.margen_actual_porcentaje}%`
+          }
           size="small"
           sx={{ bgcolor: color + '20', color, fontWeight: 700, '& .MuiChip-icon': { color } }}
         />
       </Box>
+
+      {incompleto && (
+        <Alert severity="info" sx={{ mb: 1.5, py: 0.5, borderRadius: 1.5 }}>
+          <Typography variant="caption" display="block">
+            La rentabilidad se calcula con el <strong>precio bruto de compra</strong> de cada insumo.
+            {r.ingredientes_sin_precio
+              ? ` Faltan ${r.ingredientes_sin_precio} insumo(s) por precio.`
+              : ''}
+          </Typography>
+          <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+            Cárgalo en <strong>Proveedores → Asociar producto</strong> y el margen se calculará solo.
+          </Typography>
+          {(r.advertencias ?? []).map(adv => (
+            <Typography key={adv.ingrediente} variant="caption" display="block" sx={{ mt: 0.5, color: 'text.secondary' }}>
+              • {adv.ingrediente}
+            </Typography>
+          ))}
+        </Alert>
+      )}
+
       <Grid container spacing={1.5}>
-        {[
-          { label: 'Costo ingredientes',   val: fmt(r.costo_ingredientes),      help: 'Suma de todos los ingredientes requeridos' },
-          { label: 'Costo con merma',      val: fmt(r.costo_con_merma),         help: 'Costo ajustado por pérdidas en preparación' },
-          { label: 'Costo por porción',    val: fmt(r.costo_unitario),          bold: true },
-          { label: 'Precio mínimo suger.', val: fmt(r.precio_sugerido_minimo),  bold: true, accent: '#0ea5e9', help: 'Precio mínimo para tener 40% de margen' },
-          { label: 'Precio de venta actual', val: fmt(r.precio_actual),         bold: true, accent: color },
-          { label: 'Diferencia vs mínimo', val: `${r.diferencia_precio >= 0 ? '+' : ''}${fmt(r.diferencia_precio)}`, bold: true, accent: r.diferencia_precio >= 0 ? '#10b981' : '#ef4444' },
-        ].map(item => (
+        {(incompleto
+          ? [
+              // Sin precios de compra los costos son 0: mostrarlos como cifras
+              // sería inventar datos, así que solo queda el precio de venta.
+              { label: 'Costo ingredientes',    val: '—', help: 'Requiere el precio de compra de los insumos' },
+              { label: 'Costo por porción',     val: '—', help: 'Requiere el precio de compra de los insumos' },
+              { label: 'Precio de venta actual', val: fmt(r.precio_actual), bold: true },
+            ]
+          : [
+              { label: 'Costo ingredientes',   val: fmt(r.costo_ingredientes),      help: 'Suma de todos los ingredientes requeridos' },
+              { label: 'Costo con merma',      val: fmt(r.costo_con_merma),         help: 'Costo ajustado por pérdidas en preparación' },
+              { label: 'Costo por porción',    val: fmt(r.costo_unitario),          bold: true },
+              { label: 'Precio mínimo suger.', val: fmt(r.precio_sugerido_minimo),  bold: true, accent: '#0ea5e9', help: 'Precio mínimo para tener 40% de margen' },
+              { label: 'Precio de venta actual', val: fmt(r.precio_actual),         bold: true, accent: color },
+              { label: 'Diferencia vs mínimo', val: `${r.diferencia_precio >= 0 ? '+' : ''}${fmt(r.diferencia_precio)}`, bold: true, accent: r.diferencia_precio >= 0 ? '#10b981' : '#ef4444' },
+            ]
+        ).map(item => (
           <Grid size={{ xs: 6 }} key={item.label}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -157,7 +194,7 @@ function TablaIngredientes({ ingredientes }: { ingredientes: RecetaIngrediente[]
           <TableRow sx={{ bgcolor: 'grey.50' }}>
             <TableCell sx={{ fontWeight: 700 }}>Ingrediente</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>Cantidad</TableCell>
-            <TableCell sx={{ fontWeight: 700 }}>Precio unit.</TableCell>
+            <TableCell sx={{ fontWeight: 700 }}>Precio compra</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>Costo</TableCell>
             <TableCell sx={{ fontWeight: 700 }}>Stock actual</TableCell>
           </TableRow>
@@ -179,11 +216,13 @@ function TablaIngredientes({ ingredientes }: { ingredientes: RecetaIngrediente[]
                   <Typography variant="body2">{ing.cantidad} {fmtU(ing.unidad)}</Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2">{fmt(ing.producto.precio_unitario)}</Typography>
+                  <Typography variant="body2" color={ing.producto.precio_compra == null ? 'text.disabled' : 'text.primary'}>
+                    {ing.producto.precio_compra != null ? fmt(ing.producto.precio_compra) : '—'}
+                  </Typography>
                 </TableCell>
                 <TableCell>
-                  <Typography variant="body2" fontWeight={700}>
-                    {fmt(ing.cantidad * ing.producto.precio_unitario)}
+                  <Typography variant="body2" fontWeight={700} color={ing.producto.precio_compra == null ? 'text.disabled' : 'text.primary'}>
+                    {ing.producto.precio_compra != null ? fmt(ing.cantidad * ing.producto.precio_compra) : '—'}
                   </Typography>
                 </TableCell>
                 <TableCell>
@@ -342,13 +381,16 @@ function DetalleReceta({ receta, onEdit }: { receta: Receta; onEdit: () => void 
 
 // ─── Modal: Crear/Editar Receta ───────────────────────────────────────────────
 
-interface ProductoOpt { id: number; nombre: string; sku: string; precio_unitario: number; unidad_medida: string; tipo_materia?: string; precio_venta?: number; }
+// precio_compra: precio bruto pactado con el proveedor (null si aún no se asocia).
+// Es la única base de costo válida; precio_unitario del catálogo NO se usa aquí.
+interface ProductoOpt { id: number; nombre: string; sku: string; precio_unitario: number; precio_compra?: number | null; unidad_medida: string; tipo_materia?: string; precio_venta?: number; }
 
 type PasoModal = 'datos' | 'fases';
 
 interface IngFase {
   id_producto: number; nombre: string; cantidad: string; unidad: string;
-  precio_unitario: number; es_opcional: boolean;
+  /** precio de compra del proveedor; null = sin precio → la receta no es rentable-calculable. */
+  precio_compra: number | null; es_opcional: boolean;
   tipo_formula: string; factor_formula: string; formula_descripcion: string;
 }
 interface FaseForm {
@@ -408,7 +450,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
             .map((i: RecetaIngrediente) => ({
               id_producto: i.id_producto, nombre: i.producto.nombre,
               cantidad: i.cantidad.toString(), unidad: i.unidad,
-              precio_unitario: i.producto.precio_unitario, es_opcional: i.es_opcional,
+              precio_compra: i.producto.precio_compra ?? null, es_opcional: i.es_opcional,
               tipo_formula: (i as any).tipo_formula || '', factor_formula: (i as any).factor_formula?.toString() || '',
               formula_descripcion: (i as any).formula_descripcion || '',
             })),
@@ -423,7 +465,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
           ingredientes: receta.ingredientes.map((i: RecetaIngrediente) => ({
             id_producto: i.id_producto, nombre: i.producto.nombre,
             cantidad: i.cantidad.toString(), unidad: i.unidad,
-            precio_unitario: i.producto.precio_unitario, es_opcional: i.es_opcional,
+            precio_compra: i.producto.precio_compra ?? null, es_opcional: i.es_opcional,
             tipo_formula: (i as any).tipo_formula || '', factor_formula: (i as any).factor_formula?.toString() || '',
             formula_descripcion: (i as any).formula_descripcion || '',
           })),
@@ -439,13 +481,31 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
   useEffect(() => {
     const allIngs = fases.flatMap(f => f.ingredientes);
     if (allIngs.length === 0 || form.id_producto_final === 0) { setPreview(null); return; }
-    const costo     = allIngs.filter(i => !i.es_opcional).reduce((s, i) => s + Number(i.cantidad) * i.precio_unitario, 0);
+
+    const prod      = todosProductos.find(p => p.id === form.id_producto_final);
+    const actual    = prod?.precio_venta || prod?.precio_unitario || 0;
+    const requeridos = allIngs.filter(i => !i.es_opcional);
+
+    // Sin el precio de compra de todos los insumos no se puede calcular el costo:
+    // se refleja 0% igual que en el backend, en vez de inventar un margen.
+    const sinPrecio = requeridos.filter(i => i.precio_compra == null || i.precio_compra <= 0);
+    if (sinPrecio.length > 0 || requeridos.length === 0) {
+      setPreview({
+        costo_ingredientes: 0, costo_con_merma: 0, costo_unitario: 0,
+        precio_sugerido_minimo: 0, precio_actual: Math.round(actual),
+        margen_actual_porcentaje: 0, es_rentable: false, diferencia_precio: 0,
+        alerta_rentabilidad: null, datos_incompletos: true,
+        ingredientes_sin_precio: sinPrecio.length,
+        advertencias: sinPrecio.map(i => ({ ingrediente: i.nombre, mensaje: 'Sin precio de compra' })),
+      });
+      return;
+    }
+
+    const costo     = requeridos.reduce((s, i) => s + Number(i.cantidad) * (i.precio_compra ?? 0), 0);
     const merma     = Math.max(...fases.map(f => Number(f.merma_esperada_porcentaje || 0))) / 100;
     const costoCon  = merma > 0 ? costo / (1 - merma) : costo;
     const costoUnit = costoCon / Number(form.cantidad_producida || 1);
     const sugerido  = Math.ceil(costoUnit / 0.6);
-    const prod      = todosProductos.find(p => p.id === form.id_producto_final);
-    const actual    = prod?.precio_venta || prod?.precio_unitario || 0;
     const margen    = actual > 0 ? ((actual - costoUnit) / actual) * 100 : 0;
     setPreview({
       costo_ingredientes:       Math.round(costo),
@@ -456,6 +516,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
       margen_actual_porcentaje: Math.round(margen * 100) / 100,
       es_rentable:              margen >= 40,
       diferencia_precio:        Math.round(actual - sugerido),
+      datos_incompletos:        false,
       alerta_rentabilidad: actual < sugerido
         ? `Precio actual (${fmt(actual)}) está ${fmt(Math.abs(actual - sugerido))} por debajo del mínimo rentable (${fmt(sugerido)})`
         : null,
@@ -477,7 +538,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
     setConfirmRemoveFase(i);
   };
 
-  const addIngFase    = (fi: number) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: [...f.ingredientes, { id_producto: 0, nombre: '', cantidad: '1', unidad: 'kilogramo', precio_unitario: 0, es_opcional: false, tipo_formula: '', factor_formula: '', formula_descripcion: '' }] } : f));
+  const addIngFase    = (fi: number) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: [...f.ingredientes, { id_producto: 0, nombre: '', cantidad: '1', unidad: 'kilogramo', precio_compra: null, es_opcional: false, tipo_formula: '', factor_formula: '', formula_descripcion: '' }] } : f));
   const removeIngFase = (fi: number, ii: number) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.filter((_, m) => m !== ii) } : f));
 
   const handleRemoveIngFase = (fi: number, ii: number) => {
@@ -488,7 +549,7 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
   const updateIngFase = (fi: number, ii: number, field: string, v: any) => setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.map((x, m) => m === ii ? { ...x, [field]: v } : x) } : f));
   const selectProdFase = (fi: number, ii: number, prod: ProductoOpt | null) => {
     if (!prod) return;
-    setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.map((x, m) => m === ii ? { ...x, id_producto: prod.id, nombre: prod.nombre, precio_unitario: prod.precio_unitario, unidad: prod.unidad_medida } : x) } : f));
+    setFases(p => p.map((f, n) => n === fi ? { ...f, ingredientes: f.ingredientes.map((x, m) => m === ii ? { ...x, id_producto: prod.id, nombre: prod.nombre, precio_compra: prod.precio_compra ?? null, unidad: prod.unidad_medida } : x) } : f));
   };
 
   const productosFinal = todosProductos.filter(p => p.tipo_materia === 'procesada' || (p as any).es_vendible);
@@ -812,13 +873,17 @@ function RecetaModal({ open, receta, onClose, onSaved, productoPreseleccionado }
                                 </IconButton>
                               </Grid>
                               <Grid size={{ xs: 12 }} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                {ing.precio_unitario > 0 ? (
-                                  <Typography variant="caption" color="text.secondary">
-                                    Costo estimado: <strong>{fmt(Number(ing.cantidad) * ing.precio_unitario)}</strong>
-                                  </Typography>
-                                ) : (
+                                {ing.id_producto === 0 ? (
                                   <Typography variant="caption" color="text.disabled">
                                     Selecciona el ingrediente para ver el costo
+                                  </Typography>
+                                ) : ing.precio_compra != null && ing.precio_compra > 0 ? (
+                                  <Typography variant="caption" color="text.secondary">
+                                    Costo estimado: <strong>{fmt(Number(ing.cantidad) * ing.precio_compra)}</strong>
+                                  </Typography>
+                                ) : (
+                                  <Typography variant="caption" color="warning.main">
+                                    Sin precio de compra — asócialo a un proveedor
                                   </Typography>
                                 )}
                                 <Tooltip title={ing.es_opcional ? 'Clic para marcar como requerido' : 'Clic para marcar como opcional'}>

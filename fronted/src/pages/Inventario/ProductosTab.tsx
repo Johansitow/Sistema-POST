@@ -26,14 +26,12 @@ import { categoriasService, Categoria } from '../../services/categorias.service'
 import { inventarioService, MovimientoCreateDTO } from '../../services/inventario.service';
 import { proveedorService, Proveedor } from '../../services/servicios-gestion';
 import { usuariosService } from '../../services/usuarios.service';
-import { variantesService, type ProductoVariante, type CreateVarianteDto } from '../../services/variantes.service';
 import api from '../../services/api';
 import { formatCurrency, ESTADOS } from '../../utils';
 import { ConfirmDialog, EmptyState, TableSkeleton, ErrorAlert } from '../../components/common';
 import { useUIStore, toast } from '../../store/uiStore';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { Z_INDEX } from '../../lib/zIndex';
-import { useFeatureFlag } from '../../store/featureFlagStore';
 
 type ModalMode = 'create' | 'edit' | null;
 
@@ -1495,178 +1493,6 @@ const ProductoModal: React.FC<ProductoModalProps> = ({ mode, producto, categoria
 };
 
 // ============================================================================
-// VARIANTES DRAWER
-// ============================================================================
-
-interface VariantesDrawerProps { producto: Producto; onClose: () => void; }
-
-function VariantesDrawer({ producto, onClose }: VariantesDrawerProps) {
-  useEscapeKey(onClose);
-  const [variantes, setVariantes] = useState<ProductoVariante[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [formOpen, setFormOpen]   = useState(false);
-  const [editV, setEditV]         = useState<ProductoVariante | null>(null);
-  const [form, setForm]           = useState<CreateVarianteDto>({ nombre: '', precio: 0, sku: '', orden: 0 });
-  const [saving, setSaving]       = useState(false);
-  const [error, setError]         = useState('');
-  const [confirmDelete, setConfirmDelete] = useState<ProductoVariante | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setVariantes(await variantesService.listar(producto.id)); }
-    catch { setVariantes([]); }
-    finally { setLoading(false); }
-  }, [producto.id]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const openCreate = () => { setEditV(null); setForm({ nombre: '', precio: 0, sku: '', orden: variantes.length }); setError(''); setFormOpen(true); };
-  const openEdit   = (v: ProductoVariante) => { setEditV(v); setForm({ nombre: v.nombre, precio: Number(v.precio), sku: v.sku||'', orden: v.orden }); setError(''); setFormOpen(true); };
-
-  const handleSave = async () => {
-    if (!form.nombre.trim()) { setError('El nombre es obligatorio'); return; }
-    if (form.precio < 0) { setError('El precio no puede ser negativo'); return; }
-    setSaving(true);
-    try {
-      if (editV) await variantesService.actualizar(producto.id, editV.id, form);
-      else       await variantesService.crear(producto.id, form);
-      setFormOpen(false);
-      load();
-    } catch (e: any) { setError(e.response?.data?.error || 'Error al guardar'); }
-    finally { setSaving(false); }
-  };
-
-  const handleDelete = async (v: ProductoVariante) => {
-    try {
-      await variantesService.eliminar(producto.id, v.id);
-      toast.success('Variante eliminada');
-      load();
-    } catch (e: any) {
-      toast.error(e.message || 'Error al eliminar la variante');
-    }
-  };
-
-  const moveVariante = async (v: ProductoVariante, dir: -1 | 1) => {
-    const sorted = [...variantes].sort((a, b) => a.orden - b.orden);
-    const idx = sorted.findIndex(x => x.id === v.id);
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= sorted.length) return;
-    [sorted[idx], sorted[newIdx]] = [sorted[newIdx], sorted[idx]];
-    const items = sorted.map((x, i) => ({ id: x.id, orden: i }));
-    try {
-      await variantesService.reordenar(producto.id, items);
-      load();
-    } catch { /* ignore */ }
-  };
-
-  return (
-    <div className="fixed inset-0 flex justify-end" style={{ zIndex: Z_INDEX.MODAL_BASE }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-white dark:bg-gray-800 h-full shadow-2xl flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-          <div>
-            <h3 className="font-bold text-gray-900 dark:text-white">Variantes</h3>
-            <p className="text-sm text-gray-500">{producto.nombre}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={openCreate}
-              className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700">
-              <Plus className="w-3 h-3" /> Nueva
-            </button>
-            <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 rounded">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Lista */}
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-purple-600 border-t-transparent rounded-full animate-spin" /></div>
-          ) : variantes.length === 0 ? (
-            <div className="text-center py-10 text-gray-400">
-              <Layers className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p className="text-sm">Sin variantes. Crea la primera.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {[...variantes].sort((a, b) => a.orden - b.orden).map((v, idx) => (
-                <div key={v.id} className="flex items-center gap-3 p-3 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700">
-                  <div className="flex flex-col gap-0.5">
-                    <button disabled={idx === 0} onClick={() => moveVariante(v, -1)} className="text-gray-300 hover:text-gray-600 disabled:opacity-20">
-                      <ChevronUp className="w-3 h-3" />
-                    </button>
-                    <button disabled={idx === variantes.length - 1} onClick={() => moveVariante(v, 1)} className="text-gray-300 hover:text-gray-600 disabled:opacity-20">
-                      <ChevronDown className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm text-gray-900 dark:text-white truncate">{v.nombre}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-xs font-bold text-purple-600">${Number(v.precio).toLocaleString('es-CO')}</span>
-                      {v.sku && <span className="text-xs text-gray-400">SKU: {v.sku}</span>}
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${v.estado === 'activo' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{v.estado}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(v)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded">
-                      <Edit2 className="w-3 h-3" />
-                    </button>
-                    <button onClick={() => setConfirmDelete(v)} className="p-1.5 text-red-400 hover:bg-red-50 rounded" title="Eliminar variante">
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Mini form dentro del drawer */}
-        {formOpen && (
-          <div className="border-t border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-800/50">
-            <h4 className="font-semibold text-sm mb-3">{editV ? 'Editar variante' : 'Nueva variante'}</h4>
-            {error && <p className="text-xs text-red-500 mb-2">{error}</p>}
-            <div className="grid grid-cols-2 gap-2 mb-2">
-              <input
-                className="col-span-2 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                placeholder="Nombre *" value={form.nombre}
-                onChange={e => setForm(p => ({ ...p, nombre: e.target.value }))} />
-              <input
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                placeholder="Precio *" type="number" min={0} value={form.precio}
-                onChange={e => setForm(p => ({ ...p, precio: Number(e.target.value) }))} />
-              <input
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-                placeholder="SKU (opcional)" value={form.sku||''}
-                onChange={e => setForm(p => ({ ...p, sku: e.target.value }))} />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setFormOpen(false)} className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-100">Cancelar</button>
-              <button onClick={handleSave} disabled={saving}
-                className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">
-                {saving ? 'Guardando...' : 'Guardar'}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <ConfirmDialog
-        open={confirmDelete !== null}
-        title="Eliminar variante"
-        message={confirmDelete ? `¿Eliminar la variante "${confirmDelete.nombre}"?` : ''}
-        confirmText="Eliminar"
-        confirmColor="error"
-        onConfirm={() => { if (confirmDelete) handleDelete(confirmDelete); }}
-        onClose={() => setConfirmDelete(null)}
-      />
-    </div>
-  );
-}
-
-// ============================================================================
 // COMPONENTE PRINCIPAL
 // ============================================================================
 export const ProductosTab: React.FC = () => {
@@ -1687,13 +1513,11 @@ export const ProductosTab: React.FC = () => {
   const [movimientoTarget, setMovimientoTarget]         = useState<Producto | null>(null);
   const [disponibilidadTarget, setDisponibilidadTarget] = useState<Producto | null>(null);
   const [precioVentaTarget, setPrecioVentaTarget]       = useState<Producto | null>(null);
-  const [variantesTarget, setVariantesTarget]           = useState<Producto | null>(null);
   const [_deleting, setDeleting]                        = useState(false);
-  const showVariantes = useFeatureFlag('variantes_productos');
   const [disponibilidades, setDisponibilidades]         = useState<Map<number, { disponibilidad: number; unidad_produccion: string | null }>>(new Map());
 
   // Auto-colapsar sidebar cuando hay un modal abierto
-  const anyModalOpen = !!modalMode || !!movimientoTarget || !!disponibilidadTarget || !!precioVentaTarget || !!deleteTarget || !!variantesTarget;
+  const anyModalOpen = !!modalMode || !!movimientoTarget || !!disponibilidadTarget || !!precioVentaTarget || !!deleteTarget;
   useEffect(() => {
     if (anyModalOpen) setSidebarCollapsed(true);
   }, [anyModalOpen]);
@@ -1858,12 +1682,6 @@ export const ProductosTab: React.FC = () => {
               <button onClick={() => setPrecioVentaTarget(producto)}
                 className="p-2 text-violet-600 hover:bg-violet-50 rounded-lg transition-colors" title="Configurar precio de venta">
                 <Calculator className="w-4 h-4" />
-              </button>
-            )}
-            {showVariantes && (
-              <button onClick={() => setVariantesTarget(producto)}
-                className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Variantes / presentaciones">
-                <Layers className="w-4 h-4" />
               </button>
             )}
             <button onClick={() => setMovimientoTarget(producto)}
@@ -2131,13 +1949,6 @@ export const ProductosTab: React.FC = () => {
         onConfirm={handleDelete}
         onClose={() => setDeleteTarget(null)}
       />
-
-      {variantesTarget && (
-        <VariantesDrawer
-          producto={variantesTarget}
-          onClose={() => setVariantesTarget(null)}
-        />
-      )}
     </>
   );
 };
