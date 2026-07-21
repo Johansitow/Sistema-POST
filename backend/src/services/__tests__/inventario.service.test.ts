@@ -17,6 +17,13 @@ vi.mock('../../repositories/producto.repository', () => ({
   productoRepository: { findActivos: vi.fn() },
 }));
 
+vi.mock('../../repositories/configuracion-restaurante.repository', () => ({
+  configuracionRestauranteRepository: {
+    findByClave: vi.fn(),
+    upsert:      vi.fn(),
+  },
+}));
+
 vi.mock('../../repositories/lote.repository', () => ({
   loteRepository: {
     findProximosVencer:      vi.fn(),
@@ -69,6 +76,9 @@ import prisma from '../../config/database';
 
 const movRepo = movimientoRepository as ReturnType<typeof vi.fn> & typeof movimientoRepository;
 const prismaMock = prisma as unknown as { lote: { findMany: ReturnType<typeof vi.fn> } };
+
+import { configuracionRestauranteRepository } from '../../repositories/configuracion-restaurante.repository';
+const cfgRepo = configuracionRestauranteRepository as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 const mockProducto = { id: 1, nombre: 'Harina', stock_actual: 100, es_vendible: false };
 const mockMovimiento = {
@@ -541,5 +551,101 @@ describe('calcularRentabilidadLote', () => {
 
     await expect(inventarioService.calcularRentabilidadLote(1, 10))
       .rejects.toThrow('Lote');
+  });
+});
+
+// ── Reconteo programable ─────────────────────────────────────────────────────
+
+describe('reconteo programable', () => {
+  const DIA = 86_400_000;
+
+  describe('obtenerFrecuenciaReconteo', () => {
+    it('devuelve 7 días por defecto cuando no hay config', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce(null);
+      expect(await inventarioService.obtenerFrecuenciaReconteo(1)).toBe(7);
+    });
+
+    it('devuelve el valor configurado', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '3' });
+      expect(await inventarioService.obtenerFrecuenciaReconteo(1)).toBe(3);
+    });
+
+    it('acota el valor al rango [1, 90]', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '500' });
+      expect(await inventarioService.obtenerFrecuenciaReconteo(1)).toBe(90);
+    });
+  });
+
+  describe('configurarFrecuenciaReconteo', () => {
+    it('guarda la frecuencia válida', async () => {
+      cfgRepo.upsert.mockResolvedValueOnce({});
+      const r = await inventarioService.configurarFrecuenciaReconteo(1, 2);
+      expect(r).toBe(2);
+      expect(cfgRepo.upsert).toHaveBeenCalledWith(1, 'inventario.reconteo_frecuencia_dias', '2');
+    });
+
+    it('rechaza frecuencia fuera de rango', async () => {
+      await expect(inventarioService.configurarFrecuenciaReconteo(1, 0)).rejects.toThrow('frecuencia');
+      await expect(inventarioService.configurarFrecuenciaReconteo(1, 200)).rejects.toThrow('frecuencia');
+    });
+  });
+
+  describe('evaluarGateReconteo', () => {
+    it('permite reconteo si el lote nunca se ha recontado', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '7' });
+      const g = await inventarioService.evaluarGateReconteo(1, null);
+      expect(g.permitido).toBe(true);
+      expect(g.proximo_reconteo).toBeNull();
+    });
+
+    it('bloquea reconteo dentro de la ventana de N días', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '7' });
+      const hace2dias = new Date(Date.now() - 2 * DIA);
+      const g = await inventarioService.evaluarGateReconteo(1, hace2dias);
+      expect(g.permitido).toBe(false);
+      expect(g.proximo_reconteo).not.toBeNull();
+    });
+
+    it('permite reconteo una vez pasada la ventana', async () => {
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '7' });
+      const hace8dias = new Date(Date.now() - 8 * DIA);
+      const g = await inventarioService.evaluarGateReconteo(1, hace8dias);
+      expect(g.permitido).toBe(true);
+    });
+  });
+
+  describe('actualizarEstadoLote con es_reconteo', () => {
+    it('estampa fecha_ultimo_reconteo cuando pasa el gate', async () => {
+      loteRepo.findById.mockResolvedValueOnce({ id: 5, id_restaurante: 1, estado_lote: 'activo', fecha_cierre: null, fecha_ultimo_reconteo: null });
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '7' });
+      loteRepo.update.mockResolvedValueOnce({ id: 5 });
+
+      await inventarioService.actualizarEstadoLote(5, { estado_lote: 'activo', es_reconteo: true });
+
+      const arg = loteRepo.update.mock.calls[0][1];
+      expect(arg.fecha_ultimo_reconteo).toBeInstanceOf(Date);
+      expect(arg).not.toHaveProperty('es_reconteo');
+    });
+
+    it('bloquea el reconteo si aún no pasa la frecuencia', async () => {
+      const hace1dia = new Date(Date.now() - 1 * DIA);
+      loteRepo.findById.mockResolvedValueOnce({ id: 5, id_restaurante: 1, estado_lote: 'activo', fecha_cierre: null, fecha_ultimo_reconteo: hace1dia });
+      cfgRepo.findByClave.mockResolvedValueOnce({ valor: '7' });
+
+      await expect(inventarioService.actualizarEstadoLote(5, { estado_lote: 'activo', es_reconteo: true }))
+        .rejects.toThrow('Reconteo no disponible');
+      expect(loteRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('una actualización normal (sin es_reconteo) no toca el gate', async () => {
+      loteRepo.findById.mockResolvedValueOnce({ id: 5, id_restaurante: 1, estado_lote: 'activo', fecha_cierre: null, fecha_ultimo_reconteo: null });
+      loteRepo.update.mockResolvedValueOnce({ id: 5 });
+
+      await inventarioService.actualizarEstadoLote(5, { observaciones: 'nota' });
+
+      expect(cfgRepo.findByClave).not.toHaveBeenCalled();
+      const arg = loteRepo.update.mock.calls[0][1];
+      expect(arg).not.toHaveProperty('fecha_ultimo_reconteo');
+    });
   });
 });

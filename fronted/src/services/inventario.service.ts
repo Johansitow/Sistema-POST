@@ -90,9 +90,18 @@ export interface Lote {
   fecha_produccion: string;
   fecha_vencimiento?: string;
   fecha_cierre?: string | null;
+  fecha_ultimo_reconteo?: string | null;
   estado_lote: string;
   costo_produccion?: number;
   observaciones?: string;
+}
+
+/** Estado del gate de reconteo de un lote. */
+export interface ReconteoGate {
+  permitido: boolean;
+  frecuencia_dias: number;
+  proximo_reconteo: string | null;
+  ultimo_reconteo: string | null;
 }
 
 export interface VidaUtilPromedio {
@@ -241,6 +250,7 @@ class InventarioService {
     estado_lote?: 'activo' | 'vencido' | 'agotado' | 'en_produccion';
     fecha_vencimiento?: string;
     observaciones?: string;
+    es_reconteo?: boolean;
   }): Promise<Lote> {
     try {
       const response = await api.patch<{ success: boolean; data: Lote }>(`${this.basePath}/lotes/${id}`, data);
@@ -249,6 +259,24 @@ class InventarioService {
       console.error('Error al actualizar el lote:', error);
       throw this.handleError(error);
     }
+  }
+
+  /** Estado del gate de reconteo de un lote: si se puede recontar y cuándo será el próximo. */
+  async getReconteoGate(idLote: number): Promise<ReconteoGate> {
+    const response = await api.get<{ success: boolean; data: ReconteoGate }>(`${this.basePath}/lotes/${idLote}/reconteo-gate`);
+    return response.data.data;
+  }
+
+  /** Frecuencia de reconteo (días) configurada para la sede. */
+  async getFrecuenciaReconteo(): Promise<number> {
+    const response = await api.get<{ success: boolean; data: { dias: number } }>(`${this.basePath}/reconteo/frecuencia`);
+    return response.data.data.dias;
+  }
+
+  /** Define cada cuántos días se permite reconteo en la sede. */
+  async setFrecuenciaReconteo(dias: number): Promise<number> {
+    const response = await api.put<{ success: boolean; data: { dias: number } }>(`${this.basePath}/reconteo/frecuencia`, { dias });
+    return response.data.data.dias;
   }
 
   /**

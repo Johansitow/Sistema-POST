@@ -10,7 +10,7 @@ import { Request, Response } from 'express';
 import { TipoMovimiento } from '@prisma/client';
 import { inventarioService } from '../services/inventario.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { registrarMovimientoSchema, actualizarEstadoLoteSchema } from '../dto/inventario.dto';
+import { registrarMovimientoSchema, actualizarEstadoLoteSchema, configurarFrecuenciaReconteoSchema } from '../dto/inventario.dto';
 import { commandBus } from '../application/commands/CommandBus';
 import { queryBus }   from '../application/queries/QueryBus';
 import { GetMovimientosQuery }        from '../application/queries/inventario/GetMovimientosQuery';
@@ -86,8 +86,30 @@ export const actualizarEstadoLote = asyncHandler(async (req: Request, res: Respo
     estado_lote:       data.estado_lote,
     observaciones:     data.observaciones,
     fecha_vencimiento: data.fecha_vencimiento ? new Date(data.fecha_vencimiento) : undefined,
+    es_reconteo:       data.es_reconteo,
   });
   res.json({ success: true, data: lote, message: 'Lote actualizado correctamente' });
+});
+
+// ── Reconteo programable ────────────────────────────────────────────────────
+
+export const getFrecuenciaReconteo = asyncHandler(async (req: Request, res: Response) => {
+  const dias = await inventarioService.obtenerFrecuenciaReconteo(req.restauranteId!);
+  res.json({ success: true, data: { dias } });
+});
+
+export const configurarFrecuenciaReconteo = asyncHandler(async (req: Request, res: Response) => {
+  const { dias } = configurarFrecuenciaReconteoSchema.parse(req.body);
+  const guardado = await inventarioService.configurarFrecuenciaReconteo(req.restauranteId!, dias);
+  res.json({ success: true, data: { dias: guardado }, message: 'Frecuencia de reconteo actualizada' });
+});
+
+// Estado del gate de reconteo de un lote (permitido + próxima fecha).
+export const getGateReconteoLote = asyncHandler(async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const lote = await inventarioService.lotePorId(id);
+  const gate = await inventarioService.evaluarGateReconteo(lote.id_restaurante, lote.fecha_ultimo_reconteo);
+  res.json({ success: true, data: gate });
 });
 
 export const getLotesActivosPorProducto = asyncHandler(async (req: Request, res: Response) => {

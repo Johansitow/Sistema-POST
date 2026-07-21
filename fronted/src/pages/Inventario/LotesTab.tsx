@@ -16,6 +16,7 @@ import { LoadingScreen, EmptyState, ErrorAlert } from '../../components/common';
 import LoteRentabilidad from '../../components/lotes/LoteRentabilidad';
 import { Z_INDEX } from '../../lib/zIndex';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { toast } from '../../store/uiStore';
 import { inventarioService, type VidaUtilPromedio } from '../../services/inventario.service';
 import { productosService, type Producto } from '../../services/productos.service';
 import { proveedorService, type Proveedor } from '../../services/servicios-gestion';
@@ -43,6 +44,8 @@ export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
   const [vidaUtilPromedio, setVidaUtilPromedio] = useState<VidaUtilPromedio[]>([]);
   const [showNuevoLote, setShowNuevoLote]       = useState(false);
   const [reconteoLote, setReconteoLote]         = useState<Lote | null>(null);
+  const [frecuenciaReconteo, setFrecuenciaReconteo] = useState<number>(7);
+  const [savingFrecuencia, setSavingFrecuencia] = useState(false);
   const [mermaLote, setMermaLote]               = useState<Lote | null>(null);
   // Devolución: acción rápida por lote (lote preseleccionado)
   const [devolucionLote, setDevolucionLote]     = useState<Lote | null>(null);
@@ -92,6 +95,36 @@ export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
 
   useEffect(() => { loadVidaUtil(); }, [idRestaurante, loadVidaUtil]);
 
+  // Frecuencia de reconteo configurada para la sede (default 7 días).
+  useEffect(() => {
+    inventarioService.getFrecuenciaReconteo()
+      .then(setFrecuenciaReconteo)
+      .catch(() => setFrecuenciaReconteo(7));
+  }, [idRestaurante]);
+
+  const cambiarFrecuencia = async (dias: number) => {
+    setSavingFrecuencia(true);
+    try {
+      const guardado = await inventarioService.setFrecuenciaReconteo(dias);
+      setFrecuenciaReconteo(guardado);
+      toast.success(`Reconteo permitido cada ${guardado} día(s)`);
+    } catch (e: any) {
+      toast.error(e.message || 'No se pudo actualizar la frecuencia');
+    } finally {
+      setSavingFrecuencia(false);
+    }
+  };
+
+  /**
+   * Gate de reconteo por lote calculado en el cliente con la frecuencia de la
+   * sede y el último reconteo del lote — evita una llamada por lote.
+   */
+  const reconteoGate = (lote: Lote): { permitido: boolean; proximo: Date | null } => {
+    if (!lote.fecha_ultimo_reconteo) return { permitido: true, proximo: null };
+    const proximo = new Date(new Date(lote.fecha_ultimo_reconteo).getTime() + frecuenciaReconteo * 86_400_000);
+    return { permitido: Date.now() >= proximo.getTime(), proximo };
+  };
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     loadLotes();
@@ -136,6 +169,20 @@ export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
               : 'Control de fechas de caducidad y reconteo de productos almacenados'}
           </p>
           <div className="flex items-center gap-2">
+            {!soloProduccion && (
+              <label className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-600 bg-white"
+                title="Cada cuántos días se permite hacer reconteo de un lote">
+                <ClipboardCheck className="w-4 h-4 text-amber-500" />
+                <span className="hidden sm:inline">Reconteo cada</span>
+                <select
+                  value={frecuenciaReconteo}
+                  disabled={savingFrecuencia}
+                  onChange={e => cambiarFrecuencia(Number(e.target.value))}
+                  className="bg-transparent font-semibold text-slate-700 outline-none cursor-pointer disabled:opacity-50">
+                  {[2, 3, 7, 15, 30].map(d => <option key={d} value={d}>{d} días</option>)}
+                </select>
+              </label>
+            )}
             <button onClick={() => setShowNuevoLote(true)}
               className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl text-sm font-semibold hover:from-indigo-700 hover:to-blue-700 transition-all shadow-sm">
               <Plus className="w-4 h-4" /> {soloProduccion ? 'Nueva Producción' : 'Nuevo Lote'}
@@ -369,15 +416,25 @@ export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
                         {/* Acciones */}
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-1.5 flex-wrap">
-                            {lote.estado_lote !== 'agotado' && (
-                              <button
-                                onClick={() => setReconteoLote(lote)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 text-amber-700 text-xs font-medium hover:bg-amber-100 transition-colors"
-                                title="Registrar reconteo"
-                              >
-                                <ClipboardCheck className="w-3.5 h-3.5" /> Reconteo
-                              </button>
-                            )}
+                            {lote.estado_lote !== 'agotado' && (() => {
+                              const gate = reconteoGate(lote);
+                              return (
+                                <button
+                                  onClick={() => setReconteoLote(lote)}
+                                  disabled={!gate.permitido}
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                                    gate.permitido
+                                      ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                      : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                  }`}
+                                  title={gate.permitido
+                                    ? 'Registrar reconteo'
+                                    : `Próximo reconteo: ${gate.proximo?.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}`}
+                                >
+                                  <ClipboardCheck className="w-3.5 h-3.5" /> Reconteo
+                                </button>
+                              );
+                            })()}
                             {(lote.estado_lote === 'activo' || lote.estado_lote === 'en_produccion') && (
                               <button
                                 onClick={() => setMermaLote(lote)}
@@ -807,6 +864,7 @@ const ReconteoModal: React.FC<ReconteoModalProps> = ({ lote, onClose, onSaved })
         estado_lote: estado,
         ...(fechaVenc && { fecha_vencimiento: new Date(fechaVenc).toISOString() }),
         ...(observaciones && { observaciones }),
+        es_reconteo: true,   // sujeto al gate de frecuencia; estampa fecha_ultimo_reconteo
       });
       onSaved();
     } catch (e: any) {

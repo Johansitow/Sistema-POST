@@ -784,6 +784,7 @@ model Lote {
   fecha_vencimiento       DateTime?
   vida_util_dias          Int?
   fecha_cierre            DateTime?  // duración real observada: se estampa al pasar a agotado/vencido
+  fecha_ultimo_reconteo   DateTime?  // último reconteo registrado — controla la frecuencia permitida
   estado_lote             EstadoLote @default(activo)
   costo_produccion        Decimal?   @db.Decimal(12, 2)
   observaciones           String?    @db.Text

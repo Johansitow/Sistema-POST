@@ -32,8 +32,15 @@ export const actualizarEstadoLoteSchema = z.object({
   estado_lote:       z.enum(['activo', 'vencido', 'agotado', 'en_produccion']).optional(),
   fecha_vencimiento: z.string().datetime().optional(),
   observaciones:     z.string().max(500).optional(),
+  // Marca la actualización como reconteo (revisión física periódica).
+  es_reconteo:       z.boolean().optional(),
 });
 
 export type ActualizarEstadoLoteDTO = z.infer<typeof actualizarEstadoLoteSchema>;
+
+export const configurarFrecuenciaReconteoSchema = z.object({
+  dias: z.number().int().min(1).max(90),
+});
+export type ConfigurarFrecuenciaReconteoDTO = z.infer<typeof configurarFrecuenciaReconteoSchema>;
 
 export type RegistrarMovimientoDTO = z.infer<typeof registrarMovimientoSchema>;
