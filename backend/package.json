@@ -23,7 +23,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "seed:nomina": "tsx prisma/seed-nomina.ts"
+    "seed:nomina": "tsx prisma/seed-nomina.ts",
+    "seed:nomina-demo": "tsx prisma/seed-nomina-demo.ts"
   },
   "keywords": [
     "pos",
