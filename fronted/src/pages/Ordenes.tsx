@@ -20,9 +20,11 @@ import {
   Trash2, PlusCircle, User, UserPlus, Printer,
 } from 'lucide-react';
 import { printComanda, printFactura, PrintOrden, type PrintTemplateConfig } from '../utils/print';
+import { cargarConfigImpresion } from '../lib/plantillas/negocio';
 import ModalHeader from '../components/common/ModalHeader';
 import { Z_INDEX } from '../lib/zIndex';
 import { plantillasService } from '../services/plantillas.service';
+import { facturaService } from '../services/servicios-gestion';
 import { ordenesService, Orden, OrdenCreateDTO, OrdenCreateV2DTO, OrdenSede, EstadoOrdenGlobal, PagoInput } from '../services/ordenes.service';
 import { productosService, Producto } from '../services/productos.service';
 import {
@@ -42,45 +44,37 @@ import { useRestauranteActivo, useRestauranteStore } from '../store/restauranteS
 import { useFeatureFlag }                    from '../store/featureFlagStore';
 import api                                   from '../services/api';
 import { variantesService, type ProductoVariante } from '../services/variantes.service';
+import { clasesEstado, definirEstado }        from '../theme/estados';
 
 // ============================================================================
 // HELPERS
 // ============================================================================
 
-/** Genera config visual por código de estado */
+// Los tres mapas de estado que vivían aquí (getEstadoConfig,
+// getEstadoGlobalConfig y getEstadoSedeConfig) definían el MISMO vocabulario
+// con tres formatos distintos, y otros cuatro archivos tenían copias propias.
+// Ahora todos leen theme/estados.ts. Ver el comentario de cabecera de ese
+// archivo para el inventario completo de lo que se consolidó.
+
+/** Config visual por código de estado (insignia + punto de color). */
 const getEstadoConfig = (codigo?: string) => {
-  const map: Record<string, { cls: string; dot: string }> = {
-    PENDIENTE:      { cls: 'bg-amber-100 text-amber-700 border border-amber-200',      dot: 'bg-amber-400'   },
-    EN_PREPARACION: { cls: 'bg-blue-100 text-blue-700 border border-blue-200',         dot: 'bg-blue-400'    },
-    LISTA:          { cls: 'bg-emerald-100 text-emerald-700 border border-emerald-200', dot: 'bg-emerald-400' },
-    ENTREGADA:      { cls: 'bg-slate-100 text-slate-600 border border-slate-200',      dot: 'bg-slate-400'   },
-    CANCELADA:      { cls: 'bg-red-100 text-red-700 border border-red-200',            dot: 'bg-red-400'     },
-  };
-  return map[codigo?.toUpperCase() || ''] || { cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' };
+  const { insignia, punto } = clasesEstado(codigo);
+  return { cls: insignia, dot: punto };
 };
 
-/** Config visual para estado_global (nueva arquitectura) */
+/** Config visual para estado_global (nueva arquitectura). */
 const getEstadoGlobalConfig = (eg?: EstadoOrdenGlobal) => {
-  const map: Record<string, { cls: string; label: string }> = {
-    RECIBIDA:   { cls: 'bg-amber-100 text-amber-700',        label: 'Recibida'       },
-    EN_PROCESO: { cls: 'bg-blue-100 text-blue-700',          label: 'En proceso'     },
-    LISTA:      { cls: 'bg-emerald-100 text-emerald-700',    label: 'Lista p/ cobro' },
-    ENTREGADA:  { cls: 'bg-slate-100 text-slate-600',        label: 'Entregada'      },
-    CANCELADA:  { cls: 'bg-red-100 text-red-700',            label: 'Cancelada'      },
-  };
-  return map[eg || ''] || { cls: 'bg-slate-100 text-slate-500', label: eg || '—' };
+  const { insignia } = clasesEstado(eg);
+  // "Lista p/ cobro" es específico de esta pantalla: aquí el cajero necesita
+  // saber que la orden espera pago, no solo que la cocina terminó.
+  const label = eg === 'LISTA' ? 'Lista p/ cobro' : definirEstado(eg).label;
+  return { cls: insignia, label };
 };
 
-const getEstadoSedeConfig = (est?: string) => {
-  const map: Record<string, { dot: string; label: string }> = {
-    PENDIENTE:      { dot: 'bg-amber-400',   label: 'Pendiente'       },
-    EN_PREPARACION: { dot: 'bg-blue-400',    label: 'En preparación'  },
-    LISTA:          { dot: 'bg-emerald-400', label: 'Lista'           },
-    ENTREGADA:      { dot: 'bg-slate-400',   label: 'Entregada'       },
-    CANCELADA:      { dot: 'bg-red-400',     label: 'Cancelada'       },
-  };
-  return map[est || ''] || { dot: 'bg-slate-300', label: est || '—' };
-};
+const getEstadoSedeConfig = (est?: string) => ({
+  dot:   clasesEstado(est).punto,
+  label: definirEstado(est).label,
+});
 
 const METODO_ICONOS: Record<string, React.ReactNode> = {
   EFECTIVO:  <Banknote   className="w-4 h-4" />,
@@ -409,8 +403,11 @@ const DetalleModal: React.FC<{
 
   const handlePrintComanda = async () => {
     const po   = buildPrintOrden();
-    const def  = await plantillasService.obtenerDefault('comanda').catch(() => null);
-    printComanda(po, toTmpl(def));
+    const [def, cfg] = await Promise.all([
+      plantillasService.obtenerDefault('comanda').catch(() => null),
+      cargarConfigImpresion(),
+    ]);
+    printComanda(po, toTmpl(def), cfg.copiasComanda);
   };
 
   const handlePrintFactura = async () => {
@@ -419,8 +416,15 @@ const DetalleModal: React.FC<{
       metodo: p.metodo_pago?.nombre ?? 'Pago',
       monto:  p.monto,
     }));
-    const def = await plantillasService.obtenerDefault('ticket').catch(() => null);
-    printFactura(po, pagos, { nombre: 'Cocina Oculta' }, undefined, toTmpl(def));
+    const [def, cfg, factura] = await Promise.all([
+      plantillasService.obtenerDefault('ticket').catch(() => null),
+      cargarConfigImpresion(),
+      facturaService.getByOrden(orden.id).catch(() => null),
+    ]);
+    // Consecutivo real solo si la orden ya está facturada; si no, es una PRE-CUENTA
+    // (sin número legal) para no fabricar un consecutivo.
+    const tmpl: PrintTemplateConfig = { ...(toTmpl(def) ?? {}), footerText: cfg.pieTicket };
+    printFactura(po, pagos, cfg.negocio, factura?.numero_factura, tmpl);
   };
 
   const cfg = getEstadoConfig(estadoActual?.codigo);

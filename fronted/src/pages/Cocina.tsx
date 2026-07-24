@@ -17,35 +17,40 @@ import { formatDateTime, formatCurrency } from '../utils';
 import { LoadingScreen } from '../components/common';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../store/uiStore';
+import { clasesEstado } from '../theme/estados';
 
 // ─── Helpers visuales ────────────────────────────────────────────────────────
 
+// Los colores salen de theme/estados.ts (mismo vocabulario que Órdenes y las
+// insignias de estado del resto de la app). Lo que se queda aquí es lo propio
+// del KDS: la etiqueta de columna, el texto del botón de avance y el ícono —
+// una cocina no habla de "Pendiente" sino de "Nuevas".
 const ESTADO_CFG = {
   PENDIENTE: {
     label:   'Nuevas',
-    dot:     'bg-amber-400',
-    card:    'border-amber-200 bg-amber-50',
-    header:  'bg-amber-100 text-amber-800',
-    btn:     'bg-amber-500 hover:bg-amber-600 text-white',
+    dot:     clasesEstado('PENDIENTE').punto,
+    card:    clasesEstado('PENDIENTE').tarjeta,
+    header:  'bg-alerta-100 text-alerta-800',
+    btn:     'bg-alerta-500 hover:bg-alerta-600 text-white',
     btnText: 'Iniciar preparación',
     icon:    <Clock className="w-5 h-5" />,
     priority: 0,
   },
   EN_PREPARACION: {
     label:   'En preparación',
-    dot:     'bg-blue-500',
-    card:    'border-blue-200 bg-blue-50',
-    header:  'bg-blue-100 text-blue-800',
-    btn:     'bg-blue-500 hover:bg-blue-600 text-white',
+    dot:     clasesEstado('EN_PREPARACION').punto,
+    card:    clasesEstado('EN_PREPARACION').tarjeta,
+    header:  'bg-info-100 text-info-800',
+    btn:     'bg-info-500 hover:bg-info-600 text-white',
     btnText: 'Marcar lista',
     icon:    <ChefHat className="w-5 h-5" />,
     priority: 1,
   },
   LISTA: {
     label:   'Listas para cobro',
-    dot:     'bg-emerald-500',
-    card:    'border-emerald-200 bg-emerald-50',
-    header:  'bg-emerald-100 text-emerald-800',
+    dot:     clasesEstado('LISTA').punto,
+    card:    clasesEstado('LISTA').tarjeta,
+    header:  'bg-exito-100 text-exito-800',
     btn:     null,
     btnText: '',
     icon:    <CheckCircle2 className="w-5 h-5" />,

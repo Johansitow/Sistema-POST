@@ -20,8 +20,9 @@
 
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { CircularProgress, Box } from '@mui/material';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { CircularProgress, Box, GlobalStyles } from '@mui/material';
+import { ThemeProvider } from '@mui/material/styles';
+import { construirTema, construirVariablesCSS } from './theme';
 import Layout from './components/layout/Layout';
 import { useAuthStore } from './store/useStore';
 import { useBrandingStore } from './store/brandingStore';
@@ -106,20 +107,34 @@ const AdminGuard: React.FC<{ children: React.ReactNode; permiso?: string }> = ({
 
 export default function App() {
   const colorPrimario = useBrandingStore(s => s.colorPrimario);
+  const nombreSistema = useBrandingStore(s => s.nombreSistema);
   const loadBranding  = useBrandingStore(s => s.loadBranding);
 
   // Carga la marca (nombre/color/logo) una sola vez, antes de que se monten
   // Login o Layout — ambos la necesitan y ninguno debe disparar el fetch dos veces.
   useEffect(() => { loadBranding(); }, [loadBranding]);
 
-  // Tema MUI centralizado: color_primario alimenta palette.primary en toda la app
-  // (botones, tabs, switches, etc.), en vez de los hex hardcodeados de antes.
-  const theme = useMemo(() => createTheme({
-    palette: { primary: { main: colorPrimario } },
-  }), [colorPrimario]);
+  // El nombre del tenant manda en la pestaña del navegador y en los marcadores.
+  // El <title> de index.html es solo el valor previo a que cargue la marca.
+  useEffect(() => {
+    if (nombreSistema) document.title = nombreSistema;
+  }, [nombreSistema]);
+
+  // Tema completo desde src/theme: color, tipografía, radios y overrides de
+  // componentes salen todos de los mismos tokens.
+  const theme = useMemo(() => construirTema(colorPrimario), [colorPrimario]);
+
+  // El otro extremo del puente: las mismas escalas publicadas como CSS
+  // variables en :root, que es de donde las lee tailwind.config.js.
+  //
+  // Sin esto, el color de marca del tenant solo llegaba a los componentes MUI
+  // (login y admin) y las pantallas operativas —Órdenes, Dashboard, Cocina,
+  // Inventario— se quedaban con el azul y el verde quemados a mano.
+  const variablesCSS = useMemo(() => construirVariablesCSS(colorPrimario), [colorPrimario]);
 
   return (
     <ThemeProvider theme={theme}>
+    <GlobalStyles styles={variablesCSS} />
     <ErrorBoundary>
       <BrowserRouter>
         <Routes>

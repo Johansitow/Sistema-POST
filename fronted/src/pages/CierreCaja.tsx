@@ -13,22 +13,26 @@ import {
   cierreCajaService, turnoCajaService, type CierreCaja, type TurnoCaja,
 } from '../services/servicios-operacion';
 import { useRestauranteActivo } from '../store/restauranteStore';
+import { colorEstado, definirEstado } from '../theme/estados';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const DIAS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
+// Los cuatro hex sueltos que había aquí (#f59e0b, #6366f1, #10b981, #ef4444)
+// vienen ahora de theme/estados.ts, dominio 'caja'. Lo propio de esta pantalla
+// es solo el ícono.
 const ESTADO_CFG: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  pendiente:      { label: 'Pendiente',      color: '#f59e0b', icon: <HourglassEmpty fontSize="small" /> },
-  en_proceso:     { label: 'En proceso',     color: '#6366f1', icon: <AccessTime fontSize="small" />    },
-  completado:     { label: 'Completado',     color: '#10b981', icon: <CheckCircle fontSize="small" />   },
-  con_diferencia: { label: 'Con diferencia', color: '#ef4444', icon: <Warning fontSize="small" />       },
+  pendiente:      { ...definirEstado('pendiente',      'caja'), color: colorEstado('pendiente',      'caja'), icon: <HourglassEmpty fontSize="small" /> },
+  en_proceso:     { ...definirEstado('en_proceso',     'caja'), color: colorEstado('en_proceso',     'caja'), icon: <AccessTime     fontSize="small" /> },
+  completado:     { ...definirEstado('completado',     'caja'), color: colorEstado('completado',     'caja'), icon: <CheckCircle    fontSize="small" /> },
+  con_diferencia: { ...definirEstado('con_diferencia', 'caja'), color: colorEstado('con_diferencia', 'caja'), icon: <Warning        fontSize="small" /> },
 };
 
 const fmt = (n: number) => `$${Math.round(n).toLocaleString('es-CO')}`;
 
 function EstadoChip({ estado }: { estado: string }) {
-  const cfg = ESTADO_CFG[estado] || { label: estado, color: '#9ca3af', icon: null };
+  const cfg = ESTADO_CFG[estado] || { label: estado, color: colorEstado(undefined, 'caja'), icon: null };
   return (
     <Chip
       icon={cfg.icon as any} label={cfg.label} size="small"

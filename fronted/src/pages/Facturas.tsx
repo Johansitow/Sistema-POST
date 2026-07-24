@@ -9,14 +9,19 @@ import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
 import { EmptyState, LoadingScreen } from '../components/common';
-import { printFactura } from '../utils/print';
+import { printFactura, type PrintTemplateConfig } from '../utils/print';
+import { cargarConfigImpresion } from '../lib/plantillas/negocio';
+import { plantillasService } from '../services/plantillas.service';
 import { Z_INDEX } from '../lib/zIndex';
 import { useEscapeKey } from '../hooks/useEscapeKey';
+import { clasesEstado, definirEstado } from '../theme/estados';
 
+// Color y etiqueta vienen de theme/estados.ts (dominio 'factura'); aquí solo
+// queda el ícono, que es lo propio de esta pantalla.
 const ESTADO_CFG: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
-  pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700 border border-amber-200',      icon: <Clock       className="w-3.5 h-3.5" /> },
-  pagada:    { label: 'Pagada',    cls: 'bg-emerald-100 text-emerald-700 border border-emerald-200', icon: <CheckCircle className="w-3.5 h-3.5" /> },
-  anulada:   { label: 'Anulada',   cls: 'bg-red-100 text-red-700 border border-red-200',             icon: <XCircle     className="w-3.5 h-3.5" /> },
+  pendiente: { ...definirEstado('pendiente', 'factura'), cls: clasesEstado('pendiente', 'factura').insignia, icon: <Clock       className="w-3.5 h-3.5" /> },
+  pagada:    { ...definirEstado('pagada',    'factura'), cls: clasesEstado('pagada',    'factura').insignia, icon: <CheckCircle className="w-3.5 h-3.5" /> },
+  anulada:   { ...definirEstado('anulada',   'factura'), cls: clasesEstado('anulada',   'factura').insignia, icon: <XCircle     className="w-3.5 h-3.5" /> },
 };
 
 // Resuelve las líneas de producto de una orden, sin importar si es legado (orden.detalles)
@@ -52,12 +57,24 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
 
   const items = resolverItemsFactura(ordenFull);
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const detalles = items;
     const pagos = (ordenFull?.pagos ?? []).map((p: any) => ({
       metodo: p.metodo_pago?.nombre ?? 'Pago',
       monto:  p.monto,
     }));
+    const [def, cfgImpr] = await Promise.all([
+      plantillasService.obtenerDefault('ticket').catch(() => null),
+      cargarConfigImpresion(),
+    ]);
+    const cfgPl = def?.plantilla as any;
+    const tmpl: PrintTemplateConfig = {
+      paperWidth: cfgPl?.config?.paperWidth,
+      fontSize:   cfgPl?.config?.fontSize,
+      showLogo:   cfgPl?.config?.showLogo,
+      sections:   cfgPl?.sections,
+      footerText: cfgImpr.pieTicket,
+    };
     printFactura(
       {
         numero_orden:      ordenFull?.numero_orden ?? factura.orden?.numero_orden ?? `#${factura.id_orden}`,
@@ -75,8 +92,9 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
         detalles,
       },
       pagos,
-      { nombre: 'Cocina Oculta' },
+      cfgImpr.negocio,
       factura.numero_factura,
+      tmpl,
     );
   };
 
