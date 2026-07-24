@@ -880,21 +880,37 @@ export default function Layout() {
 
       {/* Contenido principal — usa <Outlet /> para renderizar la página activa.
           El key por sede re-monta la página al cambiar de sucursal, garantizando
-          que todos sus datos se recarguen con el nuevo X-Restaurante-Id. */}
+          que todos sus datos se recarguen con el nuevo X-Restaurante-Id.
+
+          El fondo se pinta AQUÍ, una sola vez. Antes cada página traía su propio
+          `min-h-screen` con un gradiente de tinte distinto (teal en Clientes,
+          violeta en Facturas, índigo en Inventario, esmeralda en Órdenes…), así
+          que el fondo de la app cambiaba de color al navegar. Y como ese
+          `min-h-screen` (100vh) vivía dentro de este <main>, que ya suma el
+          Toolbar (64px) y el padding (48px), toda página producía scroll
+          vertical aunque estuviera vacía.
+
+          `minHeight: 100dvh` sobre el contenedor —y no sobre el hijo— da el
+          fondo a pantalla completa sin sumar altura al contenido. */}
       <Box
         component="main"
         key={restauranteActivo?.id ?? 'sin-sede'}
         sx={{
           flexGrow: 1,
-          p: 3,
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           transition: 'width 0.2s',
           minWidth: 0,
+          minHeight: '100dvh',
+          bgcolor: 'background.default',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         <Toolbar />
-        <AppBreadcrumbs />
-        <Outlet />
+        <Box sx={{ px: 3, pt: 2, pb: 3, flexGrow: 1, minWidth: 0 }}>
+          <AppBreadcrumbs />
+          <Outlet />
+        </Box>
       </Box>
 
       {/* Confirmación: cambiar de sede con una orden sin guardar */}

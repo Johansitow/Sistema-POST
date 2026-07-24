@@ -468,31 +468,29 @@ export const ListaCompras: React.FC = () => {
   if (loading && listas.length === 0) return <LoadingScreen message="Cargando listas de compras..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100">
+    <div className="space-y-6">
 
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Lista de Compras</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Gestión automática de compras por stock bajo</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowNueva(true)}
-              className="flex items-center gap-2 px-5 py-2.5 border border-indigo-200 text-indigo-700 bg-white rounded-xl font-semibold hover:bg-indigo-50 transition-all text-sm">
-              <PencilLine className="w-4 h-4" />
-              Nueva lista
-            </button>
-            <button onClick={handleGenerar} disabled={generating}
-              className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-violet-700 transition-all shadow-lg text-sm disabled:opacity-60">
-              {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
-              {generating ? 'Generando...' : 'Generar automática'}
-            </button>
-          </div>
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-neutro-800">Lista de Compras</h1>
+          <p className="text-neutro-500 text-sm mt-0.5">Gestión automática de compras por stock bajo</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowNueva(true)}
+            className="flex items-center gap-2 px-5 min-h-toque border border-neutro-200 text-neutro-700 bg-white rounded-xl font-semibold hover:bg-neutro-50 transition-colors text-sm">
+            <PencilLine className="w-4 h-4" />
+            Nueva lista
+          </button>
+          <button onClick={handleGenerar} disabled={generating}
+            className="flex items-center gap-2 px-5 min-h-toque bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm text-sm disabled:opacity-60">
+            {generating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+            {generating ? 'Generando...' : 'Generar automática'}
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <div className="space-y-5">
 
         {/* Banner de resultado de generación */}
         {genMsg && (

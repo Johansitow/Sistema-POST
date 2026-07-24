@@ -1706,23 +1706,25 @@ export const Ordenes: React.FC = () => {
   if (loading && ordenes.length === 0) return <LoadingScreen message="Cargando órdenes..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-emerald-50/20 to-slate-100">
+    <div className="space-y-6">
 
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Órdenes</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Gestión de pedidos locales y domicilios</p>
-          </div>
-          <button onClick={abrirModal}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl font-semibold hover:from-emerald-700 hover:to-teal-700 transition-all shadow-lg text-sm">
-            <Plus className="w-4 h-4" /> Nueva Orden
-          </button>
+      {/* Encabezado de la página.
+          Antes esto era una franja blanca a todo el ancho: una tercera barra
+          apilada bajo el AppBar y los breadcrumbs, repitiendo el título del
+          módulo que ya estaba arriba. El fondo y el ancho los pone ahora el
+          <main> del Layout. */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-neutro-800">Órdenes</h1>
+          <p className="text-neutro-500 text-sm mt-0.5">Gestión de pedidos locales y domicilios</p>
         </div>
+        <button onClick={abrirModal}
+          className="flex items-center gap-2 px-5 min-h-toque bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm text-sm">
+          <Plus className="w-4 h-4" /> Nueva Orden
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="space-y-6">
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

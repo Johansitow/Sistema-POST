@@ -107,25 +107,27 @@ export const Auditoria: React.FC = () => {
   if (loading && registros.length === 0) return <LoadingScreen message="Cargando auditoría..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-100 to-slate-200">
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-slate-700 to-slate-800 rounded-xl flex items-center justify-center">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800">Auditoría</h1>
-              <p className="text-slate-500 text-sm">Historial de acciones del sistema</p>
-            </div>
+    <div className="space-y-6">
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 bg-neutro-800 rounded-xl flex items-center justify-center">
+            <Shield className="w-5 h-5 text-white" />
           </div>
-          <button onClick={loadData} className="p-2.5 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-colors">
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-neutro-800">Auditoría</h1>
+            <p className="text-neutro-500 text-sm">Historial de acciones del sistema</p>
+          </div>
         </div>
+        <button
+          onClick={loadData}
+          aria-label="Recargar registros de auditoría"
+          className="p-2.5 min-h-toque min-w-toque border border-neutro-200 rounded-xl text-neutro-500 hover:bg-neutro-50 transition-colors">
+          <RefreshCw className="w-4 h-4" />
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <div className="space-y-5">
 
         {/* Filtros */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-3">

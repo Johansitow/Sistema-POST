@@ -11,7 +11,8 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, ChefHat, CheckCircle2, RefreshCw, Package, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Clock, ChefHat, CheckCircle2, RefreshCw, Package, ArrowRight, ArrowLeft } from 'lucide-react';
 import { ordenesService, type OrdenSede } from '../services/ordenes.service';
 import { formatDateTime, formatCurrency } from '../utils';
 import { LoadingScreen } from '../components/common';
@@ -221,33 +222,41 @@ export const Cocina: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
 
-      {/* Header */}
+      {/* Header. La pantalla ya no vive dentro del Layout, así que este es el
+          único encabezado y tiene que traer la salida al sistema. */}
       <div className="bg-slate-800 border-b border-slate-700 px-6 py-4">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-orange-500 p-2 rounded-xl">
+            <div className="bg-brand-600 p-2 rounded-xl">
               <ChefHat className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-bold">Pantalla de Cocina</h1>
-              <p className="text-slate-400 text-xs">
+              <p className="text-slate-400 text-sm">
                 {totalActivas > 0
                   ? `${totalActivas} sede${totalActivas !== 1 ? 's' : ''} en preparación`
                   : 'Sin pedidos activos'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-slate-400 text-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400 text-sm hidden md:inline">
               Actualizado {formatDateTime(lastUpdate.toISOString())}
             </span>
             <button
               onClick={cargar}
-              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors"
+              aria-label="Recargar pedidos"
+              className="p-2 min-h-toque min-w-toque flex items-center justify-center bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors"
               title="Recargar"
             >
-              <RefreshCw className="w-4 h-4 text-slate-300" />
+              <RefreshCw className="w-5 h-5 text-slate-300" />
             </button>
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2 px-4 min-h-toque bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors text-sm font-semibold text-slate-200"
+            >
+              <ArrowLeft className="w-4 h-4" /> Salir
+            </Link>
           </div>
         </div>
       </div>

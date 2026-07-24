@@ -36,18 +36,22 @@ import { OnboardingGuard }     from './components/common/OnboardingGuard';
 import { Login }        from './pages/Login';
 import { Onboarding }   from './pages/Onboarding';
 import { Dashboard }    from './pages/Dashboard';
-import { Inventario }   from './pages/Inventario';
-import { Ordenes }      from './pages/Ordenes';
-import { Reportes }     from './pages/Reportes';
 import { Clientes }     from './pages/Clientes';
 import { Proveedores }  from './pages/Proveedores';
 import { Facturas }     from './pages/Facturas';
-import { Recetas }      from './pages/Recetas';
 import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
 import { Perfil }       from './pages/Perfil';
 import { VerificarDocumento } from './pages/VerificarDocumento';
+
+// Las cuatro páginas operativas más pesadas también van en lazy. Sumaban ~6.000
+// líneas en el bundle inicial (ProductosTab 1.954, Ordenes 1.870, Recetas 1.324,
+// Reportes 840) y no todos los roles las abren: un cajero nunca entra a Recetas.
+const Inventario = lazy(() => import('./pages/Inventario').then(m => ({ default: m.Inventario })));
+const Ordenes    = lazy(() => import('./pages/Ordenes').then(m    => ({ default: m.Ordenes    })));
+const Reportes   = lazy(() => import('./pages/Reportes').then(m   => ({ default: m.Reportes   })));
+const Recetas    = lazy(() => import('./pages/Recetas').then(m    => ({ default: m.Recetas    })));
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
 
@@ -154,6 +158,14 @@ export default function App() {
           {/* el <Outlet /> al cambiar de ruta. El sidebar nunca se remonta.  */}
 
           <Route element={<PrivateGuard />}>
+
+            {/* KDS de cocina — protegido pero SIN Layout, a propósito.
+                Es una pantalla montada en pared que se mira a 2-3 metros: el
+                sidebar de 248px no lo usa nadie en la cocina, y el AppBar claro
+                y los breadcrumbs encima de una pantalla oscura solo encandilan.
+                Va a pantalla completa, con su propia salida. */}
+            <Route path="/cocina" element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
+
             <Route element={<Layout />}>
 
               {/*
@@ -189,7 +201,6 @@ export default function App() {
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
               {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
               <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
-              <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}
               {/* Esto mantiene el mismo Layout pero añade la verificación de permisos */}

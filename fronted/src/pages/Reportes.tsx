@@ -223,34 +223,30 @@ export const Reportes: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-violet-50/20 to-slate-100">
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800">Reportes</h1>
-              <p className="text-slate-500 text-sm mt-0.5">Análisis y estadísticas del negocio</p>
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => { loadData(); loadExtraData(); if (scope === 'grupo') loadConsolidado(); if (scope === 'super') loadSuperConsolidado(); }}
-                className="flex items-center gap-2 px-4 py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors">
-                <RefreshCw className={`w-4 h-4 ${loading || loadingExtra ? 'animate-spin' : ''}`} />
-                Actualizar
-              </button>
-              <button
-                onClick={handleExportar}
-                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 transition-all shadow-lg text-sm">
-                <Download className="w-4 h-4" />
-                Exportar
-              </button>
-            </div>
-          </div>
+    <div className="space-y-6">
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-neutro-800">Reportes</h1>
+          <p className="text-neutro-500 text-sm mt-0.5">Análisis y estadísticas del negocio</p>
+        </div>
+        <div className="flex gap-3">
+          <button
+            onClick={() => { loadData(); loadExtraData(); if (scope === 'grupo') loadConsolidado(); if (scope === 'super') loadSuperConsolidado(); }}
+            className="flex items-center gap-2 px-4 min-h-toque border border-neutro-200 rounded-xl text-sm font-semibold text-neutro-600 hover:bg-neutro-50 transition-colors">
+            <RefreshCw className={`w-4 h-4 ${loading || loadingExtra ? 'animate-spin' : ''}`} />
+            Actualizar
+          </button>
+          <button
+            onClick={handleExportar}
+            className="flex items-center gap-2 px-5 min-h-toque bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm text-sm">
+            <Download className="w-4 h-4" />
+            Exportar
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="space-y-6">
 
         {/* Selector de scope */}
         {puedeVerGrupo && (

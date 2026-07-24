@@ -537,25 +537,23 @@ export const Clientes: React.FC = () => {
   if (loading && clientes.length === 0) return <LoadingScreen message="Cargando clientes..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-teal-50/20 to-slate-100">
+    <div className="space-y-6">
 
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-800">Clientes</h1>
-            <p className="text-slate-500 text-sm mt-0.5">Gestión de clientes y fidelización</p>
-          </div>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-xl font-semibold text-sm shadow-lg hover:from-teal-700 hover:to-emerald-700 transition-all hover:-translate-y-0.5"
-          >
-            <UserPlus className="w-4 h-4" /> Nuevo cliente
-          </button>
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-neutro-800">Clientes</h1>
+          <p className="text-neutro-500 text-sm mt-0.5">Gestión de clientes y fidelización</p>
         </div>
+        <button
+          onClick={openCreate}
+          className="flex items-center gap-2 px-5 min-h-toque bg-brand-600 text-white rounded-xl font-semibold text-sm shadow-sm hover:bg-brand-700 transition-colors"
+        >
+          <UserPlus className="w-4 h-4" /> Nuevo cliente
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <div className="space-y-5">
 
         {/* Stats cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

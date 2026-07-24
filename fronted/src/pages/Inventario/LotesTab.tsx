@@ -160,42 +160,44 @@ export const LotesTab: React.FC<LotesTabProps> = ({ soloProduccion }) => {
 
   return (
     <>
-      {/* Sub-header: subtítulo + acción principal de esta pestaña */}
-      <div className="bg-white border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <p className="text-slate-500 text-sm">
-            {soloProduccion
-              ? 'Registra qué elaboraste internamente (con receta), su caducidad y su merma esperada'
-              : 'Control de fechas de caducidad y reconteo de productos almacenados'}
-          </p>
-          <div className="flex items-center gap-2">
-            {!soloProduccion && (
-              <label className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-600 bg-white"
-                title="Cada cuántos días se permite hacer reconteo de un lote">
-                <ClipboardCheck className="w-4 h-4 text-amber-500" />
-                <span className="hidden sm:inline">Reconteo cada</span>
-                <select
-                  value={frecuenciaReconteo}
-                  disabled={savingFrecuencia}
-                  onChange={e => cambiarFrecuencia(Number(e.target.value))}
-                  className="bg-transparent font-semibold text-slate-700 outline-none cursor-pointer disabled:opacity-50">
-                  {[2, 3, 7, 15, 30].map(d => <option key={d} value={d}>{d} días</option>)}
-                </select>
-              </label>
-            )}
-            <button onClick={() => setShowNuevoLote(true)}
-              className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white rounded-xl text-sm font-semibold hover:from-indigo-700 hover:to-blue-700 transition-all shadow-sm">
-              <Plus className="w-4 h-4" /> {soloProduccion ? 'Nueva Producción' : 'Nuevo Lote'}
-            </button>
-            <button onClick={refrescarTodo}
-              className="p-2.5 border border-slate-200 rounded-xl text-slate-500 hover:bg-slate-50 transition-colors" title="Actualizar">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            </button>
-          </div>
+      {/* Subtítulo + acciones de esta pestaña. Antes era una franja blanca a
+          todo el ancho: la CUARTA barra apilada, tras el AppBar, los
+          breadcrumbs y el encabezado del módulo. */}
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-neutro-500 text-sm">
+          {soloProduccion
+            ? 'Registra qué elaboraste internamente (con receta), su caducidad y su merma esperada'
+            : 'Control de fechas de caducidad y reconteo de productos almacenados'}
+        </p>
+        <div className="flex items-center gap-2">
+          {!soloProduccion && (
+            <label className="flex items-center gap-2 px-3 min-h-toque border border-neutro-200 rounded-xl text-sm text-neutro-600 bg-white"
+              title="Cada cuántos días se permite hacer reconteo de un lote">
+              <ClipboardCheck className="w-4 h-4 text-alerta-500" />
+              <span className="hidden sm:inline">Reconteo cada</span>
+              <select
+                value={frecuenciaReconteo}
+                disabled={savingFrecuencia}
+                aria-label="Frecuencia de reconteo en días"
+                onChange={e => cambiarFrecuencia(Number(e.target.value))}
+                className="bg-transparent font-semibold text-neutro-700 outline-none cursor-pointer disabled:opacity-50">
+                {[2, 3, 7, 15, 30].map(d => <option key={d} value={d}>{d} días</option>)}
+              </select>
+            </label>
+          )}
+          <button onClick={() => setShowNuevoLote(true)}
+            className="flex items-center gap-2 px-4 min-h-toque bg-brand-600 text-white rounded-xl text-sm font-semibold hover:bg-brand-700 transition-colors shadow-sm">
+            <Plus className="w-4 h-4" /> {soloProduccion ? 'Nueva Producción' : 'Nuevo Lote'}
+          </button>
+          <button onClick={refrescarTodo}
+            aria-label="Actualizar lotes"
+            className="p-2.5 min-h-toque min-w-toque border border-neutro-200 rounded-xl text-neutro-500 hover:bg-neutro-50 transition-colors" title="Actualizar">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="space-y-6">
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

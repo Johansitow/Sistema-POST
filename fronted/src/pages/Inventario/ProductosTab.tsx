@@ -1756,19 +1756,17 @@ export const ProductosTab: React.FC = () => {
 
   return (
     <>
-      {/* Sub-header: subtítulo + acción principal de esta pestaña */}
-      <div className="bg-white border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <p className="text-slate-500 text-sm">Gestión de productos y control de stock</p>
-          <button
-            onClick={() => { setSelectedProducto(null); setModalMode('create'); }}
-            className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg text-sm">
-            <Plus className="w-4 h-4" /> Nuevo Producto
-          </button>
-        </div>
+      {/* Subtítulo + acción de esta pestaña (ver nota en LotesTab). */}
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-neutro-500 text-sm">Gestión de productos y control de stock</p>
+        <button
+          onClick={() => { setSelectedProducto(null); setModalMode('create'); }}
+          className="flex items-center gap-2 px-5 min-h-toque bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm text-sm">
+          <Plus className="w-4 h-4" /> Nuevo Producto
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="space-y-6">
 
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

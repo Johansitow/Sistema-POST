@@ -214,15 +214,14 @@ export const Facturas: React.FC = () => {
   if (loading && facturas.length === 0) return <LoadingScreen message="Cargando facturas..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-violet-50/20 to-slate-100">
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <h1 className="text-2xl font-bold text-slate-800">Facturas</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Historial de facturas generadas automáticamente</p>
-        </div>
+    <div className="space-y-6">
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div>
+        <h1 className="text-2xl font-bold text-neutro-800">Facturas</h1>
+        <p className="text-neutro-500 text-sm mt-0.5">Historial de facturas generadas automáticamente</p>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <div className="space-y-5">
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
