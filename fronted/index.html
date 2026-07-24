@@ -1,10 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>fronted</title>
+
+    <!-- Identidad del producto. `nombre_sistema` de Apariencia sobrescribe este
+         título en caliente (ver brandingStore); esto es lo que se ve mientras
+         carga la marca del tenant. -->
+    <title>POS Restaurante</title>
+    <meta name="description" content="Sistema de punto de venta para restaurantes: órdenes, inventario, cocina, facturación y nómina." />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <meta name="theme-color" content="#e53935" />
+
+    <!-- Inter: fuente única para MUI y Tailwind (ver src/theme/tokens.ts).
+         Sin esto MUI cae a Roboto y Tailwind a system-ui — dos tipografías
+         distintas en la misma pantalla. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   </head>
   <body>
     <div id="root"></div>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="POS">
+  <rect width="64" height="64" rx="14" fill="#e53935"/>
+  <!-- Ticket: cuerpo con borde inferior dentado, legible a 16px -->
+  <path fill="#fff" d="M18 13h28a2 2 0 0 1 2 2v34.2a1.4 1.4 0 0 1-2.1 1.2L41 48l-4.9 2.6a1.4 1.4 0 0 1-1.3 0L30 48l-4.9 2.6a1.4 1.4 0 0 1-1.3 0L19 48l-2.9 1.5A1.4 1.4 0 0 1 14 48.2V15a2 2 0 0 1 2-2z" opacity=".18"/>
+  <path fill="#fff" d="M17 12h30a2 2 0 0 1 2 2v34.4a1.5 1.5 0 0 1-2.2 1.3L42 47.6l-4.8 2.6a1.5 1.5 0 0 1-1.4 0L31 47.6l-4.8 2.6a1.5 1.5 0 0 1-1.4 0L20 47.6l-4.8 2.1A1.5 1.5 0 0 1 15 48.4V14a2 2 0 0 1 2-2z"/>
+  <g fill="#e53935">
+    <rect x="21" y="21" width="22" height="4" rx="2"/>
+    <rect x="21" y="30" width="22" height="4" rx="2"/>
+    <rect x="21" y="39" width="13" height="4" rx="2"/>
+  </g>
+</svg>

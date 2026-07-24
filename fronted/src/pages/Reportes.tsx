@@ -14,12 +14,10 @@ import { ordenesService } from '../services/ordenes.service';
 import { reportesService } from '../services/reportes.service';
 import { useAuthStore } from '../store/useStore';
 import { useRestauranteStore } from '../store/restauranteStore';
-import { buildDateParams } from '../utils';
+import { buildDateParams, formatCurrency, exportarCSV } from '../utils';
+import { toast } from '../store/uiStore';
 
 type ScopeReporte = 'restaurante' | 'grupo' | 'super';
-
-const formatCurrency = (v: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(v);
 
 export const Reportes: React.FC = () => {
   const [dateRange,    setDateRange]    = useState('today');
@@ -101,6 +99,47 @@ export const Reportes: React.FC = () => {
     [dateRange, customDesde, customHasta],
   );
 
+  /**
+   * Exporta a CSV lo que el usuario está viendo en pantalla.
+   *
+   * Se exportan las dos tablas con valor de negocio real (productos y
+   * clientes); las tarjetas de KPI no se incluyen porque son un solo número
+   * que ya se ve. Si no hay nada cargado se avisa en vez de bajar un archivo
+   * vacío.
+   */
+  const handleExportar = useCallback(() => {
+    const productos = stats?.topProductos ?? [];
+    const clientes  = topClientes ?? [];
+
+    if (productos.length === 0 && clientes.length === 0) {
+      toast.info('No hay datos para exportar en el período seleccionado');
+      return;
+    }
+
+    const sufijo = activo?.nombre
+      ? `-${activo.nombre.toLowerCase().replace(/\s+/g, '-')}`
+      : '';
+
+    if (productos.length > 0) {
+      exportarCSV(`productos-vendidos${sufijo}`, [
+        { columna: 'Producto',         valor: p => p.nombre || `Producto #${p.producto_id}` },
+        { columna: 'Unidades',         valor: p => p.cantidad_vendida },
+        { columna: 'Total vendido',    valor: p => p.total_vendido },
+      ], productos);
+    }
+
+    if (clientes.length > 0) {
+      exportarCSV(`top-clientes${sufijo}`, [
+        { columna: 'Cliente',          valor: (c: any) => c.nombre ?? c.nombre_cliente ?? `Cliente #${c.id_cliente ?? ''}` },
+        { columna: 'Órdenes',          valor: (c: any) => c.total_ordenes ?? 0 },
+        { columna: 'Ticket promedio',  valor: (c: any) => c.ticket_promedio ?? 0 },
+        { columna: 'Total gastado',    valor: (c: any) => c.total_gastado ?? 0 },
+      ], clientes);
+    }
+
+    toast.success('Exportación lista');
+  }, [stats, topClientes, activo]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
@@ -152,36 +191,32 @@ export const Reportes: React.FC = () => {
     }
   }, [scope, esSuperAdmin, puedeVerGrupo, setScope]);
 
+  // Nota: estas tarjetas mostraban "+8%" y "+12%" como variación respecto al
+  // período anterior. Eran strings literales, no un cálculo — el dueño leía una
+  // cifra de negocio inventada. Se retiran hasta que el backend exponga el
+  // período comparativo; ver Fase 4b del plan de rediseño.
   const kpis = [
     {
       label: 'Ventas Hoy',
       value: formatCurrency(stats?.ventasHoy || 0),
-      change: '+8%',
-      positive: true,
       icon: <DollarSign className="w-5 h-5" />,
       color: 'from-violet-500 to-violet-600',
     },
     {
       label: 'Órdenes Hoy',
       value: stats?.ordenesHoy || 0,
-      change: '+12%',
-      positive: true,
       icon: <ShoppingCart className="w-5 h-5" />,
       color: 'from-blue-500 to-blue-600',
     },
     {
       label: 'Productos Activos',
       value: stats?.productosActivos || 0,
-      change: '',
-      positive: true,
       icon: <Package className="w-5 h-5" />,
       color: 'from-emerald-500 to-emerald-600',
     },
     {
       label: 'Alertas Stock',
       value: stats?.alertas || 0,
-      change: '',
-      positive: false,
       icon: <BarChart3 className="w-5 h-5" />,
       color: 'from-amber-500 to-amber-600',
     },
@@ -204,7 +239,9 @@ export const Reportes: React.FC = () => {
                 <RefreshCw className={`w-4 h-4 ${loading || loadingExtra ? 'animate-spin' : ''}`} />
                 Actualizar
               </button>
-              <button className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 transition-all shadow-lg text-sm">
+              <button
+                onClick={handleExportar}
+                className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl font-semibold hover:from-violet-700 hover:to-purple-700 transition-all shadow-lg text-sm">
                 <Download className="w-4 h-4" />
                 Exportar
               </button>
@@ -509,12 +546,6 @@ export const Reportes: React.FC = () => {
                     <div className={`bg-gradient-to-br ${kpi.color} p-2.5 rounded-xl shadow-lg`}>
                       <div className="text-white">{kpi.icon}</div>
                     </div>
-                    {kpi.change && (
-                      <div className={`flex items-center gap-1 text-xs font-semibold ${kpi.positive ? 'text-emerald-600' : 'text-red-500'}`}>
-                        {kpi.positive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
-                        {kpi.change}
-                      </div>
-                    )}
                   </div>
                   <p className="text-sm text-slate-500 mb-1">{kpi.label}</p>
                   <p className="text-2xl font-bold text-slate-800">{kpi.value}</p>

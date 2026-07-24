@@ -24,12 +24,15 @@ import { useAuthStore } from '../../store/useStore';
 import { menuService, type GuardarMenuGrupo } from '../../services/menu.service';
 import { useMenuStore } from '../../store/menuStore';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS } from '../../config/menuCatalog';
+import { DEFAULTS } from '../../services/ui-config.schema';
 
 // ── Panel: Apariencia ─────────────────────────────────────────────────────────
 
 function AparienciaPanel() {
   const [nombreSistema, setNombreSistema] = useState('');
-  const [colorPrimario, setColorPrimario] = useState('#e53935');
+  // El default sale del esquema, no de un hex repetido aquí: si cambia el color
+  // por defecto del producto, cambia en un solo sitio.
+  const [colorPrimario, setColorPrimario] = useState(DEFAULTS.apariencia.color_primario);
   const [logoUrl,       setLogoUrl]       = useState('');
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
