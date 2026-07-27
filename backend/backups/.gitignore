@@ -1,0 +1,4 @@
+# Los respaldos de la base NUNCA se versionan (datos sensibles + tamaño).
+# Se conserva la carpeta, se ignora su contenido.
+*
+!.gitignore

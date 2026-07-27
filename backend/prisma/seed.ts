@@ -13,11 +13,29 @@
 
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { DEV_SUPER_ADMIN_UUID } from '../src/config/env.schema';
 
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Iniciando seed...');
+
+  // ============================================================
+  // CREDENCIALES DEL SUPERADMIN
+  // En producción DEBEN venir por entorno; nunca se permite quedar
+  // con el UUID/contraseña por defecto (que son públicos en el repo).
+  // ============================================================
+  const isProduction = process.env.NODE_ENV === 'production';
+  const SUPER_ADMIN_UUID = process.env.SUPER_ADMIN_UUID ?? DEV_SUPER_ADMIN_UUID;
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!';
+  const adminPasswordEsPorDefecto = !process.env.SEED_ADMIN_PASSWORD;
+
+  if (isProduction && (!process.env.SUPER_ADMIN_UUID || !process.env.SEED_ADMIN_PASSWORD)) {
+    throw new Error(
+      'En producción el seed exige SUPER_ADMIN_UUID y SEED_ADMIN_PASSWORD en el entorno ' +
+        '(no se permiten credenciales por defecto). Defínelas antes de sembrar.',
+    );
+  }
 
   // ============================================================
   // LIMPIAR DATOS EXISTENTES (orden correcto por dependencias)
@@ -185,14 +203,11 @@ async function main() {
   // USUARIOS
   // ============================================================
   console.log('👤 Creando usuarios...');
-  const passwordHash = await bcrypt.hash('Admin123!', 10);
+  const passwordHash = await bcrypt.hash(adminPassword, 10);
 
   // ─── SUPER ADMIN ÚNICO ────────────────────────────────────────────────────
-  // UUID fijo que identifica al superadmin en el sistema.
-  // DEBE coincidir con SUPER_ADMIN_UUID en el archivo .env.
-  // NUNCA cambiar este UUID en producción.
-  const SUPER_ADMIN_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-
+  // El UUID (SUPER_ADMIN_UUID) se resolvió arriba: por entorno en producción,
+  // o DEV_SUPER_ADMIN_UUID en desarrollo. DEBE coincidir con Usuario.uuid en DB.
   const usuarioAdmin = await prisma.usuario.create({
     data: {
       uuid:            SUPER_ADMIN_UUID,  // UUID fijo e inmutable
@@ -616,7 +631,11 @@ async function main() {
   console.log('\n✨ ¡Seed completado exitosamente!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('👤 Usuarios:');
-  console.log('   admin   / Admin123!   → Administrador (superadmin)');
+  console.log(
+    adminPasswordEsPorDefecto
+      ? '   admin   / Admin123!   → Administrador (superadmin) — ⚠️ contraseña por defecto, cámbiala'
+      : '   admin   / (contraseña de SEED_ADMIN_PASSWORD)  → Administrador (superadmin)',
+  );
   console.log('   cajero1 / Cajero123!  → Cajero');
   console.log('   cocina1 / Cocina123!  → Cocina');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
