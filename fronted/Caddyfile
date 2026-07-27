@@ -1,0 +1,36 @@
+# Caddy: sirve el frontend estático, hace de reverse proxy al backend y saca/
+# renueva el certificado HTTPS automáticamente (Let's Encrypt / ZeroSSL).
+#
+# Variables (las inyecta docker-compose desde el .env de la raíz):
+#   DOMAIN      dominio público, p.ej. pos.midominio.com  (usa "localhost" para probar)
+#   ACME_EMAIL  correo para los avisos del certificado (opcional pero recomendado)
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# API REST → backend
+	handle /api/* {
+		reverse_proxy backend:3000
+	}
+
+	# WebSocket (Socket.IO) → backend
+	handle /socket.io/* {
+		reverse_proxy backend:3000
+	}
+
+	# Health check del backend (para monitoreo externo)
+	handle /health {
+		reverse_proxy backend:3000
+	}
+
+	# Resto: SPA estática (fallback a index.html para las rutas del router)
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

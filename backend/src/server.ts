@@ -31,6 +31,8 @@ import { categoriasPlugin }      from './plugins/core/categorias.plugin';
 import { startInventarioJob } from './jobs/inventario.job';
 import logger from './config/logger';
 import { config } from './config/env';
+import prisma from './config/database';
+import redis from './config/redis';
 
 // Cargar variables de entorno
 dotenv.config();
@@ -38,6 +40,11 @@ dotenv.config();
 // Crear aplicación Express
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Detrás de un reverse proxy (Caddy/Nginx). Necesario para que req.ip, el
+// rate-limit por IP y la auditoría usen la IP real (X-Forwarded-For) y para que
+// req.secure refleje el HTTPS terminado en el proxy.
+app.set('trust proxy', 1);
 
 // ─── Rate limiting ────────────────────────────────────────────────────────────
 // Limiter general: 500 req / 15 min — cubre polling de dashboard, alertas, etc.
@@ -82,6 +89,36 @@ app.use(cors({
 app.use(compression()); // Compresión gzip
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Health check — antes del rate limiter para que los chequeos del balanceador
+// no queden limitados. Verifica DB (crítica) y Redis (opcional, fail-open).
+app.get('/health', async (_req, res) => {
+  let db: 'up' | 'down' = 'down';
+  let cache: 'up' | 'down' = 'down';
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    db = 'up';
+  } catch {
+    db = 'down';
+  }
+  try {
+    if (redis.status === 'ready') {
+      await redis.ping();
+      cache = 'up';
+    }
+  } catch {
+    cache = 'down';
+  }
+  const ok = db === 'up'; // la DB es crítica; Redis no bloquea el health
+  res.status(ok ? 200 : 503).json({
+    status: ok ? 'OK' : 'DEGRADED',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    db,
+    redis: cache,
+  });
+});
+
 app.use(limiter); // Rate limiting
 app.use(requestLogger); // Logger de peticiones
 app.use(attachAuditContext); // Adjuntar IP y User-Agent al request
@@ -94,15 +131,6 @@ if (process.env.NODE_ENV !== 'production') {
   app.get('/api/docs.json', (_req, res) => res.json(swaggerSpec));
   logger.info('📖 Docs disponibles en: http://localhost:3000/api/docs');
 }
-
-// Health check
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-  });
-});
 
 // Auth routes: limiter estricto (anti brute-force sobre login)
 app.use('/api/v1/auth', authLimiter);
@@ -167,13 +195,25 @@ process.on('uncaughtException', (error) => {
   server.close(() => process.exit(1));
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM recibido, cerrando servidor...');
-  server.close(() => {
+// Graceful shutdown: cierra el servidor HTTP y las conexiones a DB/Redis.
+// Docker envía SIGTERM al detener el contenedor; SIGINT cubre Ctrl+C en local.
+const shutdown = (signal: string) => {
+  logger.info(`${signal} recibido, cerrando servidor...`);
+  server.close(async () => {
+    try {
+      await prisma.$disconnect();
+      redis.disconnect();
+    } catch (err) {
+      logger.error('Error cerrando conexiones:', err);
+    }
     logger.info('Servidor cerrado');
     process.exit(0);
   });
-});
+  // Si no cierra en 10s, forzar salida para no colgar el orquestador.
+  setTimeout(() => process.exit(1), 10_000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export default app;
