@@ -11,7 +11,7 @@
  */
 
 import crypto from 'crypto';
-import { EstadoLaboral } from '@prisma/client';
+import { EstadoLaboral, EstadoPeriodoNomina } from '@prisma/client';
 import prisma from '../config/database';
 import { documentoRepository } from '../repositories/documento.repository';
 import { usuarioRepository } from '../repositories/usuario.repository';
@@ -199,6 +199,7 @@ export const documentoService = {
         codigo_empleado:     empleado.codigo_empleado,
         email:               empleado.email,
         telefono:            empleado.telefono,
+        estado_laboral:      empleado.estado_laboral,
       },
       empresa: {
         nombre:    sede?.nombre    ?? grupo.nombre,
@@ -223,15 +224,38 @@ export const documentoService = {
   },
 
   /**
+   * _aplicarIncluirSalario — plantilla efectiva según el toggle de salario.
+   *
+   * Cuando incluirSalario es false, devuelve una COPIA de la plantilla con los
+   * párrafos de salario quitados del cuerpo. Se filtra por el token
+   * `{{empleado.salario` (cubre `salario` y `salario_letras`), así funciona tanto
+   * con la plantilla del catálogo como con una personalizada por el grupo.
+   *
+   * Nunca muta la constante del catálogo (se clona el nivel que cambia). Es no-op
+   * para tipos sin línea de salario (carta, paz y salvo, acta, desprendible).
+   */
+  _aplicarIncluirSalario(plantilla: DocumentoConfig, incluirSalario: boolean): DocumentoConfig {
+    if (incluirSalario) return plantilla;
+    return {
+      ...plantilla,
+      documento: {
+        ...plantilla.documento,
+        cuerpo: plantilla.documento.cuerpo.filter(p => !p.includes('{{empleado.salario')),
+      },
+    };
+  },
+
+  /**
    * previsualizar — renderiza SIN persistir, para revisar antes de emitir.
    * Usa el mismo renderer que la emisión, así que lo que se ve es lo que sale.
    */
   async previsualizar(tipo: string, idEmpleado: number, opciones: {
-    observaciones?: string; firmante: string;
+    observaciones?: string; firmante: string; incluirSalario?: boolean;
   }, grupoId?: number) {
     if (!esTipoDocumento(tipo)) throw new BadRequestError('Tipo de documento inválido');
 
     const base = await this._construirContexto(tipo, idEmpleado, grupoId);
+    const plantilla = this._aplicarIncluirSalario(base.plantilla, opciones.incluirSalario ?? true);
     const ctx  = this._contexto(base, {
       consecutivo:   `${base.meta.prefijo}-${new Date().getFullYear()}-BORRADOR`,
       codigo:        'PREVIEW',
@@ -241,7 +265,7 @@ export const documentoService = {
 
     const dias = base.plantilla.documento.vigencia_dias;
     const { html } = await renderizarDocumento({
-      plantilla:       base.plantilla,
+      plantilla,
       contexto:        ctx,
       urlVerificacion: urlVerificacion('PREVIEW'),
       vigenciaHasta:   dias > 0 ? new Date(Date.now() + dias * 86_400_000) : null,
@@ -258,7 +282,7 @@ export const documentoService = {
    * simultáneas no reciban el mismo número.
    */
   async emitir(tipo: string, idEmpleado: number, opciones: {
-    observaciones?: string; id_periodo?: number;
+    observaciones?: string; id_periodo?: number; incluirSalario?: boolean;
   }, emisor: { id: number; nombre: string }, grupoId?: number) {
     if (!esTipoDocumento(tipo)) throw new BadRequestError('Tipo de documento inválido');
 
@@ -302,7 +326,7 @@ export const documentoService = {
             logoUrl:         base.sede?.logo_url ?? base.grupo.logo_url,
           })
         : await renderizarDocumento({
-            plantilla:       base.plantilla,
+            plantilla:       this._aplicarIncluirSalario(base.plantilla, opciones.incluirSalario ?? true),
             contexto:        ctx,
             urlVerificacion: urlVerificacion(codigo),
             vigenciaHasta,
@@ -315,7 +339,11 @@ export const documentoService = {
         codigo_verificacion: codigo,
         hash_contenido:      sha256(html),
         contenido_html:      html,
-        datos:               variables,
+        // El desprendible guarda su periodo en el snapshot para que el
+        // autoservicio del trabajador sea idempotente (una colilla por periodo).
+        datos:               datosNomina
+          ? { ...variables, periodo_id: opciones.id_periodo ?? null }
+          : variables,
         vigencia_hasta:      vigenciaHasta,
         id_empleado:         idEmpleado,
         id_emisor:           emisor.id,
@@ -379,6 +407,62 @@ export const documentoService = {
       // Permite a quien tenga el PDF comparar que no fue alterado
       hash:          doc.hash_contenido,
     };
+  },
+
+  // ── Portal del trabajador — autoservicio de documentos ──────────────────────
+  // Todas reciben el id del TOKEN (nunca de la URL): el empleado solo alcanza lo
+  // suyo, sin permiso de administración y sin poder apuntar a otra persona. Mismo
+  // principio que /auth/mi-nomina.
+
+  /** Documentos propios ya emitidos (certificados y desprendibles). */
+  async listarMisDocumentos(userId: number) {
+    return documentoRepository.findByEmpleado(userId);
+  },
+
+  /** Snapshot de un documento propio. Verifica pertenencia por el id del token. */
+  async obtenerMiContenido(id: number, userId: number) {
+    const doc = await documentoRepository.findContenido(id);
+    if (!doc || doc.id_empleado !== userId) throw new NotFoundError('Documento');
+    return doc;
+  },
+
+  /** Periodos liquidados (aprobados/pagados) en los que el empleado tiene colilla. */
+  async listarMisPeriodos(userId: number) {
+    const detalles = await prisma.nominaDetalle.findMany({
+      where: {
+        id_empleado: userId,
+        periodo: { estado: { in: [EstadoPeriodoNomina.aprobada, EstadoPeriodoNomina.pagada] } },
+      },
+      include: {
+        periodo: { select: { id: true, nombre: true, fecha_inicio: true, fecha_fin: true, estado: true } },
+      },
+      orderBy: { periodo: { fecha_inicio: 'desc' } },
+    });
+
+    return detalles.map(d => ({
+      id_periodo:   d.periodo.id,
+      nombre:       d.periodo.nombre,
+      fecha_inicio: d.periodo.fecha_inicio,
+      fecha_fin:    d.periodo.fecha_fin,
+      estado:       d.periodo.estado,
+      neto_pagar:   Number(d.neto_pagar),
+    }));
+  },
+
+  /**
+   * emitirMiDesprendible — el trabajador genera su propia colilla de un periodo.
+   * Idempotente: si ya existe una no anulada para ese periodo, se devuelve esa
+   * en vez de crear otro consecutivo. Reutiliza el flujo `emitir` (que exige que
+   * el periodo esté aprobado/pagado y que el empleado tenga liquidación).
+   */
+  async emitirMiDesprendible(userId: number, userNombre: string, idPeriodo: number) {
+    const existente = await documentoRepository.findDesprendibleDePeriodo(userId, idPeriodo);
+    if (existente) return existente;
+    return this.emitir(
+      'documento_desprendible_pago', userId,
+      { id_periodo: idPeriodo },
+      { id: userId, nombre: userNombre },
+    );
   },
 };
 

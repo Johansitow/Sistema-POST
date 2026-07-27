@@ -25,6 +25,9 @@ export const grupoNegocioRepository = {
     filters: { activo?: boolean; plan?: PlanSaaS }
   ) => {
     const where = {
+      // Los sandboxes de "Probar configuración" no se listan en gestión de grupos;
+      // se administran desde su propia pantalla de pruebas.
+      es_sandbox: false,
       ...(filters.activo !== undefined ? { activo: filters.activo } : {}),
       ...(filters.plan               ? { plan:   filters.plan   } : {}),
     };

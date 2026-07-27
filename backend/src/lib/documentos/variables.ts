@@ -106,6 +106,8 @@ export interface DatosEmpleado {
   codigo_empleado:     string | null;
   email:               string | null;
   telefono:            string | null;
+  /** Estado laboral (enum EstadoLaboral): decide presente/pasado en el certificado. */
+  estado_laboral:      string | null;
 }
 
 export interface DatosEmpresa {
@@ -143,6 +145,15 @@ export function construirVariables(ctx: ContextoDocumento): Record<string, strin
   const salario = n ? formatearPesos(Number(n.salario_base)) : 'no registrado';
   const letras  = n ? pesosEnLetras(Number(n.salario_base)) : '';
 
+  // Presente/pasado del vínculo laboral. Un certificado de alguien retirado debe
+  // decir "laboró … desde X hasta Y", no "labora … desde X".
+  const retirado    = e.estado_laboral === 'retirado';
+  const laboraVerbo = retirado ? 'laboró' : 'labora';
+  const desde       = fechaEnLetras(e.fecha_ingreso);
+  const vinculoPeriodo = retirado && e.fecha_retiro
+    ? `desde el ${desde} hasta el ${fechaEnLetras(e.fecha_retiro)}`
+    : `desde el ${desde}`;
+
   return {
     // Empleado
     'empleado.nombre':              e.nombre_completo,
@@ -158,6 +169,8 @@ export function construirVariables(ctx: ContextoDocumento): Record<string, strin
     'empleado.tipo_contrato':       TIPO_CONTRATO_LABEL[e.tipo_contrato ?? ''] ?? 'término indefinido',
     'empleado.jornada':             JORNADA_LABEL[e.jornada ?? ''] ?? 'tiempo completo',
     'empleado.antiguedad':          antiguedadEnTexto(e.fecha_ingreso, e.fecha_retiro),
+    'empleado.labora_verbo':        laboraVerbo,
+    'empleado.vinculo_periodo':     vinculoPeriodo,
     'empleado.salario':             salario,
     'empleado.salario_letras':      letras,
     'empleado.frecuencia_pago':     FRECUENCIA_LABEL[n?.tipo_pago ?? ''] ?? 'mensual',
@@ -209,6 +222,7 @@ export function listarVariablesDisponibles(): { clave: string; ejemplo: string }
       tipo_contrato: 'indefinido', jornada: 'completa',
       codigo_empleado: 'EMP-0042',
       email: 'maria@empresa.com', telefono: '3001234567',
+      estado_laboral: 'activo',
     },
     empresa: {
       nombre: 'Restaurante Ejemplo S.A.S.', nit: '900.123.456-7',

@@ -5,7 +5,7 @@
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { loginSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema } from '../dto/auth.dto';
+import { loginSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema, miTutorialSchema } from '../dto/auth.dto';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
@@ -56,6 +56,13 @@ export const actualizarMiPerfil = asyncHandler(async (req: Request, res: Respons
   });
 
   res.json({ message: 'Datos actualizados correctamente', user });
+});
+
+export const marcarMiTutorial = asyncHandler(async (req: Request, res: Response) => {
+  const { completado } = miTutorialSchema.parse(req.body);
+  const usuarioId = (req as any).user!.id;
+  const result = await authService.marcarTutorial(usuarioId, completado);
+  res.json(result);
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {

@@ -19,10 +19,10 @@ import {
 } from '@mui/material';
 import {
   AccountBalance, Badge as BadgeIcon, Business, CheckCircleOutline,
-  LockOutlined, Person, Save, Shield,
+  Description, LockOutlined, Person, Save, Shield,
 } from '@mui/icons-material';
 import { PageHeader, EmptyState } from '../components/common';
-import { InfoRow } from '../components/personal';
+import { InfoRow, MisDocumentos } from '../components/personal';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/useStore';
 import { useRestauranteStore } from '../store/restauranteStore';
@@ -218,6 +218,7 @@ export function Perfil() {
           <Tab icon={<BadgeIcon fontSize="small" />}      iconPosition="start" label="Mi información" />
           <Tab icon={<Person fontSize="small" />}         iconPosition="start" label="Mis datos de contacto" />
           <Tab icon={<AccountBalance fontSize="small" />} iconPosition="start" label="Mi nómina" />
+          <Tab icon={<Description fontSize="small" />}    iconPosition="start" label="Mis documentos" />
           <Tab icon={<LockOutlined fontSize="small" />}   iconPosition="start" label="Seguridad" />
         </Tabs>
 
@@ -465,8 +466,13 @@ export function Perfil() {
             )
           )}
 
-          {/* ── Seguridad ─────────────────────────────────────────────────── */}
+          {/* ── Mis documentos (autoservicio) ─────────────────────────────── */}
           {tab === 3 && (
+            <MisDocumentos onError={m => showToast(m, 'error')} />
+          )}
+
+          {/* ── Seguridad ─────────────────────────────────────────────────── */}
+          {tab === 4 && (
             <Box component="form" onSubmit={handleChangePassword}>
               <Stack spacing={2} sx={{ maxWidth: 420 }}>
                 <Typography variant="subtitle2" fontWeight={700}>Cambiar contraseña</Typography>

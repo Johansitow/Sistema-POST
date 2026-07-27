@@ -11,6 +11,7 @@ export const Z_INDEX = {
   MODAL_BACKDROP: 1300,
   MODAL_BASE:     1400,  // modales normales
   MODAL_NESTED:   1500,  // modales sobre modales (ej: pago dentro de detalle)
+  TOUR:           1550,  // overlay + spotlight del modo tutorial (product tour)
   NOTIFICATION:   1600,
 } as const;
 

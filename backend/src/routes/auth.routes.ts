@@ -3,7 +3,10 @@
  */
 
 import { Router } from 'express';
-import { login, logout, getProfile, refreshToken, changePassword, getMiNomina, actualizarMiPerfil } from '../controller/auth.controller';
+import { login, logout, getProfile, refreshToken, changePassword, getMiNomina, actualizarMiPerfil, marcarMiTutorial } from '../controller/auth.controller';
+import {
+  misDocumentos, miDocumentoContenido, misPeriodosLiquidados, miDesprendible,
+} from '../controller/documentos.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 
 const router = Router();
@@ -24,5 +27,12 @@ router.put('/change-password',  authenticate, changePassword);
 // módulo de usuarios.
 router.get('/mi-nomina',        authenticate, getMiNomina);
 router.patch('/mi-perfil',      authenticate, actualizarMiPerfil);
+router.patch('/mi-tutorial',    authenticate, marcarMiTutorial);
+
+// Documentos propios (certificado emitido por el admin + desprendible autoservicio).
+router.get('/mis-documentos',             authenticate, misDocumentos);
+router.get('/mis-documentos/:id/contenido', authenticate, miDocumentoContenido);
+router.get('/mis-periodos-liquidados',    authenticate, misPeriodosLiquidados);
+router.post('/mi-desprendible',           authenticate, miDesprendible);
 
 export default router;

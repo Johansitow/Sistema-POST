@@ -8,12 +8,10 @@ import { facturaService, Factura } from '../services/servicios-gestion';
 import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
-import { EmptyState, LoadingScreen } from '../components/common';
+import { EmptyState, LoadingScreen, Modal } from '../components/common';
 import { printFactura, type PrintTemplateConfig } from '../utils/print';
 import { cargarConfigImpresion } from '../lib/plantillas/negocio';
 import { plantillasService } from '../services/plantillas.service';
-import { Z_INDEX } from '../lib/zIndex';
-import { useEscapeKey } from '../hooks/useEscapeKey';
 import { clasesEstado, definirEstado } from '../theme/estados';
 
 // Color y etiqueta vienen de theme/estados.ts (dominio 'factura'); aquí solo
@@ -47,7 +45,7 @@ const resolverItemsFactura = (ordenFull: any): Array<{ nombre: string; cantidad:
 const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ factura, onClose }) => {
   const cfg = ESTADO_CFG[factura.estado_factura] || ESTADO_CFG.pendiente;
   const [ordenFull, setOrdenFull] = useState<any | null>(null);
-  useEscapeKey(onClose);
+  // Escape, focus trap, scroll lock y devolución del foco los gestiona <Modal>.
 
   useEffect(() => {
     api.get(`/ordenes/${factura.id_orden}`)
@@ -99,12 +97,10 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 flex items-center justify-between">
+    <Modal titulo={`Detalle de la factura ${factura.numero_factura}`} onClose={onClose} ancho="md">
+        <div className="bg-brand-600 px-6 py-4 flex items-center justify-between">
           <div>
-            <p className="text-violet-200 text-xs">Factura</p>
+            <p className="text-white/70 text-xs">Factura</p>
             <h2 className="text-white font-bold text-lg">{factura.numero_factura}</h2>
           </div>
           <div className="flex items-center gap-2">
@@ -115,7 +111,11 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
             >
               <Printer className="w-3.5 h-3.5" /> Imprimir
             </button>
-            <button onClick={onClose} className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors">✕</button>
+            <button
+              onClick={onClose}
+              aria-label="Cerrar detalle de factura"
+              className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+            >✕</button>
           </div>
         </div>
         <div className="p-6 space-y-4">
@@ -140,16 +140,15 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
               ))}
             </div>
           )}
-          <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm text-slate-600"><span>Subtotal</span><span>{formatCurrency(factura.subtotal)}</span></div>
-            <div className="flex justify-between text-sm text-slate-600"><span>Impuestos</span><span>{formatCurrency(factura.impuestos)}</span></div>
-            <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-slate-800">
+          <div className="bg-neutro-50 rounded-xl p-4 space-y-2">
+            <div className="flex justify-between text-sm text-neutro-600"><span>Subtotal</span><span>{formatCurrency(factura.subtotal)}</span></div>
+            <div className="flex justify-between text-sm text-neutro-600"><span>Impuestos</span><span>{formatCurrency(factura.impuestos)}</span></div>
+            <div className="border-t border-neutro-200 pt-2 flex justify-between font-bold text-neutro-800">
               <span>Total</span><span className="text-lg">{formatCurrency(factura.total)}</span>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 

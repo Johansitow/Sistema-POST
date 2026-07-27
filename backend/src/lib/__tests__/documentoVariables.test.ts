@@ -20,6 +20,7 @@ const CTX_BASE = {
     fecha_retiro: null, motivo_retiro: null,
     tipo_contrato: 'indefinido', jornada: 'completa',
     codigo_empleado: 'EMP-0001', email: 'm@x.com', telefono: '300',
+    estado_laboral: 'activo',
   },
   empresa: {
     nombre: 'Restaurante X', nit: '900.1-2', ciudad: 'Bogotá',
@@ -178,6 +179,25 @@ describe('construirVariables', () => {
     for (const [clave, valor] of Object.entries(v)) {
       expect(valor, `la clave ${clave} quedó indefinida`).toBeDefined();
     }
+  });
+
+  it('empleado activo: presente y periodo sin fecha de retiro', () => {
+    const v = construirVariables(CTX_BASE);
+    expect(v['empleado.labora_verbo']).toBe('labora');
+    expect(v['empleado.vinculo_periodo']).toBe('desde el 15 de marzo de 2024');
+  });
+
+  it('empleado retirado: pasado y periodo con fecha de retiro', () => {
+    const v = construirVariables({
+      ...CTX_BASE,
+      empleado: {
+        ...CTX_BASE.empleado,
+        estado_laboral: 'retirado',
+        fecha_retiro:   new Date(Date.UTC(2026, 5, 30)),
+      },
+    });
+    expect(v['empleado.labora_verbo']).toBe('laboró');
+    expect(v['empleado.vinculo_periodo']).toBe('desde el 15 de marzo de 2024 hasta el 30 de junio de 2026');
   });
 });
 

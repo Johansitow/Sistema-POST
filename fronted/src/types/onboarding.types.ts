@@ -43,3 +43,35 @@ export interface EntradaOnboarding {
   /** Overrides del usuario aplicados encima del preset. */
   ejes?: Record<string, string>;
 }
+
+// ── Sandboxes de "Probar configuración" ──────────────────────────────────────
+
+import type { UsuarioAuth, AuthTokens } from './index';
+
+export interface SandboxSede {
+  id:         number;
+  nombre:     string;
+  es_default: boolean;
+}
+
+/** Una prueba activa: un GrupoNegocio desechable con 1+ sedes. */
+export interface SandboxResumen {
+  id_grupo:       number;
+  nombre:         string;
+  arquetipo:      string | null;
+  multisede:      boolean;
+  fecha_creacion: string;
+  sedes:          SandboxSede[];
+}
+
+/** Sesión fresca devuelta al crear/entrar (ya incluye la sede de prueba). */
+export interface SandboxSession {
+  user:   UsuarioAuth;
+  tokens: AuthTokens;
+}
+
+/** Respuesta de crear/entrar a un sandbox. */
+export interface SandboxCreado {
+  sandbox: SandboxResumen;
+  session: SandboxSession;
+}

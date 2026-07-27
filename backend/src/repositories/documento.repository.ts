@@ -87,6 +87,26 @@ export const documentoRepository = {
       orderBy: { fecha_emision: 'desc' },
     }),
 
+  /**
+   * Desprendible NO anulado del empleado para un periodo dado.
+   *
+   * Da idempotencia al autoservicio: si el trabajador vuelve a "generar" su
+   * colilla de un periodo, se reutiliza la ya emitida en vez de crear otro
+   * consecutivo. El periodo se guarda en el snapshot `datos` (clave `periodo_id`)
+   * al emitir; no hace falta una columna nueva.
+   */
+  findDesprendibleDePeriodo: (id_empleado: number, id_periodo: number) =>
+    prisma.documentoEmitido.findFirst({
+      where: {
+        id_empleado,
+        tipo:    'documento_desprendible_pago',
+        anulado: false,
+        datos:   { path: ['periodo_id'], equals: id_periodo },
+      },
+      orderBy: { id: 'desc' },
+      select:  selectListado,
+    }),
+
   /** Contenido completo — para reimprimir el snapshot original. */
   findContenido: (id: number, id_grupo?: number) =>
     prisma.documentoEmitido.findFirst({

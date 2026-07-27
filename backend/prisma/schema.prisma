@@ -100,6 +100,10 @@ model GrupoNegocio {
   db_connection_url     String?  @db.Text         // cifrada — para multi-DB futuro
 
   activo                Boolean  @default(true)
+  // Tenant desechable creado desde "Probar configuración" (onboarding sandbox).
+  // Los sandboxes se ocultan de las pantallas de gestión y solo ellos pueden
+  // borrarse por completo (hard delete) desde el módulo de pruebas.
+  es_sandbox            Boolean  @default(false)
   fecha_creacion        DateTime @default(now())
   fecha_modificacion    DateTime @updatedAt
 
@@ -263,6 +267,13 @@ model Usuario {
   //   CREATE UNIQUE INDEX "idx_usuario_super_admin_unico"
   //   ON "usuarios" ("es_super_admin") WHERE "es_super_admin" = true;
   es_super_admin                Boolean   @default(false)
+
+  // ── Modo tutorial (product tour) ───────────────────────────────────────────
+  // Progreso del tour guiado, POR USUARIO (no por sede, a diferencia del flag
+  // onboarding_completado). Fuente de verdad para no re-disparar el tour y para
+  // medir activación. Se marca al completarlo u omitirlo desde el frontend.
+  tutorial_completado           Boolean   @default(false)
+  tutorial_completado_en        DateTime?
 
   rol              Rol       @relation(fields: [id_rol], references: [id])
   creador          Usuario?  @relation("UsuarioCreador", fields: [creado_por], references: [id])

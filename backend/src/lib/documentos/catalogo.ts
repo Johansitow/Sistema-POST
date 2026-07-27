@@ -89,7 +89,7 @@ export const CATALOGO_DOCUMENTOS: Record<TipoDocumento, TipoDocumentoMeta> = {
         cuerpo: [
           'El suscrito {{firma.cargo}} de {{empresa.nombre}}, identificada con NIT {{empresa.nit}},',
           'CERTIFICA QUE:',
-          '{{empleado.nombre}}, identificado(a) con {{empleado.tipo_documento}} No. {{empleado.documento}}, labora en esta empresa desde el {{empleado.fecha_ingreso_texto}}, desempeñando el cargo de {{empleado.cargo}}, mediante contrato a {{empleado.tipo_contrato}} en jornada de {{empleado.jornada}}.',
+          '{{empleado.nombre}}, identificado(a) con {{empleado.tipo_documento}} No. {{empleado.documento}}, {{empleado.labora_verbo}} en esta empresa {{empleado.vinculo_periodo}}, desempeñando el cargo de {{empleado.cargo}}, mediante contrato a {{empleado.tipo_contrato}} en jornada de {{empleado.jornada}}.',
           'Su asignación salarial actual es de {{empleado.salario}} ({{empleado.salario_letras}}), pagaderos de forma {{empleado.frecuencia_pago}}.',
         ],
         despedida: 'La presente certificación se expide a solicitud del interesado(a) en {{empresa.ciudad}}, el {{documento.fecha_texto}}.',

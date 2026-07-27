@@ -12,7 +12,8 @@ export type TipoDocumento =
   | 'documento_certificado_laboral'
   | 'documento_carta_terminacion'
   | 'documento_paz_y_salvo'
-  | 'documento_acta_dotacion';
+  | 'documento_acta_dotacion'
+  | 'documento_desprendible_pago';
 
 export interface TipoDocumentoMeta {
   tipo:        TipoDocumento;
@@ -57,6 +58,16 @@ export interface VariableDisponible {
   ejemplo: string;
 }
 
+/** Periodo de nómina liquidado del propio trabajador (para el desprendible). */
+export interface PeriodoLiquidado {
+  id_periodo:   number;
+  nombre:       string;
+  fecha_inicio: string;
+  fecha_fin:    string;
+  estado:       'aprobada' | 'pagada';
+  neto_pagar:   number;
+}
+
 export const documentosService = {
 
   listarTipos: async (): Promise<TipoDocumentoMeta[]> => {
@@ -71,16 +82,16 @@ export const documentosService = {
 
   /** Renderiza sin persistir — mismo código que la emisión real. */
   previsualizar: async (
-    tipo: TipoDocumento, id_empleado: number, observaciones?: string,
+    tipo: TipoDocumento, id_empleado: number, observaciones?: string, incluirSalario?: boolean,
   ): Promise<{ html: string; nombre: string }> => {
-    const { data } = await api.post('/documentos/previsualizar', { tipo, id_empleado, observaciones });
+    const { data } = await api.post('/documentos/previsualizar', { tipo, id_empleado, observaciones, incluirSalario });
     return data;
   },
 
   emitir: async (
-    tipo: TipoDocumento, id_empleado: number, observaciones?: string,
+    tipo: TipoDocumento, id_empleado: number, observaciones?: string, incluirSalario?: boolean,
   ): Promise<DocumentoEmitido> => {
-    const { data } = await api.post('/documentos', { tipo, id_empleado, observaciones });
+    const { data } = await api.post('/documentos', { tipo, id_empleado, observaciones, incluirSalario });
     return data.documento;
   },
 
@@ -104,5 +115,33 @@ export const documentosService = {
   verificar: async (codigo: string): Promise<VerificacionDocumento> => {
     const { data } = await api.get(`/documentos/verificar/${encodeURIComponent(codigo)}`);
     return data;
+  },
+
+  // ── Portal del trabajador — autoservicio ──────────────────────────────────
+  // Rutas /auth/mi(s)-*: el backend toma el id del token, así que el empleado
+  // solo alcanza lo suyo sin permiso de administración.
+
+  /** Documentos propios ya emitidos (certificados y desprendibles). */
+  misDocumentos: async (): Promise<DocumentoEmitido[]> => {
+    const { data } = await api.get('/auth/mis-documentos');
+    return data.documentos;
+  },
+
+  /** Snapshot de un documento propio. */
+  miDocumentoContenido: async (id: number): Promise<{ contenido_html: string; consecutivo: string; anulado: boolean }> => {
+    const { data } = await api.get(`/auth/mis-documentos/${id}/contenido`);
+    return data.documento;
+  },
+
+  /** Periodos liquidados propios (para elegir el desprendible). */
+  misPeriodosLiquidados: async (): Promise<PeriodoLiquidado[]> => {
+    const { data } = await api.get('/auth/mis-periodos-liquidados');
+    return data.periodos;
+  },
+
+  /** Genera (idempotente) el desprendible propio de un periodo. */
+  miDesprendible: async (id_periodo: number): Promise<DocumentoEmitido> => {
+    const { data } = await api.post('/auth/mi-desprendible', { id_periodo });
+    return data.documento;
   },
 };

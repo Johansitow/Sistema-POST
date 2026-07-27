@@ -10,3 +10,4 @@ export { TabResumen }        from './TabResumen';
 export { TabDatosEmpleado }  from './TabDatosEmpleado';
 export { TabNomina }         from './TabNomina';
 export { TabDocumentos }     from './TabDocumentos';
+export { MisDocumentos }     from './MisDocumentos';

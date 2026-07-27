@@ -45,6 +45,8 @@ import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
 import NotificationsMenu from './NotificationsMenu';
+import { TourOverlay, TourAutostart } from '../tour';
+import { useTourStore } from '../../store/tourStore';
 
 const DRAWER_WIDTH    = 248;
 const COLLAPSED_WIDTH = 64;
@@ -162,6 +164,7 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { usuario, logout, isSuperAdmin, esAdminGrupo, hasPermission } = useAuthStore();
+  const iniciarTour = useTourStore(s => s.iniciar);
 
   // ── Módulos de administración visibles para este usuario ───────────────────
   // Superadmin ve todo; un admin de grupo solo los módulos cuyo permiso le
@@ -300,6 +303,7 @@ export default function Layout() {
         <Tooltip title={collapsed ? item.text : ''} placement="right" arrow>
           <ListItemButton
             component={Link} to={item.path} selected={active}
+            data-tour={`nav-${item.path}`}
             sx={{
               borderRadius: 2,
               justifyContent: collapsed ? 'center' : 'flex-start',
@@ -750,6 +754,7 @@ export default function Layout() {
             <>
               <Tooltip title={restaurantes.length > 1 ? 'Cambiar restaurante' : 'Restaurante activo'}>
                 <Box
+                  data-tour="selector-sede"
                   onClick={restaurantes.length > 1 ? (e => setRestAnchorEl(e.currentTarget)) : undefined}
                   sx={{
                     display: 'flex', alignItems: 'center', gap: 0.75,
@@ -812,11 +817,16 @@ export default function Layout() {
           )}
 
           {/* Campana de notificaciones (solo en sección principal) */}
-          {!isAdminSection && <NotificationsMenu />}
+          {!isAdminSection && (
+            <Box component="span" data-tour="notificaciones" sx={{ display: 'inline-flex' }}>
+              <NotificationsMenu />
+            </Box>
+          )}
 
           {/* Menú usuario */}
           <Tooltip title="Mi cuenta">
             <Box
+              data-tour="usuario-menu"
               onClick={e => setAnchorEl(e.currentTarget)}
               sx={{
                 display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer',
@@ -842,6 +852,10 @@ export default function Layout() {
             <MenuItem onClick={() => { setAnchorEl(null); navigate('/perfil'); }}>
               <ListItemIcon><Person fontSize="small" /></ListItemIcon>
               Mi perfil
+            </MenuItem>
+            <MenuItem onClick={() => { setAnchorEl(null); iniciarTour(); }}>
+              <ListItemIcon><PlayCircleOutline fontSize="small" /></ListItemIcon>
+              Ver tutorial
             </MenuItem>
             <MenuItem onClick={() => { setAnchorEl(null); handleLogout(); }} sx={{ color: 'error.main' }}>
               <ListItemIcon><Logout fontSize="small" color="error" /></ListItemIcon>
@@ -946,6 +960,10 @@ export default function Layout() {
         <CircularProgress color="inherit" />
         <Typography fontWeight={600}>Cambiando a {restauranteActivo?.nombre}…</Typography>
       </Backdrop>
+
+      {/* Modo tutorial (product tour): auto-arranque la primera vez + capa visual */}
+      <TourAutostart />
+      <TourOverlay />
     </Box>
   );
 }

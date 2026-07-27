@@ -8,12 +8,25 @@
 
 import type { PrintOrden, PrintPago, PrintNegocio } from './ticketRenderer';
 
+// Logo de ejemplo (SVG inline como data-URI) para que el preview muestre el
+// efecto del toggle "Mostrar logo" sin depender de una imagen externa.
+const LOGO_EJEMPLO =
+  'data:image/svg+xml;utf8,' +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="60" viewBox="0 0 120 60">
+      <rect width="120" height="60" rx="8" fill="#111"/>
+      <text x="60" y="38" font-family="Georgia, serif" font-size="22" fill="#fff"
+        text-anchor="middle" font-weight="bold">LOGO</text>
+    </svg>`,
+  );
+
 export const NEGOCIO_EJEMPLO: PrintNegocio = {
   nombre:         'La Bodega Gourmet',
   nit:            '900.123.456-7',
   telefono:       '601 234 5678',
   ciudad:         'Cra 7 #45-10, Bogotá',
   resolucionDian: '18764000125671',
+  logoUrl:        LOGO_EJEMPLO,
 };
 
 export const ORDEN_EJEMPLO: PrintOrden = {

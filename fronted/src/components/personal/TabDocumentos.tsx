@@ -12,9 +12,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Dialog,
-  DialogActions, DialogContent, DialogTitle, Divider, FormControl, IconButton,
-  InputLabel, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead,
-  TableRow, TextField, Tooltip, Typography,
+  DialogActions, DialogContent, DialogTitle, Divider, FormControl,
+  FormControlLabel, IconButton, InputLabel, MenuItem, Select, Stack, Switch,
+  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from '@mui/material';
 import {
   Block, Close, ContentCopy, Description, Print, Visibility,
@@ -25,18 +25,9 @@ import {
 } from '../../services/documentos.service';
 import type { Usuario } from '../../types';
 import { EmptyState, ConfirmDialog } from '../common';
+import { DocumentoPreviewA4 } from './DocumentoPreviewA4';
 import { formatDateTime } from '../../utils/format';
-
-/** Abre el HTML en una ventana y lanza la impresión del navegador. */
-function imprimirHtml(html: string) {
-  const win = window.open('', '_blank', 'width=860,height=1000');
-  if (!win) return false;
-  win.document.write(html);
-  win.document.close();
-  // El load garantiza que el CSS y el QR estén pintados antes de imprimir
-  win.onload = () => { win.focus(); win.print(); };
-  return true;
-}
+import { imprimirHtml } from '../../utils/imprimirHtml';
 
 interface TabDocumentosProps {
   empleado: Usuario;
@@ -52,6 +43,8 @@ export function TabDocumentos({ empleado, onError, onExito }: TabDocumentosProps
   // Emisión
   const [tipoSel, setTipoSel]           = useState<TipoDocumento | ''>('');
   const [observaciones, setObservaciones] = useState('');
+  // Certificado laboral: mostrar u ocultar la línea de salario.
+  const [mostrarSalario, setMostrarSalario] = useState(true);
   const [previewHtml, setPreviewHtml]   = useState<string | null>(null);
   const [previewCargando, setPreviewCargando] = useState(false);
   const [emitiendo, setEmitiendo]       = useState(false);
@@ -82,12 +75,15 @@ export function TabDocumentos({ empleado, onError, onExito }: TabDocumentosProps
 
   const metaSel = tipos.find(t => t.tipo === tipoSel);
   const bloqueadoPorRetiro = !!metaSel?.requiereRetiro && !retirado;
+  const esCertificado = tipoSel === 'documento_certificado_laboral';
+  // Solo el certificado usa el toggle; en el resto se manda undefined (no-op).
+  const incluirSalario = esCertificado ? mostrarSalario : undefined;
 
   const handlePrevisualizar = async () => {
     if (!tipoSel) return;
     setPreviewCargando(true);
     try {
-      const { html } = await documentosService.previsualizar(tipoSel, empleado.id, observaciones || undefined);
+      const { html } = await documentosService.previsualizar(tipoSel, empleado.id, observaciones || undefined, incluirSalario);
       setPreviewHtml(html);
     } catch (err) {
       const data = (err as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
@@ -101,7 +97,7 @@ export function TabDocumentos({ empleado, onError, onExito }: TabDocumentosProps
     if (!tipoSel) return;
     setEmitiendo(true);
     try {
-      const doc = await documentosService.emitir(tipoSel, empleado.id, observaciones || undefined);
+      const doc = await documentosService.emitir(tipoSel, empleado.id, observaciones || undefined, incluirSalario);
       onExito(`Documento ${doc.consecutivo} emitido correctamente`);
       setPreviewHtml(null);
       setObservaciones('');
@@ -196,6 +192,20 @@ export function TabDocumentos({ empleado, onError, onExito }: TabDocumentosProps
                 value={observaciones}
                 onChange={e => setObservaciones(e.target.value)}
                 helperText="Se insertan en el cuerpo del acta"
+              />
+            )}
+
+            {esCertificado && (
+              <FormControlLabel
+                control={<Switch checked={mostrarSalario} onChange={e => { setMostrarSalario(e.target.checked); setPreviewHtml(null); }} />}
+                label={
+                  <Typography variant="body2">
+                    Mostrar salario
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      Si se apaga, la certificación no incluye la línea del salario.
+                    </Typography>
+                  </Typography>
+                }
               />
             )}
 
@@ -326,19 +336,12 @@ export function TabDocumentos({ empleado, onError, onExito }: TabDocumentosProps
           <IconButton size="small" onClick={() => setPreviewHtml(null)}><Close fontSize="small" /></IconButton>
         </DialogTitle>
         <Divider />
-        <DialogContent sx={{ p: 0, bgcolor: 'grey.100' }}>
+        <DialogContent sx={{ p: 0 }}>
           <Alert severity="info" square sx={{ borderRadius: 0 }}>
             Borrador. El consecutivo y el código de verificación se generan al emitir.
           </Alert>
-          <Box sx={{ p: 2, display: 'flex', justifyContent: 'center' }}>
-            <iframe
-              title="Vista previa del documento"
-              srcDoc={previewHtml ?? ''}
-              style={{
-                width: '210mm', height: '70vh', border: '1px solid #ccc',
-                background: '#fff', transform: 'scale(0.85)', transformOrigin: 'top center',
-              }}
-            />
+          <Box sx={{ p: 2 }}>
+            <DocumentoPreviewA4 html={previewHtml ?? ''} />
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>

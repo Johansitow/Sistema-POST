@@ -42,6 +42,11 @@ export interface TokenPayload {
   /** Identidad del super admin — viene de Usuario.es_super_admin, NO del rol */
   es_super_admin:  boolean;
   /**
+   * Progreso del modo tutorial (product tour), POR USUARIO. El frontend lo usa
+   * para decidir si auto-dispara el tour de bienvenida sin peticiones extra.
+   */
+  tutorial_completado: boolean;
+  /**
    * Códigos de permiso (Permiso.codigo) efectivos del usuario:
    * permisos del rol (RolPermiso) ∪ permisos directos (UsuarioPermiso).
    * Vacío para superadmin (bypasea todo).
@@ -99,6 +104,8 @@ const buildPayload = (user: {
   nombre_completo: string;
   /** Campo directo del usuario — identifica al superadmin único del sistema */
   es_super_admin:  boolean;
+  /** Progreso del modo tutorial, por usuario */
+  tutorial_completado: boolean;
   rol: {
     id:             number;
     nombre:         string;
@@ -119,6 +126,7 @@ const buildPayload = (user: {
   nombre_completo: user.nombre_completo,
   // ─── FUENTE DE VERDAD: es_super_admin del usuario, no del rol ───────────────
   es_super_admin:  user.es_super_admin,
+  tutorial_completado: user.tutorial_completado,
   // Permisos efectivos = rol ∪ directos (sin duplicados)
   permisos: [...new Set([
     ...(user.rol.permisos ?? []).map(rp => rp.permiso.codigo),
@@ -192,6 +200,24 @@ export const authService = {
   },
 
   /**
+   * emitirSesion — re-emite user + tokens frescos para un usuario ya autenticado,
+   * sin pedir credenciales. Recarga desde BD (misma fuente que login/refresh) para
+   * que la lista `restaurantes` refleje asignaciones recién creadas.
+   *
+   * Se usa al crear/entrar a un sandbox de onboarding: tras asignar al superadmin
+   * como UsuarioRestaurante de la sede de prueba, el frontend necesita un token
+   * que ya incluya esa sede para que tenantContext la resuelva. `credencial` es el
+   * username del usuario autenticado (req.user.usuario).
+   */
+  async emitirSesion(credencial: string) {
+    const user = await usuarioRepository.findByCredencial(credencial);
+    if (!user) throw new UnauthorizedError('Usuario no encontrado');
+
+    const payload = buildPayload(user);
+    return { user: payload, tokens: buildTokens(payload) };
+  },
+
+  /**
    * getProfile — perfil completo del usuario autenticado.
    *
    * Devuelve más campos que el token (telefono, fechas, creador, etc.)
@@ -235,6 +261,26 @@ export const authService = {
     const existe = await usuarioRepository.findById(userId);
     if (!existe) throw new NotFoundError('Usuario');
     return usuarioRepository.update(userId, data);
+  },
+
+  /**
+   * marcarTutorial — registra si el usuario completó u omitió el modo tutorial.
+   *
+   * Es progreso PERSONAL (por usuario), no por sede: por eso vive en Usuario y no
+   * en un feature flag con contexto como onboarding_completado. El id sale del
+   * token (nunca de la URL), así que nadie puede marcar el tutorial de otro.
+   * `tutorial_completado_en` guarda cuándo, para medir activación; se limpia a
+   * null si se resetea (completado = false), útil para volver a mostrar el tour.
+   */
+  async marcarTutorial(userId: number, completado: boolean) {
+    const existe = await usuarioRepository.findById(userId);
+    if (!existe) throw new NotFoundError('Usuario');
+
+    await usuarioRepository.update(userId, {
+      tutorial_completado:    completado,
+      tutorial_completado_en: completado ? new Date() : null,
+    });
+    return { tutorial_completado: completado };
   },
 
   /**

@@ -55,13 +55,17 @@ export interface PrintNegocio {
   telefono?:     string;
   ciudad?:       string;
   resolucionDian?: string;
+  /** URL del logo del negocio; se dibuja si showLogo está activo. */
+  logoUrl?:      string;
 }
 
 export interface PrintTemplateConfig {
   paperWidth?: string;
   fontSize?:   'small' | 'medium' | 'large';
   showLogo?:   boolean;
-  sections?:   { id: string; visible: boolean; campos?: Record<string, boolean> }[];
+  /** Texto libre para el pie del ticket (reemplaza el "¡Gracias!" por defecto). */
+  footerText?: string;
+  sections?:   { id: string; visible: boolean; orden?: number; campos?: Record<string, boolean> }[];
 }
 
 // ── Helpers internos ──────────────────────────────────────────────────────────
@@ -86,6 +90,27 @@ function cam(tmpl: PrintTemplateConfig | undefined, secId: string, campo: string
   if (!tmpl?.sections) return true;
   const s = tmpl.sections.find(x => x.id === secId);
   return !s?.campos || s.campos[campo] !== false;
+}
+
+/**
+ * Devuelve los ids de sección en el orden configurado por el usuario
+ * (`sections[].orden`), cayendo al orden por defecto cuando no hay config.
+ * Permite reordenar secciones desde el editor y que el preview/impresión
+ * lo reflejen sin tocar el layout de cada sección.
+ */
+function ordenarSecciones(tmpl: PrintTemplateConfig | undefined, defaults: string[]): string[] {
+  if (!tmpl?.sections) return defaults;
+  const ordenDe = (id: string): number => {
+    const s = tmpl.sections!.find(x => x.id === id);
+    return s?.orden ?? defaults.indexOf(id);
+  };
+  return [...defaults].sort((a, b) => ordenDe(a) - ordenDe(b));
+}
+
+/** Bloque de logo centrado para el encabezado (solo si showLogo y hay URL). */
+function logoHTML(tmpl: PrintTemplateConfig | undefined, negocio: PrintNegocio): string {
+  if (!tmpl?.showLogo || !negocio.logoUrl) return '';
+  return `<div class="center"><img class="logo" src="${negocio.logoUrl}" alt="" /></div>`;
 }
 
 // ── Margen físico proporcional ────────────────────────────────────────────────
@@ -137,6 +162,7 @@ export function buildCSS(cfg?: PrintTemplateConfig): string {
   }
   .center  { text-align: center; }
   .right   { text-align: right; }
+  .logo    { max-width: 60%; max-height: 90px; margin: 0 auto 4px; filter: grayscale(1) contrast(1.2); }
   .bold    { font-weight: 900; }
   .large   { font-size: 15px; font-weight: 900; }
   .xlarge  { font-size: 18px; font-weight: 900; letter-spacing: 1px; }
@@ -179,31 +205,30 @@ export function buildComandaHTML(orden: PrintOrden, tmpl?: PrintTemplateConfig):
 
   const totalItems = orden.detalles.reduce((acc, d) => acc + d.cantidad, 0);
 
-  return `
-    ${sec(tmpl, 'header') ? `
-    <div class="center">
-      <div class="bold xlarge">★ COCINA ★</div>
-      <div class="bold large">${orden.numero_orden}</div>
-      <div class="badge">${tipo}</div>
-    </div>
-    <hr class="divider" />
-    ${cam(tmpl, 'header', 'mesa') && orden.mesa ? `<div><span class="bold">Mesa:</span> ${orden.mesa}</div>` : ''}
-    ${cam(tmpl, 'header', 'mesero') && orden.mesero ? `<div><span class="bold">Mesero:</span> ${orden.mesero}</div>` : ''}
-    ${cam(tmpl, 'header', 'fechaHora') ? `<div><span class="bold">Hora:</span> ${fmtFecha(orden.fecha_apertura)}</div>` : ''}
-    ${cam(tmpl, 'header', 'prioridad') && orden.prioridad ? `<div><span class="bold">Prioridad:</span> ${orden.prioridad}</div>` : ''}
-    ${cam(tmpl, 'header', 'orden') ? `<div><span class="bold">Orden:</span> ${orden.numero_orden}</div>` : ''}
-    ` : ''}
-    <hr class="divider-solid" />
+  const bloques: Record<string, string> = {
+    header: !sec(tmpl, 'header') ? '' : `
+      <div class="center">
+        <div class="bold xlarge">★ COCINA ★</div>
+        <div class="bold large">${orden.numero_orden}</div>
+        <div class="badge">${tipo}</div>
+      </div>
+      <hr class="divider" />
+      ${cam(tmpl, 'header', 'mesa') && orden.mesa ? `<div><span class="bold">Mesa:</span> ${orden.mesa}</div>` : ''}
+      ${cam(tmpl, 'header', 'mesero') && orden.mesero ? `<div><span class="bold">Mesero:</span> ${orden.mesero}</div>` : ''}
+      ${cam(tmpl, 'header', 'fechaHora') ? `<div><span class="bold">Hora:</span> ${fmtFecha(orden.fecha_apertura)}</div>` : ''}
+      ${cam(tmpl, 'header', 'prioridad') && orden.prioridad ? `<div><span class="bold">Prioridad:</span> ${orden.prioridad}</div>` : ''}
+      ${cam(tmpl, 'header', 'orden') ? `<div><span class="bold">Orden:</span> ${orden.numero_orden}</div>` : ''}
+      <hr class="divider-solid" />`,
 
-    ${sec(tmpl, 'items') ? `<table>${items}</table>` : ''}
+    items: !sec(tmpl, 'items') ? '' : `<table>${items}</table><hr class="divider" />`,
 
-    <hr class="divider" />
-    ${sec(tmpl, 'footer') ? `
+    footer: !sec(tmpl, 'footer') ? '' : `
       ${cam(tmpl, 'footer', 'totalItems') ? `<div class="center bold">Total ítems: ${totalItems}</div>` : ''}
       ${orden.observaciones ? `<div class="notas bold">Obs: ${orden.observaciones}</div>` : ''}
-      <div class="center" style="margin-top:6px; font-size:10px;">— Fin de comanda —</div>
-    ` : ''}
-  `;
+      <div class="center" style="margin-top:6px; font-size:10px;">— Fin de comanda —</div>`,
+  };
+
+  return ordenarSecciones(tmpl, ['header', 'items', 'footer']).map(id => bloques[id] ?? '').join('');
 }
 
 /** Genera el cuerpo HTML para ticket/factura de cliente. */
@@ -236,77 +261,77 @@ export function buildFacturaHTML(
     ? `<tr class="totales"><td class="label">Domicilio</td><td class="valor">${fmtMoney(orden.costo_domicilio)}</td></tr>`
     : '';
 
-  return `
-    ${sec(tmpl, 'header') ? `
-    <div class="center">
-      <div class="bold xlarge">${negocio.nombre}</div>
-      ${cam(tmpl, 'header', 'nit')       && negocio.nit            ? `<div>NIT: ${negocio.nit}</div>` : ''}
-      ${cam(tmpl, 'header', 'telefono')  && negocio.telefono        ? `<div>Tel: ${negocio.telefono}</div>` : ''}
-      ${cam(tmpl, 'header', 'direccion') && negocio.ciudad           ? `<div>${negocio.ciudad}</div>` : ''}
-      ${cam(tmpl, 'header', 'resolucionDian') && negocio.resolucionDian ? `<div>Res. DIAN: ${negocio.resolucionDian}</div>` : ''}
-    </div>
-    <hr class="divider" />
-    <div class="center">
-      <div>${numeroFactura ? `Factura: <span class="bold">${numeroFactura}</span>` : ''}</div>
-      <div>Orden: <span class="bold">${orden.numero_orden}</span></div>
-      <div class="badge">${tipo}</div>
-    </div>
-    ` : ''}
+  const graciasHTML = cam(tmpl, 'footer', 'gracias')
+    ? (tmpl?.footerText?.trim()
+        ? tmpl.footerText.trim()
+        : '¡Gracias por su compra!<br/>Vuelva pronto 😊')
+    : '';
 
-    ${sec(tmpl, 'cliente') ? `
-    <div style="margin-top:4px;">
-      <div>${fmtFecha(orden.fecha_apertura)}</div>
-      ${cam(tmpl, 'cliente', 'nombre')    && orden.nombre_contacto  ? `<div>Cliente: ${orden.nombre_contacto}</div>` : ''}
-      ${cam(tmpl, 'cliente', 'nombre')    && orden.telefono          ? `<div>Tel: ${orden.telefono}</div>` : ''}
-      ${orden.direccion_entrega                                       ? `<div>Dir: ${orden.direccion_entrega}</div>` : ''}
-    </div>
-    ` : ''}
-
-    <hr class="divider-solid" />
-
-    ${sec(tmpl, 'items') ? `
-    <table>
-      <tr class="item-row">
-        <td class="item-nombre bold">Producto</td>
-        ${cam(tmpl, 'items', 'cantidad') ? `<td class="item-cant bold">Cant</td>` : ''}
-        ${cam(tmpl, 'items', 'precio')   ? `<td class="item-precio bold">Total</td>` : ''}
-      </tr>
-      <tr><td colspan="3"><hr class="divider" /></td></tr>
-      ${items}
-    </table>
-    ` : ''}
-
-    <hr class="divider" />
-
-    ${sec(tmpl, 'totals') ? `
-    <table>
-      ${cam(tmpl, 'totals', 'subtotal') ? `<tr class="totales"><td class="label">Subtotal</td><td class="valor">${fmtMoney(orden.subtotal)}</td></tr>` : ''}
-      ${domicilioRow}
-      ${cam(tmpl, 'totals', 'iva') && orden.impuestos > 0 ? `<tr class="totales"><td class="label">${IMPUESTO_LABEL[orden.impuesto_tipo ?? ''] ?? 'IVA'}</td><td class="valor">${fmtMoney(orden.impuestos)}</td></tr>` : ''}
-      <tr><td colspan="2"><hr class="divider" /></td></tr>
-      ${cam(tmpl, 'totals', 'total') ? `<tr class="totales total-final"><td class="label">TOTAL</td><td class="valor">${fmtMoney(orden.total)}</td></tr>` : ''}
-    </table>
-    ` : ''}
-
-    ${cam(tmpl, 'totals', 'metodoPago') && pagos.length > 0 ? `
+  const bloques: Record<string, string> = {
+    header: !sec(tmpl, 'header') ? '' : `
+      ${logoHTML(tmpl, negocio)}
+      <div class="center">
+        <div class="bold xlarge">${negocio.nombre}</div>
+        ${cam(tmpl, 'header', 'nit')       && negocio.nit            ? `<div>NIT: ${negocio.nit}</div>` : ''}
+        ${cam(tmpl, 'header', 'telefono')  && negocio.telefono        ? `<div>Tel: ${negocio.telefono}</div>` : ''}
+        ${cam(tmpl, 'header', 'direccion') && negocio.ciudad           ? `<div>${negocio.ciudad}</div>` : ''}
+        ${cam(tmpl, 'header', 'resolucionDian') && negocio.resolucionDian ? `<div>Res. DIAN: ${negocio.resolucionDian}</div>` : ''}
+      </div>
       <hr class="divider" />
+      <div class="center">
+        <div>${numeroFactura ? `Factura: <span class="bold">${numeroFactura}</span>` : ''}</div>
+        <div>Orden: <span class="bold">${orden.numero_orden}</span></div>
+        <div class="badge">${tipo}</div>
+      </div>`,
+
+    cliente: !sec(tmpl, 'cliente') ? '' : `
+      <div style="margin-top:4px;">
+        <div>${fmtFecha(orden.fecha_apertura)}</div>
+        ${cam(tmpl, 'cliente', 'nombre')    && orden.nombre_contacto  ? `<div>Cliente: ${orden.nombre_contacto}</div>` : ''}
+        ${cam(tmpl, 'cliente', 'nombre')    && orden.telefono          ? `<div>Tel: ${orden.telefono}</div>` : ''}
+        ${orden.direccion_entrega                                       ? `<div>Dir: ${orden.direccion_entrega}</div>` : ''}
+      </div>`,
+
+    items: !sec(tmpl, 'items') ? '' : `
+      <hr class="divider-solid" />
       <table>
-        <tr class="totales"><td class="label bold">PAGO</td><td></td></tr>
-        ${pagosRows}
+        <tr class="item-row">
+          <td class="item-nombre bold">Producto</td>
+          ${cam(tmpl, 'items', 'cantidad') ? `<td class="item-cant bold">Cant</td>` : ''}
+          ${cam(tmpl, 'items', 'precio')   ? `<td class="item-precio bold">Total</td>` : ''}
+        </tr>
+        <tr><td colspan="3"><hr class="divider" /></td></tr>
+        ${items}
       </table>
-    ` : ''}
+      <hr class="divider" />`,
 
-    ${orden.observaciones ? `<hr class="divider" /><div class="notas">Obs: ${orden.observaciones}</div>` : ''}
+    totals: !sec(tmpl, 'totals') ? '' : `
+      <table>
+        ${cam(tmpl, 'totals', 'subtotal') ? `<tr class="totales"><td class="label">Subtotal</td><td class="valor">${fmtMoney(orden.subtotal)}</td></tr>` : ''}
+        ${domicilioRow}
+        ${cam(tmpl, 'totals', 'iva') && orden.impuestos > 0 ? `<tr class="totales"><td class="label">${IMPUESTO_LABEL[orden.impuesto_tipo ?? ''] ?? 'IVA'}</td><td class="valor">${fmtMoney(orden.impuestos)}</td></tr>` : ''}
+        <tr><td colspan="2"><hr class="divider" /></td></tr>
+        ${cam(tmpl, 'totals', 'total') ? `<tr class="totales total-final"><td class="label">TOTAL</td><td class="valor">${fmtMoney(orden.total)}</td></tr>` : ''}
+      </table>
+      ${cam(tmpl, 'totals', 'metodoPago') && pagos.length > 0 ? `
+        <hr class="divider" />
+        <table>
+          <tr class="totales"><td class="label bold">PAGO</td><td></td></tr>
+          ${pagosRows}
+        </table>` : ''}
+      ${orden.observaciones ? `<hr class="divider" /><div class="notas">Obs: ${orden.observaciones}</div>` : ''}`,
 
-    ${sec(tmpl, 'footer') ? `
-    <hr class="divider" />
-    <div class="center" style="margin-top:4px; font-size:10px;">
-      ${cam(tmpl, 'footer', 'gracias') ? '¡Gracias por su compra!<br/>Vuelva pronto 😊' : ''}
-      ${cam(tmpl, 'footer', 'fechaHora') ? `<div>${fmtFecha(orden.fecha_apertura)}</div>` : ''}
-      ${cam(tmpl, 'footer', 'condicionesPago') ? '<div>Pago a 30 días.</div>' : ''}
-    </div>
-    ` : ''}
-  `;
+    footer: !sec(tmpl, 'footer') ? '' : `
+      <hr class="divider" />
+      <div class="center" style="margin-top:4px; font-size:10px;">
+        ${graciasHTML}
+        ${cam(tmpl, 'footer', 'fechaHora') ? `<div>${fmtFecha(orden.fecha_apertura)}</div>` : ''}
+        ${cam(tmpl, 'footer', 'condicionesPago') ? '<div>Pago a 30 días.</div>' : ''}
+      </div>`,
+  };
+
+  return ordenarSecciones(tmpl, ['header', 'cliente', 'items', 'totals', 'footer'])
+    .map(id => bloques[id] ?? '').join('');
 }
 
 /**

@@ -35,6 +35,8 @@ export interface ImpresionConfig {
   ancho_papel:    '58' | '80';
   copias_comanda: number;
   pie_ticket:     string;
+  /** Resolución DIAN a imprimir en la factura (opcional; no hay campo en Restaurante). */
+  resolucion_dian: string;
 }
 
 // ── Valores por defecto ──────────────────────────────────────────────────────
@@ -59,6 +61,7 @@ export const DEFAULTS: {
     ancho_papel:    '80',
     copias_comanda: 1,
     pie_ticket:     '',
+    resolucion_dian: '',
   },
 };
 
@@ -95,6 +98,7 @@ export const CONFIG_KEYS = {
     ancho_papel:    'ancho_papel',
     copias_comanda: 'copias_comanda',
     pie_ticket:     'pie_ticket',
+    resolucion_dian: 'resolucion_dian',
   },
 } as const;
 

@@ -7,12 +7,16 @@ import { plantillaService } from '../services/plantilla.service';
 import { buildTenantCtx } from '../lib/tenantCtx';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
+import { TIPOS_TERMICOS } from '../lib/plantillas/tipos';
 import { z } from 'zod';
 
 const plantillaSchema = z.object({
   nombre:     z.string().min(1).max(100),
-  tipo:       z.enum(['comanda', 'factura', 'ticket', 'cocina']),
+  tipo:       z.enum(TIPOS_TERMICOS),
   es_default: z.boolean().default(false),
+  // Cuando es true, la plantilla aplica solo a la sede activa (id_restaurante);
+  // cuando es false/omitido, aplica a todo el grupo.
+  solo_sede:  z.boolean().optional(),
   plantilla:  z.record(z.unknown()),
 });
 
@@ -34,7 +38,10 @@ export const getById = asyncHandler(async (req: Request, res: Response) => {
 
 export const getDefault = asyncHandler(async (req: Request, res: Response) => {
   const tipo = String(req.params.tipo);
-  const plantilla = await plantillaService.obtenerDefault(tipo);
+  const plantilla = await plantillaService.obtenerDefault(tipo, {
+    id_restaurante: req.restauranteId,
+    id_grupo:       req.grupoId,
+  });
   res.json({ success: true, data: plantilla });
 });
 

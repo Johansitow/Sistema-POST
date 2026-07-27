@@ -61,6 +61,8 @@ const mockUser = {
   email:           'admin@test.com',
   nombre_completo: 'Admin Test',
   password_hash:   'hashed_password',
+  es_super_admin:  true,
+  tutorial_completado: false,
   rol: {
     id:             1,
     nombre:         'admin',
@@ -85,6 +87,16 @@ describe('authService.login', () => {
     expect(result.tokens.accessToken).toBe('mock_token');
     expect(result.tokens.refreshToken).toBe('mock_token');
     expect(usuarioRepository.update).toHaveBeenCalledWith(1, expect.objectContaining({ ultimo_acceso: expect.any(Date) }));
+  });
+
+  it('incluye tutorial_completado en el payload del usuario', async () => {
+    (usuarioRepository.findByCredencial as any).mockResolvedValue(mockUser);
+    (bcrypt.compare as any).mockResolvedValue(true);
+    (usuarioRepository.update as any).mockResolvedValue({});
+
+    const result = await authService.login('admin', 'password123');
+
+    expect(result.user.tutorial_completado).toBe(false);
   });
 
   it('lanza UnauthorizedError si el usuario no existe', async () => {
@@ -138,6 +150,41 @@ describe('authService.refreshToken', () => {
     (usuarioRepository.findByCredencial as any).mockResolvedValue(null);
 
     await expect(authService.refreshToken('valid')).rejects.toThrow(UnauthorizedError);
+  });
+});
+
+describe('authService.marcarTutorial', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('al completar, guarda el flag en true con marca de tiempo', async () => {
+    (usuarioRepository.findById as any).mockResolvedValue(mockUser);
+    (usuarioRepository.update as any).mockResolvedValue({});
+
+    const result = await authService.marcarTutorial(1, true);
+
+    expect(result).toEqual({ tutorial_completado: true });
+    expect(usuarioRepository.update).toHaveBeenCalledWith(1, {
+      tutorial_completado:    true,
+      tutorial_completado_en: expect.any(Date),
+    });
+  });
+
+  it('al reiniciar, pone el flag en false y limpia la marca de tiempo', async () => {
+    (usuarioRepository.findById as any).mockResolvedValue(mockUser);
+    (usuarioRepository.update as any).mockResolvedValue({});
+
+    await authService.marcarTutorial(1, false);
+
+    expect(usuarioRepository.update).toHaveBeenCalledWith(1, {
+      tutorial_completado:    false,
+      tutorial_completado_en: null,
+    });
+  });
+
+  it('lanza NotFoundError si el usuario no existe', async () => {
+    (usuarioRepository.findById as any).mockResolvedValue(null);
+
+    await expect(authService.marcarTutorial(99, true)).rejects.toThrow(NotFoundError);
   });
 });
 

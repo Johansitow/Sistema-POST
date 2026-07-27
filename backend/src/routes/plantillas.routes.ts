@@ -7,6 +7,7 @@ import { getAll, getById, getDefault, create, update, remove } from '../controll
 import { authenticate } from '../middlewares/auth.middleware';
 import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
+import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 
 const router = Router();
 
@@ -130,11 +131,13 @@ router.use(authenticate);
  *       204: { description: Eliminada }
  *       404: { description: No encontrada }
  */
+// Lecturas: cualquier usuario autenticado (los meseros necesitan GET /default/:tipo
+// para imprimir sin ser admins). Mutaciones: requieren permiso plantillas.gestionar.
 router.get('/',              tenantContextOptional, getAll);
 router.get('/default/:tipo', tenantContextOptional, getDefault);
 router.get('/:id',           tenantContextOptional, getById);
-router.post('/',             tenantContext, tenantIsolation, create);
-router.put('/:id',           tenantContext, tenantIsolation, update);
-router.delete('/:id',        tenantContext, tenantIsolation, remove);
+router.post('/',             tenantContext, requireAdminAccess('plantillas.gestionar'), tenantIsolation, create);
+router.put('/:id',           tenantContext, requireAdminAccess('plantillas.gestionar'), tenantIsolation, update);
+router.delete('/:id',        tenantContext, requireAdminAccess('plantillas.gestionar'), tenantIsolation, remove);
 
 export default router;

@@ -72,6 +72,9 @@ export type UsuarioUpdateData = Partial<{
   estado:          EstadoGeneral;
   password_hash:   string;
   ultimo_acceso:   Date;
+  // Progreso del modo tutorial (product tour), por usuario
+  tutorial_completado:    boolean;
+  tutorial_completado_en: Date | null;
 } & EmpleadoFields>;
 
 const selectPublico = {
@@ -87,6 +90,9 @@ const selectPublico = {
   fecha_modificacion: true,
   // Flag de identidad del superadmin único del sistema
   es_super_admin:     true,
+  // Progreso del modo tutorial (product tour), por usuario
+  tutorial_completado:    true,
+  tutorial_completado_en: true,
   // Datos personales del empleado
   tipo_documento:               true,
   documento_identidad:          true,

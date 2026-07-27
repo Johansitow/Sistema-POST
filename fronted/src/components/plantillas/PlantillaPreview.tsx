@@ -5,10 +5,15 @@
  * garantizando que preview ≡ impresión real (mismo CSS, mismo HTML).
  *
  * Los datos de muestra vienen de ejemploDatos.ts (fuente única).
+ *
+ * La "hoja" imita un rollo térmico: ancho fijo (según los mm elegidos) y alto
+ * variable que CRECE y ENCOGE con el contenido. El alto no es fijo: se deriva
+ * midiendo el body del iframe con un ResizeObserver (ver más abajo).
  */
 
 import { useMemo, useState, useRef, useEffect } from 'react';
 import { Box, Typography } from '@mui/material';
+import ReceiptLong from '@mui/icons-material/ReceiptLong';
 import {
   buildComandaHTML,
   buildFacturaHTML,
@@ -21,6 +26,7 @@ import {
   NEGOCIO_EJEMPLO,
 } from '../../lib/plantillas/ejemploDatos';
 import type { TipoPlantilla, PlantillaConfig } from '../../services/plantillas.service';
+import { SOMBRA, RADIO } from '../../theme/tokens';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +47,14 @@ function paperWidthPx(paperWidth: string): number {
   return 302; // 80mm default
 }
 
+// Grises/bordes del sistema de diseño (variables CSS inyectadas en :root por App.tsx).
+const GRIS_FONDO  = 'rgb(var(--neutro-200))'; // lienzo detrás del papel
+const GRIS_BARRA  = 'rgb(var(--neutro-100))'; // barra de título
+const GRIS_BORDE  = 'rgb(var(--neutro-200))'; // divisores
+
+// Diente del recorte térmico (zig-zag) en px. Un solo valor, mismo para 80/58/A4.
+const DIENTE = 10;
+
 // ── componente ────────────────────────────────────────────────────────────────
 
 export interface PlantillaPreviewProps {
@@ -49,59 +63,68 @@ export interface PlantillaPreviewProps {
 }
 
 export function PlantillaPreview({ tipo, config }: PlantillaPreviewProps) {
-  const html = useMemo(() => {
+  // El cuerpo del ticket se calcula aparte para poder detectar el estado vacío
+  // (todas las secciones ocultas → body en blanco) antes de armar el documento.
+  const { html, isEmpty } = useMemo(() => {
     const tmpl = configToTmpl(config);
     const body = (tipo === 'comanda' || tipo === 'cocina')
       ? buildComandaHTML(ORDEN_EJEMPLO, tmpl)
       : buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, undefined, tmpl);
-    return buildFullHTML(body, tmpl);
+    return { html: buildFullHTML(body, tmpl), isEmpty: body.trim() === '' };
   }, [tipo, config]);
 
   // ── Altura elástica ─────────────────────────────────────────────────────────
-  // El iframe reporta su altura real mediante ResizeObserver sobre el body del
-  // documento cargado. Un rAF tras el load garantiza que el layout esté completo
-  // antes de leer scrollHeight (onLoad sintético mide antes del layout → siempre 0).
-  // El ResizeObserver re-mide automáticamente cuando cambia el contenido (secciones,
-  // ancho de papel, tamaño de fuente) sin necesidad de lógica por-ancho.
-  const [iframeHeight, setIframeHeight] = useState<number>(200);
+  // El alto de la hoja se DERIVA del contenido, no es fijo. Se mide SOLO el body
+  // del iframe: su CSS fija width en mm pero deja el height en auto, así que la
+  // altura del body sigue al contenido tanto al crecer como al encoger.
+  //
+  // No se usa documentElement.scrollHeight: en un iframe html.scrollHeight nunca
+  // baja del alto del viewport (scrollHeight ≥ clientHeight), de modo que una vez
+  // que el iframe crece ya no podría volver a encoger. Medir el body lo evita.
+  //
+  // El ResizeObserver re-mide en cada reflow (fuente cargada, logo, etc.). El
+  // efecto se re-ejecuta con [html]: al cambiar ancho, tamaño de texto, secciones
+  // o pie, el srcDoc cambia, el iframe recarga y se vuelve a enganchar y medir.
+  const [sheetHeight, setSheetHeight] = useState<number>(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
+    if (isEmpty) { setSheetHeight(0); return; }
     const iframe = iframeRef.current;
     if (!iframe) return;
 
     let ro: ResizeObserver | null = null;
 
     const measure = () => {
-      const doc = iframe.contentDocument;
-      if (!doc) return;
-      const h = Math.max(
-        doc.body?.scrollHeight              ?? 0,
-        doc.documentElement?.scrollHeight   ?? 0,
-      );
-      if (h > 0) setIframeHeight(h);
+      const body = iframe.contentDocument?.body;
+      if (!body) return;
+      const h = Math.max(body.scrollHeight, Math.ceil(body.getBoundingClientRect().height));
+      if (h > 0) setSheetHeight(h);
     };
 
-    const onLoad = () => {
+    const attach = () => {
       ro?.disconnect();
-      // rAF: espera al primer frame después del parse para que el layout esté listo.
-      requestAnimationFrame(() => {
-        measure();
-        const body = iframe.contentDocument?.body;
-        if (body) {
-          // ResizeObserver re-mide cuando el contenido crece/encoge (reactivo a cambios).
-          ro = new ResizeObserver(measure);
-          ro.observe(body);
-        }
-      });
+      const body = iframe.contentDocument?.body;
+      if (!body) return;
+      measure();
+      // Re-mide automáticamente cuando el contenido reflowa (reactivo a cambios).
+      ro = new ResizeObserver(measure);
+      ro.observe(body);
     };
 
+    // rAF: espera al primer frame tras el parse para que el layout esté listo.
+    const onLoad = () => requestAnimationFrame(attach);
     iframe.addEventListener('load', onLoad);
+
+    // El documento puede haber cargado antes de montar este efecto (srcDoc ya
+    // presente tras un re-render): engancha de inmediato si el body existe.
+    if (iframe.contentDocument?.body) requestAnimationFrame(attach);
+
     return () => {
       iframe.removeEventListener('load', onLoad);
       ro?.disconnect();
     };
-  }, []); // una sola vez — el listener 'load' persiste y se dispara en cada srcDoc nuevo
+  }, [html, isEmpty]);
 
   const widthPx = paperWidthPx(config.config.paperWidth);
 
@@ -111,13 +134,13 @@ export function PlantillaPreview({ tipo, config }: PlantillaPreviewProps) {
         display:        'flex',
         flexDirection:  'column',
         height:         '100%',
-        background:     '#e8e8e8',
-        borderRadius:   2,
+        background:     GRIS_FONDO,
+        borderRadius:   `${RADIO.lg}px`,
         overflow:       'hidden',
       }}
     >
       {/* Barra de título */}
-      <Box sx={{ px: 2, py: 1, background: '#d0d0d0', borderBottom: '1px solid #bbb' }}>
+      <Box sx={{ px: 2, py: 1, background: GRIS_BARRA, borderBottom: `1px solid ${GRIS_BORDE}` }}>
         <Typography variant="caption" fontWeight={700} color="text.secondary">
           VISTA PREVIA — {config.config.paperWidth} · {
             config.config.fontSize === 'small'  ? 'Texto pequeño' :
@@ -130,31 +153,84 @@ export function PlantillaPreview({ tipo, config }: PlantillaPreviewProps) {
       <Box
         sx={{
           flex:           1,
-          overflow:       'auto',
+          minHeight:      0,           // permite que overflow-y funcione dentro del flex
+          overflowY:      'auto',
+          overflowX:      'hidden',
           display:        'flex',
           justifyContent: 'center',
+          alignItems:     isEmpty ? 'center' : 'flex-start',
           py:             3,
           px:             2,
         }}
       >
-        <Box
-          sx={{
-            width:        widthPx,
-            flexShrink:   0,
-            background:   'white',
-            boxShadow:    '0 4px 24px rgba(0,0,0,0.32), 0 1px 6px rgba(0,0,0,0.18)',
-            borderRadius: '1px',
-          }}
-        >
-          <iframe
-            ref={iframeRef}
-            data-testid="preview-iframe"
-            srcDoc={html}
-            scrolling="no"
-            style={{ width: '100%', height: iframeHeight, border: 'none', display: 'block' }}
-            title="Vista previa de impresión"
-          />
-        </Box>
+        {isEmpty ? (
+          // Placeholder discreto (no una hoja rota vacía). Se replica el estilo de
+          // EmptyState en vez de importarlo: EmptyState arrastra el barrel de
+          // @mui/icons-material, que satura los descriptores de archivo en test.
+          <Box
+            sx={{
+              display:        'flex',
+              flexDirection:  'column',
+              alignItems:     'center',
+              justifyContent: 'center',
+              gap:            1.25,
+              px:             3,
+              textAlign:      'center',
+              color:          'text.secondary',
+            }}
+          >
+            <ReceiptLong sx={{ fontSize: 44, color: 'text.disabled' }} />
+            <Typography variant="body1" fontWeight={500} color="text.secondary">
+              Sin contenido para previsualizar
+            </Typography>
+            <Typography variant="body2" color="text.disabled">
+              Activa al menos una sección para ver el ticket.
+            </Typography>
+          </Box>
+        ) : (
+          <Box
+            sx={{
+              position:     'relative',
+              width:        widthPx,
+              flexShrink:   0,
+              bgcolor:      'background.paper', // papel térmico: blanco del tema
+              boxShadow:    SOMBRA.lg,
+              borderRadius: `${RADIO.sm}px`,
+              // Espacio para que el contenido no toque el recorte térmico.
+              py:           `${DIENTE}px`,
+              // Recorte térmico (zig-zag) arriba y abajo: triángulos del color del
+              // fondo gris pintados sobre el borde blanco del papel.
+              '&::before, &::after': {
+                content:      '""',
+                position:     'absolute',
+                left:         0,
+                right:        0,
+                height:       `${DIENTE}px`,
+                background: `
+                  linear-gradient(-45deg, ${GRIS_FONDO} 50%, transparent 0) 0 0,
+                  linear-gradient( 45deg, ${GRIS_FONDO} 50%, transparent 0) 0 0`,
+                backgroundSize:   `${DIENTE * 2}px ${DIENTE}px`,
+                backgroundRepeat: 'repeat-x',
+              },
+              '&::before': { top: 0, transform: 'scaleY(-1)' }, // dientes apuntando hacia adentro
+              '&::after':  { bottom: 0 },
+            }}
+          >
+            <iframe
+              ref={iframeRef}
+              data-testid="preview-iframe"
+              srcDoc={html}
+              scrolling="no"
+              style={{
+                width:   '100%',
+                height:  sheetHeight || undefined,
+                border:  'none',
+                display: 'block',
+              }}
+              title="Vista previa de impresión"
+            />
+          </Box>
+        )}
       </Box>
     </Box>
   );

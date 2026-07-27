@@ -9,7 +9,7 @@ import { documentoService } from '../services/documento.service';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { BadRequestError } from '../exceptions/HttpErrors';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
-import { emitirDocumentoSchema, anularDocumentoSchema } from '../dto/documentos.dto';
+import { emitirDocumentoSchema, anularDocumentoSchema, miDesprendibleSchema } from '../dto/documentos.dto';
 
 const pid = (val: string | string[]): number => {
   const n = parseInt(Array.isArray(val) ? val[0] : val, 10);
@@ -29,23 +29,23 @@ export const listarVariables = asyncHandler(async (_req: Request, res: Response)
 });
 
 export const previsualizar = asyncHandler(async (req: Request, res: Response) => {
-  const { tipo, id_empleado, observaciones } = emitirDocumentoSchema.parse(req.body);
+  const { tipo, id_empleado, observaciones, incluirSalario } = emitirDocumentoSchema.parse(req.body);
   const usuario = (req as any).user!;
 
   const resultado = await documentoService.previsualizar(
     tipo, id_empleado,
-    { observaciones, firmante: usuario.nombre_completo ?? '' },
+    { observaciones, firmante: usuario.nombre_completo ?? '', incluirSalario },
     grupoScope(req),
   );
   res.json(resultado);
 });
 
 export const emitir = asyncHandler(async (req: Request, res: Response) => {
-  const { tipo, id_empleado, observaciones, id_periodo } = emitirDocumentoSchema.parse(req.body);
+  const { tipo, id_empleado, observaciones, id_periodo, incluirSalario } = emitirDocumentoSchema.parse(req.body);
   const usuario = (req as any).user!;
 
   const documento = await documentoService.emitir(
-    tipo, id_empleado, { observaciones, id_periodo },
+    tipo, id_empleado, { observaciones, id_periodo, incluirSalario },
     { id: usuario.id, nombre: usuario.nombre_completo ?? '' },
     grupoScope(req),
   );
@@ -105,4 +105,48 @@ export const verificar = asyncHandler(async (req: Request, res: Response) => {
   const codigo = Array.isArray(req.params.codigo) ? req.params.codigo[0] : req.params.codigo;
   if (!codigo || codigo.length > 32) throw new BadRequestError('Código inválido');
   res.json(await documentoService.verificar(codigo));
+});
+
+// ── Portal del trabajador — autoservicio ────────────────────────────────────
+// El id sale SIEMPRE del token (req.user.id), nunca de la URL: el empleado solo
+// alcanza sus propios documentos y no requiere permiso de administración.
+
+export const misDocumentos = asyncHandler(async (req: Request, res: Response) => {
+  const documentos = await documentoService.listarMisDocumentos((req as any).user!.id);
+  res.json({ documentos });
+});
+
+export const miDocumentoContenido = asyncHandler(async (req: Request, res: Response) => {
+  const documento = await documentoService.obtenerMiContenido(pid(req.params.id), (req as any).user!.id);
+  res.json({ documento });
+});
+
+export const misPeriodosLiquidados = asyncHandler(async (req: Request, res: Response) => {
+  const periodos = await documentoService.listarMisPeriodos((req as any).user!.id);
+  res.json({ periodos });
+});
+
+export const miDesprendible = asyncHandler(async (req: Request, res: Response) => {
+  const { id_periodo } = miDesprendibleSchema.parse(req.body);
+  const usuario = (req as any).user!;
+
+  const documento = await documentoService.emitirMiDesprendible(
+    usuario.id, usuario.nombre_completo ?? '', id_periodo,
+  );
+
+  registrarAuditoria({
+    id_usuario:           usuario.id,
+    accion:               'EMITIR_DOCUMENTO',
+    modulo:               'personal',
+    tabla_afectada:       'documentos_emitidos',
+    id_registro_afectado: documento.id,
+    datos_nuevos:         {
+      tipo: 'documento_desprendible_pago', consecutivo: documento.consecutivo,
+      id_empleado: usuario.id, id_periodo, autoservicio: true,
+    },
+    ip_address: req.auditContext?.ip,
+    user_agent: req.auditContext?.userAgent,
+  });
+
+  res.json({ documento });
 });

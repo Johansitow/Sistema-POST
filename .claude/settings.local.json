@@ -27,7 +27,9 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "PowerShell($ts = Get-Date -Format \"yyyyMMddHHmmss\"; $dir = \"C:\\\\Users\\\\jnosp\\\\pos-restaurante\\\\backend\\\\prisma\\\\migrations\\\\${ts}_add_configuracion_grupo\"; New-Item -ItemType Directory -Path $dir -Force | Out-Null; Write-Output $dir)",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "PowerShell($g = Get-Command gh -ErrorAction SilentlyContinue; if \\($g\\) { Write-Output $g.Source; gh --version } else { Write-Output \"NOT_FOUND\" })",
+      "PowerShell($w = Get-Command winget -ErrorAction SilentlyContinue; if \\($w\\) { Write-Output \"winget disponible: $\\($w.Source\\)\" } else { Write-Output \"winget NO disponible\" })"
     ]
   }
 }

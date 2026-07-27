@@ -40,7 +40,16 @@ export const miPerfilSchema = z.object({
   return out;
 });
 
+/**
+ * miTutorialSchema — el usuario marca su progreso del modo tutorial.
+ * completado=true al finalizarlo u omitirlo; false para volver a mostrarlo.
+ */
+export const miTutorialSchema = z.object({
+  completado: z.boolean(),
+});
+
 export type LoginDTO          = z.infer<typeof loginSchema>;
+export type MiTutorialDTO     = z.infer<typeof miTutorialSchema>;
 export type MiPerfilDTO       = z.infer<typeof miPerfilSchema>;
 export type RefreshTokenDTO   = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordDTO = z.infer<typeof changePasswordSchema>;

@@ -11,7 +11,13 @@
 
 import { Router } from 'express';
 import { apply } from '../controller/onboarding.controller';
-import { authenticate } from '../middlewares/auth.middleware';
+import {
+  crearSandbox,
+  listarSandboxes,
+  entrarSandbox,
+  eliminarSandbox,
+} from '../controller/sandboxOnboarding.controller';
+import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
 import { tenantContext } from '../middlewares/tenantContext.middleware';
 import { requirePermission } from '../middlewares/permission.middleware';
 
@@ -24,5 +30,14 @@ router.post(
   requirePermission('onboarding.aplicar'),
   apply,
 );
+
+// ── Sandboxes de "Probar configuración" (solo superadmin) ──────────────────────
+// Cada prueba es un GrupoNegocio desechable (es_sandbox) con 1+ sedes. Se puede
+// crear, entrar (sesión fresca) y borrar por completo sin tocar datos reales.
+router.use('/sandbox', authenticate, requireSuperAdmin);
+router.post('/sandbox',                 crearSandbox);
+router.get('/sandbox',                  listarSandboxes);
+router.post('/sandbox/:idGrupo/entrar', entrarSandbox);
+router.delete('/sandbox/:idGrupo',      eliminarSandbox);
 
 export default router;
