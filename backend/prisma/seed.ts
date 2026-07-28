@@ -50,7 +50,6 @@ async function main() {
   await prisma.alerta.deleteMany();
 
   // Nivel 2: Pagos y facturas (dependen de orden)
-  await prisma.pagoGrupo.deleteMany();
   await prisma.pago.deleteMany();
   await prisma.factura.deleteMany();
 
@@ -61,9 +60,8 @@ async function main() {
   await prisma.clientePunto.deleteMany();
   await prisma.cliente.deleteMany();       // cascade elimina ClienteDireccion
 
-  // Nivel 5: Órdenes y grupos de órdenes
+  // Nivel 5: Órdenes (cascada a OrdenSede/OrdenSedeItem/PagoOrden/OrdenEvento)
   await prisma.orden.deleteMany();
-  await prisma.ordenGrupo.deleteMany();
 
   // Nivel 6: Movimientos e inventario
   await prisma.movimiento.deleteMany();
