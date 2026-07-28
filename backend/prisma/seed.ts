@@ -13,7 +13,12 @@
 
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-import { DEV_SUPER_ADMIN_UUID } from '../src/config/env.schema';
+
+// UUID del superadmin SOLO para desarrollo/test. En producción manda
+// process.env.SUPER_ADMIN_UUID (obligatorio). Se define aquí en vez de
+// importarlo de ../src para que el seed sea autocontenido y corra dentro de la
+// imagen de producción (que solo lleva prisma/ y dist/, no src/).
+const DEV_SUPER_ADMIN_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
 const prisma = new PrismaClient();
 
