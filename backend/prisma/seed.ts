@@ -538,8 +538,12 @@ async function main() {
   console.log('✅ Lotes y movimientos creados');
 
   // ============================================================
-  // ÓRDENES DE EJEMPLO
+  // ÓRDENES DE EJEMPLO (solo desarrollo)
+  // Son datos de demo del modelo Orden legacy que quedaron desactualizados
+  // contra el schema actual; en producción se omiten (el flujo real usa
+  // OrdenSede y cada tenant genera sus propias órdenes).
   // ============================================================
+  if (!isProduction) {
   console.log('🛒 Creando órdenes de ejemplo...');
   const orden1 = await prisma.orden.create({
     data: {
@@ -571,6 +575,9 @@ async function main() {
     },
   });
   console.log('✅ 2 órdenes de ejemplo creadas');
+  } else {
+    console.log('⏭️  Órdenes de ejemplo omitidas (producción)');
+  }
 
   // ============================================================
   // FEATURE FLAGS
