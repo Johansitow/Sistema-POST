@@ -8,10 +8,26 @@ import type {
   UsuarioAuth, AuthTokens, PerfilUsuario, NominaEmpleado, HistorialSalario, MiPerfilDto,
 } from '../types';
 
+/** Datos del alta self-serve (embudo gratis). */
+export interface RegistroData {
+  nombre_negocio: string;
+  nombre_completo: string;
+  email: string;
+  usuario: string;
+  password: string;
+  acepta_habeas_data: boolean;
+}
+
 export const authService = {
   async login(credentials: LoginCredentials): Promise<{ user: UsuarioAuth; tokens: AuthTokens }> {
     const res = await api.post('/auth/login', credentials);
     // El backend responde: { message, user, tokens }
+    return { user: res.data.user, tokens: res.data.tokens };
+  },
+
+  /** Registro público: crea el negocio en plan Gratis y devuelve sesión iniciada. */
+  async registrar(data: RegistroData): Promise<{ user: UsuarioAuth; tokens: AuthTokens }> {
+    const res = await api.post('/auth/registro', data);
     return { user: res.data.user, tokens: res.data.tokens };
   },
 

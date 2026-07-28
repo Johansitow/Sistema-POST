@@ -161,4 +161,14 @@ export const productoRepository = {
       ...tenantWhere(id_grupo),
       ...(id_restaurante ? { stocks: { some: { id_restaurante, activo: true } } } : {}),
     } }),
+
+  /**
+   * countByGrupo — productos PROPIOS del grupo (excluye el catálogo global
+   * id_grupo=null y los eliminados). Se usa para el límite de plan: los
+   * productos compartidos del sistema no consumen la cuota del tenant.
+   */
+  countByGrupo: (id_grupo: number) =>
+    prisma.producto.count({
+      where: { id_grupo, estado: { not: EstadoGeneral.eliminado } },
+    }),
 };

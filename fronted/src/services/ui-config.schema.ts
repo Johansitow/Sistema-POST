@@ -51,7 +51,7 @@ export const DEFAULTS: {
     orden_items:   [],
   },
   apariencia: {
-    nombre_sistema: 'POS Restaurante',
+    nombre_sistema: 'Krezco',
     // Mismo rojo que ya usan Layout.tsx/Login.tsx hardcodeado hoy — evita un
     // salto de color sorpresa en instalaciones que nunca personalizaron esto.
     color_primario: '#e53935',

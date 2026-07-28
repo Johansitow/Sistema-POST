@@ -44,6 +44,8 @@ import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
 import { Perfil }       from './pages/Perfil';
 import { VerificarDocumento } from './pages/VerificarDocumento';
+import { Precios }      from './pages/Precios';
+import { Registro }     from './pages/Registro';
 
 // Las cuatro páginas operativas más pesadas también van en lazy. Sumaban ~6.000
 // líneas en el bundle inicial (ProductosTab 1.954, Ordenes 1.870, Recetas 1.324,
@@ -69,6 +71,7 @@ const Permisos        = lazy(() => import('./pages/admin/Permisos').then(m => ({
 const Apariencia      = lazy(() => import('./pages/admin/Apariencia'));
 const GruposNegocio   = lazy(() => import('./pages/admin/GruposNegocio'));
 const OnboardingPrueba = lazy(() => import('./pages/admin/OnboardingPrueba').then(m => ({ default: m.OnboardingPrueba })));
+const MiPlan          = lazy(() => import('./pages/admin/MiPlan'));
 
 // ── Fallback mientras el chunk lazy se descarga ────────────────────────────────
 
@@ -144,7 +147,10 @@ export default function App() {
         <Routes>
 
           {/* ── Pública ─────────────────────────────────────────────────── */}
-          <Route path="/login" element={<Login />} />
+          <Route path="/login"    element={<Login />} />
+          {/* Página de precios y alta self-serve: el embudo masivo, sin sesión. */}
+          <Route path="/precios"  element={<Precios />} />
+          <Route path="/registro" element={<Registro />} />
           {/* Verificación de documentos laborales: destino del QR impreso.  */}
           {/* Va FUERA del guard a propósito — quien verifica (un banco, una */}
           {/* embajada) no tiene cuenta en el sistema.                       */}
@@ -316,6 +322,15 @@ export default function App() {
                 element={
                   <AdminGuard>
                     <Suspense fallback={<PageFallback />}><OnboardingPrueba /></Suspense>
+                  </AdminGuard>
+                }
+              />
+              {/* Mi plan — consumo vs. límites y escalera de planes (dueño del grupo) */}
+              <Route
+                path="/admin/mi-plan"
+                element={
+                  <AdminGuard permiso="config.sistema">
+                    <Suspense fallback={<PageFallback />}><MiPlan /></Suspense>
                   </AdminGuard>
                 }
               />

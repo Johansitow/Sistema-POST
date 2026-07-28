@@ -3,7 +3,7 @@
  */
 
 import { Router } from 'express';
-import { login, logout, getProfile, refreshToken, changePassword, getMiNomina, actualizarMiPerfil, marcarMiTutorial } from '../controller/auth.controller';
+import { login, registro, logout, getProfile, refreshToken, changePassword, getMiNomina, actualizarMiPerfil, marcarMiTutorial } from '../controller/auth.controller';
 import {
   misDocumentos, miDocumentoContenido, misPeriodosLiquidados, miDesprendible,
 } from '../controller/documentos.controller';
@@ -13,6 +13,7 @@ const router = Router();
 
 // Públicas
 router.post('/login',           login);
+router.post('/registro',        registro);   // alta self-serve (embudo gratis)
 router.post('/refresh',         refreshToken);
 
 // Protegidas

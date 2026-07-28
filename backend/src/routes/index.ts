@@ -41,6 +41,7 @@ import uiConfigRoutes      from './ui-config.routes';
 import adminRoutes         from './admin.routes';
 import onboardingRoutes    from './onboarding.routes';
 import menuRoutes          from './menu.routes';
+import planesRoutes        from './planes.routes';
 
 // ─── Router v1 ────────────────────────────────────────────────────────────────
 const v1 = Router();
@@ -81,6 +82,7 @@ v1.use('/ui-config',      uiConfigRoutes);
 v1.use('/admin',          adminRoutes);
 v1.use('/onboarding',     onboardingRoutes);
 v1.use('/menu',           menuRoutes);
+v1.use('/planes',         planesRoutes);
 
 // ─── Exportado como setupRoutes para que coincida con server.ts ───────────────
 export const setupRoutes = (app: Application): void => {

@@ -4,8 +4,9 @@
 
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
+import { registroService } from '../services/registro.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { loginSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema, miTutorialSchema } from '../dto/auth.dto';
+import { loginSchema, registroSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema, miTutorialSchema } from '../dto/auth.dto';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
@@ -21,6 +22,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   });
 
   res.json({ message: 'Login exitoso', user: result.user, tokens: result.tokens });
+});
+
+export const registro = asyncHandler(async (req: Request, res: Response) => {
+  const data = registroSchema.parse(req.body);
+  const result = await registroService.registrar(data, {
+    ip:        req.auditContext?.ip,
+    userAgent: req.auditContext?.userAgent,
+  });
+
+  registrarAuditoria({
+    id_usuario: result.user.id,
+    accion:     'REGISTRO_PUBLICO',
+    modulo:     'auth',
+    ip_address: req.auditContext?.ip,
+    user_agent: req.auditContext?.userAgent,
+  });
+
+  res.status(201).json({ message: 'Cuenta creada correctamente', user: result.user, tokens: result.tokens });
 });
 
 export const refreshToken = asyncHandler(async (req: Request, res: Response) => {

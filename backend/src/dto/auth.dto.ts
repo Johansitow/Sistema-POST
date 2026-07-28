@@ -13,6 +13,24 @@ export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token requerido'),
 });
 
+/**
+ * registroSchema — alta self-serve de un negocio nuevo desde la web pública.
+ * `acepta_habeas_data` DEBE ser true (literal): sin consentimiento no hay alta,
+ * porque es la base legal para el tratamiento de datos (Ley 1581).
+ */
+export const registroSchema = z.object({
+  nombre_negocio:  z.string().min(2, 'El nombre del negocio es requerido').max(200),
+  nombre_completo: z.string().min(2, 'Tu nombre es requerido').max(200),
+  email:           z.string().email('Correo inválido').max(150),
+  usuario:         z.string()
+                    .min(3, 'El usuario debe tener al menos 3 caracteres').max(50)
+                    .regex(/^[a-zA-Z0-9._-]+$/, 'Solo letras, números, punto, guion y guion bajo'),
+  password:        z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(100),
+  acepta_habeas_data: z.literal(true, {
+    errorMap: () => ({ message: 'Debes aceptar el tratamiento de datos para continuar' }),
+  }),
+});
+
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Contraseña actual requerida'),
   newPassword:     z.string().min(8, 'La nueva contraseña debe tener al menos 8 caracteres'),
@@ -49,6 +67,7 @@ export const miTutorialSchema = z.object({
 });
 
 export type LoginDTO          = z.infer<typeof loginSchema>;
+export type RegistroDTO       = z.infer<typeof registroSchema>;
 export type MiTutorialDTO     = z.infer<typeof miTutorialSchema>;
 export type MiPerfilDTO       = z.infer<typeof miPerfilSchema>;
 export type RefreshTokenDTO   = z.infer<typeof refreshTokenSchema>;

@@ -19,7 +19,14 @@ vi.mock('../../repositories/producto.repository', () => ({
     softDelete:     vi.fn(),
     count:          vi.fn(),
     countByEstado:  vi.fn(),
+    countByGrupo:   vi.fn(),
   },
+}));
+
+// Por defecto findById devuelve undefined → sin plan conocido, el guard de
+// límite se omite y los tests de creación existentes no cambian de comportamiento.
+vi.mock('../../repositories/grupo-negocio.repository', () => ({
+  grupoNegocioRepository: { findById: vi.fn() },
 }));
 
 vi.mock('../../repositories/producto-stock.repository', () => ({
@@ -46,6 +53,7 @@ vi.mock('../../config/redis', () => ({
 
 import { productoService } from '../producto.service';
 import { productoRepository } from '../../repositories/producto.repository';
+import { grupoNegocioRepository } from '../../repositories/grupo-negocio.repository';
 import { productoStockRepository } from '../../repositories/producto-stock.repository';
 import { inventarioService } from '../inventario.service';
 import { ConflictError, NotFoundError, BadRequestError, ForbiddenError } from '../../exceptions/HttpErrors';
@@ -136,6 +144,29 @@ describe('productoService.crear', () => {
     await productoService.crear({ sku: 'CAFE-001', nombre: 'Café', precio_unitario: 5000, id_grupo: 7 });
 
     expect(productoStockRepository.upsert).not.toHaveBeenCalled();
+  });
+
+  it('lanza ForbiddenError si el grupo alcanzó el tope de productos de su plan', async () => {
+    // Grupo en plan Gratis (starter, tope 60) que ya tiene 60 productos propios.
+    (grupoNegocioRepository.findById as any).mockResolvedValue({ id: 7, plan: 'starter' });
+    (productoRepository.countByGrupo as any).mockResolvedValue(60);
+
+    await expect(
+      productoService.crear({ sku: 'CAFE-999', nombre: 'Café', precio_unitario: 5000, id_grupo: 7 })
+    ).rejects.toThrow(ForbiddenError);
+
+    expect(productoRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('permite crear si el grupo está por debajo del tope de su plan', async () => {
+    (grupoNegocioRepository.findById as any).mockResolvedValue({ id: 7, plan: 'starter' });
+    (productoRepository.countByGrupo as any).mockResolvedValue(59);
+    (productoRepository.findBySKU as any).mockResolvedValue(null);
+    (productoRepository.create as any).mockResolvedValue(mockProducto);
+
+    await productoService.crear({ sku: 'CAFE-060', nombre: 'Café', precio_unitario: 5000, id_grupo: 7 });
+
+    expect(productoRepository.create).toHaveBeenCalledOnce();
   });
 });
 

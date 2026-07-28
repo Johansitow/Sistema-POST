@@ -29,7 +29,9 @@ vi.mock('../../repositories/usuario.repository', () => ({
 }));
 
 vi.mock('../../repositories/grupo-negocio.repository', () => ({
-  grupoNegocioRepository: { upsertMiembro: vi.fn() },
+  // findById devuelve undefined por defecto → sin plan conocido, el guard de
+  // límite de usuarios se omite (estos tests no ejercen el tope de plan).
+  grupoNegocioRepository: { upsertMiembro: vi.fn(), findById: vi.fn() },
 }));
 
 vi.mock('../../config/database', () => ({

@@ -31,6 +31,7 @@ import bcrypt from 'bcrypt';
 import { EstadoGeneral, EstadoLaboral, RolGrupo } from '@prisma/client';
 import { usuarioRepository, type EmpleadoFields } from '../repositories/usuario.repository';
 import { grupoNegocioRepository } from '../repositories/grupo-negocio.repository';
+import { getPlan, excedeLimite } from '../lib/planes/catalogo';
 import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '../exceptions/HttpErrors';
 import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { config } from '../config/env';
@@ -207,6 +208,23 @@ export const usuarioService = {
 
     const rol = await usuarioRepository.findRolById(data.id_rol);
     if (!rol) throw new NotFoundError('Rol');
+
+    // Límite de usuarios según el plan del grupo (solo cuando hay scope de grupo:
+    // un admin de grupo creando empleados). El superadmin (grupoId undefined) no
+    // tiene tope.
+    if (grupoId) {
+      const grupo = await grupoNegocioRepository.findById(grupoId);
+      if (grupo?.plan) {
+        const def = getPlan(grupo.plan);
+        const actuales = await usuarioRepository.count(grupoId);
+        if (excedeLimite(actuales, def.limites.max_usuarios)) {
+          throw new ForbiddenError(
+            `Tu plan (${def.nombre}) permite máximo ${def.limites.max_usuarios} usuarios. ` +
+            'Mejora tu plan para agregar más.'
+          );
+        }
+      }
+    }
 
     // Nadie puede crear usuarios con es_super_admin (no está en el DTO por diseño)
     // es_super_admin solo se asigna en seed con UUID fijo

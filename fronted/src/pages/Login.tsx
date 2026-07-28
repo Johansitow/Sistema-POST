@@ -248,8 +248,18 @@ export function Login() {
         </Box>
 
         <Typography
-          variant="caption" color="text.disabled"
+          variant="body2" color="text.secondary"
           sx={{ display: 'block', textAlign: 'center', mt: 3 }}
+        >
+          ¿No tienes cuenta?{' '}
+          <Button variant="text" size="small" onClick={() => navigate('/registro')} sx={{ fontWeight: 700 }}>
+            Créala gratis
+          </Button>
+        </Typography>
+
+        <Typography
+          variant="caption" color="text.disabled"
+          sx={{ display: 'block', textAlign: 'center', mt: 1 }}
         >
           © {new Date().getFullYear()} {nombreSistema} · Todos los derechos reservados
         </Typography>
