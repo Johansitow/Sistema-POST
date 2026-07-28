@@ -38,7 +38,7 @@ export interface LimitesPlan {
   max_productos: number;
   /** Ventana de historial de reportes, en días. `ILIMITADO` = sin tope. */
   historial_reportes_dias: number;
-  /** Marca de agua "Hecho con Crezco" en los tickets. */
+  /** Marca de agua "Hecho con Krezco" en los tickets. */
   watermark_tickets: boolean;
 }
 

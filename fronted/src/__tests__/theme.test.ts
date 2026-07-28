@@ -44,8 +44,9 @@ describe('construirRampaMarca', () => {
   it('cae al color por defecto si el cliente escribe algo inválido', () => {
     // El campo de color de Apariencia es texto libre: alguien puede pegar
     // cualquier cosa y la app no debe quedarse sin marca.
-    expect(construirRampaMarca('no-es-un-color')[500]).toBe('229 57 53');
-    expect(construirRampaMarca('')[500]).toBe('229 57 53');
+    // Verde de marca Krezco (#10B981 → canales RGB).
+    expect(construirRampaMarca('no-es-un-color')[500]).toBe('16 185 129');
+    expect(construirRampaMarca('')[500]).toBe('16 185 129');
   });
 
   it('acepta los formatos de color que un cliente puede pegar', () => {

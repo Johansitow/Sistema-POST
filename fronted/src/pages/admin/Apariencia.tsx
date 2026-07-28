@@ -122,7 +122,7 @@ function AparienciaPanel() {
             <TextField value={colorPrimario} onChange={e => setColorPrimario(e.target.value)}
               size="small" sx={{ width: 120, '& input': { fontFamily: 'monospace' } }} />
             <Box sx={{ display: 'flex', gap: 1 }}>
-              {['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa'].map(c => (
+              {['#10B981', '#e53935', '#1e88e5', '#fb8c00', '#8e24aa'].map(c => (
                 <Box key={c} onClick={() => setColorPrimario(c)} sx={{
                   width: 24, height: 24, borderRadius: '50%', bgcolor: c, cursor: 'pointer',
                   border: '2px solid',

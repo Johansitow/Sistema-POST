@@ -10,7 +10,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Navigate } from 'react-router-dom';
 import {
   Box, Paper, TextField, Button, Typography, Alert,
   InputAdornment, IconButton, CircularProgress, Divider,
@@ -29,7 +29,7 @@ export function Login() {
   const location = useLocation();
   const theme = useTheme();
 
-  const { setAuth }       = useAuthStore();
+  const { setAuth, isAuthenticated, accessToken } = useAuthStore();
   const { initFromToken } = useRestauranteStore();
   const { nombreSistema, logoUrl } = useBrandingStore();
 
@@ -41,6 +41,10 @@ export function Login() {
   // Si el usuario fue redirigido al login desde una ruta protegida,
   // después del login lo mandamos de vuelta a esa ruta
   const from = (location.state as any)?.from?.pathname || '/dashboard';
+
+  // Guard inverso: quien ya tiene sesión válida no debería ver el login.
+  // El bootstrap de App ya validó el token antes de montar esta ruta.
+  if (isAuthenticated && accessToken) return <Navigate to="/dashboard" replace />;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));

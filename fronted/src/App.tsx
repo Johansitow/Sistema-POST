@@ -44,8 +44,10 @@ import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
 import { Perfil }       from './pages/Perfil';
 import { VerificarDocumento } from './pages/VerificarDocumento';
+import { Landing }      from './pages/Landing';
 import { Precios }      from './pages/Precios';
 import { Registro }     from './pages/Registro';
+import { useAuthBootstrap } from './hooks/useAuthBootstrap';
 
 // Las cuatro páginas operativas más pesadas también van en lazy. Sumaban ~6.000
 // líneas en el bundle inicial (ProductosTab 1.954, Ordenes 1.870, Recetas 1.324,
@@ -86,10 +88,15 @@ const PageFallback = () => (
 /**
  * PrivateGuard — Redirige a /login si no hay sesión activa.
  * Usa <Outlet /> para que funcione como route layout element.
+ *
+ * Exige la bandera `isAuthenticated` Y la presencia del token: la bandera se
+ * rehidrata de localStorage, pero sin token no hay forma de autenticar ningún
+ * request. La validación real del token contra el backend la hace useAuthBootstrap
+ * al arrancar (App), antes de montar estas rutas.
  */
 const PrivateGuard: React.FC = () => {
-  const { isAuthenticated } = useAuthStore();
-  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
+  const { isAuthenticated, accessToken } = useAuthStore();
+  return isAuthenticated && accessToken ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
 /**
@@ -139,14 +146,27 @@ export default function App() {
   // Inventario— se quedaban con el azul y el verde quemados a mano.
   const variablesCSS = useMemo(() => construirVariablesCSS(colorPrimario), [colorPrimario]);
 
+  // Valida el token contra el backend antes de montar las rutas. Mientras corre,
+  // se muestra una pantalla de carga: así jamás se pinta UI protegida con un token
+  // sin verificar (el flash de "sesión falsa" que se veía al recargar).
+  const authReady = useAuthBootstrap();
+
   return (
     <ThemeProvider theme={theme}>
     <GlobalStyles styles={variablesCSS} />
     <ErrorBoundary>
+      {!authReady ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      ) : (
       <BrowserRouter>
         <Routes>
 
           {/* ── Pública ─────────────────────────────────────────────────── */}
+          {/* Home de marketing: primera pantalla del sitio. Si ya hay sesión */}
+          {/* válida, Landing redirige al panel por sí misma.                 */}
+          <Route path="/"          element={<Landing />} />
           <Route path="/login"    element={<Login />} />
           {/* Página de precios y alta self-serve: el embudo masivo, sin sesión. */}
           <Route path="/precios"  element={<Precios />} />
@@ -187,9 +207,8 @@ export default function App() {
                */}
               <Route element={<OnboardingGuard />}>
 
-              {/* Raíz → dashboard */}
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {/* La raíz "/" es pública (Landing) y vive fuera de este guard.
+                  El destino tras iniciar sesión es /dashboard (ver Login). */}
 
               {/* Sistema principal */}
               <Route path="/dashboard"     element={<Dashboard   />} />
@@ -340,12 +359,14 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Fallback → la raíz (Landing decide: con sesión válida va al panel;
+              sin sesión muestra el home). Evita rebotes raros a /login. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
 
         </Routes>
         <GlobalSnackbar />
       </BrowserRouter>
+      )}
     </ErrorBoundary>
     </ThemeProvider>
   );

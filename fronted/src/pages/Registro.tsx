@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
 import {
   Box, Paper, TextField, Button, Typography, Alert, Divider,
   Checkbox, FormControlLabel, InputAdornment, IconButton, CircularProgress,
@@ -26,7 +26,7 @@ export function Registro() {
   const navigate = useNavigate();
   const theme = useTheme();
 
-  const { setAuth }       = useAuthStore();
+  const { setAuth, isAuthenticated, accessToken } = useAuthStore();
   const { initFromToken } = useRestauranteStore();
   const { nombreSistema } = useBrandingStore();
 
@@ -37,6 +37,9 @@ export function Registro() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Guard inverso: si ya hay sesión válida, no tiene sentido volver a registrarse.
+  if (isAuthenticated && accessToken) return <Navigate to="/dashboard" replace />;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));

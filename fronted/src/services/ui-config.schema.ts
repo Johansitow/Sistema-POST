@@ -52,9 +52,9 @@ export const DEFAULTS: {
   },
   apariencia: {
     nombre_sistema: 'Krezco',
-    // Mismo rojo que ya usan Layout.tsx/Login.tsx hardcodeado hoy — evita un
-    // salto de color sorpresa en instalaciones que nunca personalizaron esto.
-    color_primario: '#e53935',
+    // Verde esmeralda: color de identidad de la marca Krezco (de "crecer").
+    // Es solo el default cuando un tenant no configuró su propio color.
+    color_primario: '#10B981',
     logo_url:       '',
   },
   impresion: {

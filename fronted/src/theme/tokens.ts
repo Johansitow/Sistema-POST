@@ -121,7 +121,7 @@ export function construirRampaMarca(colorBase: string): Rampa {
   try {
     decomposeColor(base);
   } catch {
-    base = '#e53935';
+    base = '#10B981'; // verde de marca Krezco — fallback si el color guardado es inválido
   }
 
   return PARADAS.reduce((rampa, parada) => {
