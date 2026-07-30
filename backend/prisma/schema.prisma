@@ -275,6 +275,13 @@ model Usuario {
   tutorial_completado           Boolean   @default(false)
   tutorial_completado_en        DateTime?
 
+  // ── Verificación de correo ─────────────────────────────────────────────────
+  // El registro self-serve crea la cuenta con email_verificado=false y envía un
+  // correo de verificación (estilo suave: entra igual, con banner de recordatorio;
+  // ciertas acciones sensibles exigen estar verificado). Ver TokenAuth.
+  email_verificado              Boolean   @default(false)
+  email_verificado_en           DateTime?
+
   rol              Rol       @relation(fields: [id_rol], references: [id])
   creador          Usuario?  @relation("UsuarioCreador", fields: [creado_por], references: [id])
   usuarios_creados Usuario[] @relation("UsuarioCreador")
@@ -292,6 +299,7 @@ model Usuario {
   restaurantes     UsuarioRestaurante[]
   grupos           UsuarioGrupo[]
   permisos_directos UsuarioPermiso[]
+  tokens_auth       TokenAuth[]
 
   historial_salarios   HistorialSalario[] @relation("HistorialSalarioEmpleado")
   salarios_registrados HistorialSalario[] @relation("HistorialSalarioAutor")
@@ -310,6 +318,32 @@ model Usuario {
   @@index([id_restaurante_base])
   @@index([id_jefe_directo])
   @@map("usuarios")
+}
+
+// ── TokenAuth — tokens de un solo uso para verificar correo y resetear clave ──
+// Un mismo modelo sirve a AMBOS flujos (verificacion_email | reset_password).
+// Se guarda solo el HASH sha256 del token (nunca el token plano): el token viaja
+// por correo, y al consumirlo se re-hashea para buscarlo. Al emitir uno nuevo del
+// mismo tipo se invalidan los previos. `usado_en` marca el consumo (un solo uso).
+
+enum TipoTokenAuth {
+  verificacion_email
+  reset_password
+}
+
+model TokenAuth {
+  id             Int           @id @default(autoincrement())
+  id_usuario     Int
+  tipo           TipoTokenAuth
+  token_hash     String        @unique @db.VarChar(64) // sha256 hex del token plano
+  expira_en      DateTime
+  usado_en       DateTime?
+  fecha_creacion DateTime      @default(now())
+
+  usuario        Usuario       @relation(fields: [id_usuario], references: [id], onDelete: Cascade)
+
+  @@index([id_usuario, tipo])
+  @@map("tokens_auth")
 }
 
 // ── UsuarioRestaurante — Acceso multi-restaurante ─────────────────────────────

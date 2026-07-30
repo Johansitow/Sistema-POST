@@ -24,6 +24,9 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/env';
 import { usuarioRepository } from '../repositories/usuario.repository';
+import { tokenAuthService } from './tokenAuth.service';
+import { emailService, plantillaVerificacion, plantillaReset } from './email.service';
+import { cacheDel } from '../config/redis';
 import { UnauthorizedError, NotFoundError, BadRequestError } from '../exceptions/HttpErrors';
 
 /**
@@ -41,6 +44,11 @@ export interface TokenPayload {
   nombre_completo: string;
   /** Identidad del super admin — viene de Usuario.es_super_admin, NO del rol */
   es_super_admin:  boolean;
+  /**
+   * ¿El usuario ya verificó su correo? El frontend lo usa para mostrar/ocultar el
+   * banner de verificación sin una petición extra (como tutorial_completado).
+   */
+  email_verificado: boolean;
   /**
    * Progreso del modo tutorial (product tour), POR USUARIO. El frontend lo usa
    * para decidir si auto-dispara el tour de bienvenida sin peticiones extra.
@@ -104,6 +112,8 @@ const buildPayload = (user: {
   nombre_completo: string;
   /** Campo directo del usuario — identifica al superadmin único del sistema */
   es_super_admin:  boolean;
+  /** ¿Correo verificado? */
+  email_verificado: boolean;
   /** Progreso del modo tutorial, por usuario */
   tutorial_completado: boolean;
   rol: {
@@ -126,6 +136,7 @@ const buildPayload = (user: {
   nombre_completo: user.nombre_completo,
   // ─── FUENTE DE VERDAD: es_super_admin del usuario, no del rol ───────────────
   es_super_admin:  user.es_super_admin,
+  email_verificado: user.email_verificado,
   tutorial_completado: user.tutorial_completado,
   // Permisos efectivos = rol ∪ directos (sin duplicados)
   permisos: [...new Set([
@@ -305,5 +316,69 @@ export const authService = {
     const hash = await bcrypt.hash(newPassword, 10);
     await usuarioRepository.update(userId, { password_hash: hash });
     return { message: 'Contraseña actualizada correctamente' };
+  },
+
+  /**
+   * verificarEmail — consume el token del enlace y marca el correo como verificado.
+   * Invalida la cache del guard requireEmailVerificado para que aplique de inmediato.
+   */
+  async verificarEmail(token: string) {
+    const userId = await tokenAuthService.consumir(token, 'verificacion_email');
+    await usuarioRepository.update(userId, {
+      email_verificado:    true,
+      email_verificado_en: new Date(),
+    });
+    await cacheDel(`auth:email_verificado:${userId}`);
+    return { message: 'Correo verificado correctamente', id_usuario: userId };
+  },
+
+  /**
+   * reenviarVerificacion — reenvía el enlace de verificación al propio usuario.
+   * Idempotente: si ya está verificado, no envía nada. El id sale del token.
+   */
+  async reenviarVerificacion(userId: number) {
+    const user = await usuarioRepository.findById(userId) as { email: string; nombre_completo: string; email_verificado: boolean } | null;
+    if (!user) throw new NotFoundError('Usuario');
+    if (user.email_verificado) return { message: 'Tu correo ya está verificado', enviado: false };
+
+    const token = await tokenAuthService.emitir(userId, 'verificacion_email');
+    await emailService.enviarEmail({
+      to:      user.email,
+      subject: 'Confirma tu correo',
+      html:    plantillaVerificacion(user.nombre_completo, `${config.appUrl}/verificar-email?token=${token}`),
+      text:    `Verifica tu correo: ${config.appUrl}/verificar-email?token=${token}`,
+    });
+    return { message: 'Te enviamos un nuevo enlace de verificación', enviado: true };
+  },
+
+  /**
+   * solicitarReset — envía el correo de restablecimiento SI el email existe.
+   * No revela si el correo está registrado (respuesta idéntica en ambos casos)
+   * para no permitir enumeración de cuentas.
+   */
+  async solicitarReset(email: string) {
+    const user = await usuarioRepository.findByEmail(email);
+    if (user) {
+      const token = await tokenAuthService.emitir(user.id, 'reset_password');
+      await emailService.enviarEmail({
+        to:      user.email,
+        subject: 'Restablece tu contraseña',
+        html:    plantillaReset(user.nombre_completo, `${config.appUrl}/restablecer-password?token=${token}`),
+        text:    `Restablece tu contraseña: ${config.appUrl}/restablecer-password?token=${token}`,
+      });
+    }
+    return { message: 'Si el correo está registrado, te enviamos las instrucciones para restablecer tu contraseña.' };
+  },
+
+  /**
+   * confirmarReset — consume el token del correo y cambia la contraseña.
+   * (No invalida los JWT ya emitidos: el sistema es stateless; la ventana del
+   * access token es de 15m. Ver plan/riesgos para la invalidación total futura.)
+   */
+  async confirmarReset(token: string, password: string) {
+    const userId = await tokenAuthService.consumir(token, 'reset_password');
+    const hash = await bcrypt.hash(password, 10);
+    await usuarioRepository.update(userId, { password_hash: hash });
+    return { message: 'Contraseña actualizada. Ya puedes iniciar sesión.', id_usuario: userId };
   },
 };

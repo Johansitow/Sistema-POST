@@ -3,18 +3,31 @@
  */
 
 import { Router } from 'express';
-import { login, registro, logout, getProfile, refreshToken, changePassword, getMiNomina, actualizarMiPerfil, marcarMiTutorial } from '../controller/auth.controller';
+import {
+  login, registro, logout, getProfile, refreshToken, changePassword,
+  getMiNomina, actualizarMiPerfil, marcarMiTutorial,
+  verificarEmail, reenviarVerificacion, solicitarReset, confirmarReset,
+} from '../controller/auth.controller';
 import {
   misDocumentos, miDocumentoContenido, misPeriodosLiquidados, miDesprendible,
 } from '../controller/documentos.controller';
 import { authenticate } from '../middlewares/auth.middleware';
+import { authRateLimit } from '../middlewares/authRateLimit.middleware';
+import { verificarCaptcha } from '../middlewares/captcha.middleware';
 
 const router = Router();
 
 // Públicas
 router.post('/login',           login);
-router.post('/registro',        registro);   // alta self-serve (embudo gratis)
+// Alta self-serve (embudo gratis) — con captcha y límite dedicado anti-bots.
+router.post('/registro',        authRateLimit(), verificarCaptcha, registro);
 router.post('/refresh',         refreshToken);
+
+// ── Verificación de correo y recuperación de contraseña ───────────────────────
+router.post('/verificar-email',       authRateLimit(),                    verificarEmail);
+router.post('/solicitar-reset',       authRateLimit(), verificarCaptcha,  solicitarReset);
+router.post('/confirmar-reset',       authRateLimit(),                    confirmarReset);
+router.post('/reenviar-verificacion', authenticate,    authRateLimit(3),  reenviarVerificacion);
 
 // Protegidas
 router.get('/profile',          authenticate, getProfile);

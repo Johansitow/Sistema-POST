@@ -6,21 +6,32 @@
  * El usuario escribe su propia contraseña (el sistema nunca la maneja en claro).
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import {
   Box, Paper, TextField, Button, Typography, Alert, Divider,
   Checkbox, FormControlLabel, InputAdornment, IconButton, CircularProgress,
+  List, ListItem, ListItemIcon, ListItemText,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import {
   Visibility, VisibilityOff, StorefrontOutlined, PersonOutline,
   MailOutline, LockOutlined, AccountCircleOutlined,
+  CheckCircle, RadioButtonUnchecked,
 } from '@mui/icons-material';
 import { authService } from '../services/auth.service';
 import { useAuthStore } from '../store/useStore';
 import { useRestauranteStore } from '../store/restauranteStore';
 import { useBrandingStore } from '../store/brandingStore';
+import { Captcha } from '../components/common/Captcha';
+
+/** Requisitos de contraseña (deben coincidir con passwordFuerte del backend). */
+const reglasPassword = (pwd: string) => [
+  { ok: pwd.length >= 8, label: 'Al menos 8 caracteres' },
+  { ok: /[A-Z]/.test(pwd), label: 'Una mayúscula' },
+  { ok: /[a-z]/.test(pwd), label: 'Una minúscula' },
+  { ok: /[0-9]/.test(pwd), label: 'Un número' },
+];
 
 export function Registro() {
   const navigate = useNavigate();
@@ -33,10 +44,15 @@ export function Registro() {
   const [form, setForm] = useState({
     nombre_negocio: '', nombre_completo: '', email: '', usuario: '', password: '',
   });
+  const [confirmar, setConfirmar] = useState('');
   const [aceptaHabeas, setAceptaHabeas] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reglas = useMemo(() => reglasPassword(form.password), [form.password]);
+  const passwordOk = reglas.every(r => r.ok);
 
   // Guard inverso: si ya hay sesión válida, no tiene sentido volver a registrarse.
   if (isAuthenticated && accessToken) return <Navigate to="/dashboard" replace />;
@@ -53,8 +69,12 @@ export function Registro() {
       setError('Completa todos los campos para continuar.');
       return;
     }
-    if (form.password.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres.');
+    if (!passwordOk) {
+      setError('La contraseña no cumple los requisitos (8+ caracteres, mayúscula, minúscula y número).');
+      return;
+    }
+    if (form.password !== confirmar) {
+      setError('Las contraseñas no coinciden.');
       return;
     }
     if (!aceptaHabeas) {
@@ -65,7 +85,7 @@ export function Registro() {
     setLoading(true);
     setError(null);
     try {
-      const data = await authService.registrar({ ...form, acepta_habeas_data: true });
+      const data = await authService.registrar({ ...form, acepta_habeas_data: true, captchaToken });
       setAuth(data.user, data.tokens.accessToken, data.tokens.refreshToken);
       if (data.user.restaurantes?.length) initFromToken(data.user.restaurantes);
       navigate('/onboarding', { replace: true });
@@ -136,7 +156,6 @@ export function Registro() {
             fullWidth label="Contraseña" name="password" autoComplete="new-password"
             type={showPassword ? 'text' : 'password'}
             value={form.password} onChange={handleChange} disabled={loading} sx={{ mb: 1 }}
-            helperText="Mínimo 8 caracteres"
             InputProps={{
               startAdornment: <InputAdornment position="start"><LockOutlined color="action" /></InputAdornment>,
               endAdornment: (
@@ -146,6 +165,37 @@ export function Registro() {
                   </IconButton>
                 </InputAdornment>
               ),
+            }}
+          />
+
+          {/* Requisitos de contraseña en vivo */}
+          {form.password.length > 0 && (
+            <List dense disablePadding sx={{ mb: 1 }}>
+              {reglas.map((r, i) => (
+                <ListItem key={i} disableGutters sx={{ py: 0 }}>
+                  <ListItemIcon sx={{ minWidth: 26 }}>
+                    {r.ok
+                      ? <CheckCircle color="success" sx={{ fontSize: 16 }} />
+                      : <RadioButtonUnchecked color="disabled" sx={{ fontSize: 16 }} />}
+                  </ListItemIcon>
+                  <ListItemText
+                    primaryTypographyProps={{ variant: 'caption', color: r.ok ? 'success.main' : 'text.secondary' }}
+                    primary={r.label}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+
+          <TextField
+            fullWidth label="Confirmar contraseña" name="confirmar" autoComplete="new-password"
+            type={showPassword ? 'text' : 'password'}
+            value={confirmar} onChange={e => { setConfirmar(e.target.value); if (error) setError(null); }}
+            disabled={loading} sx={{ mb: 2 }}
+            error={confirmar.length > 0 && confirmar !== form.password}
+            helperText={confirmar.length > 0 && confirmar !== form.password ? 'Las contraseñas no coinciden' : ' '}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><LockOutlined color="action" /></InputAdornment>,
             }}
           />
 
@@ -165,9 +215,11 @@ export function Registro() {
             }
           />
 
+          <Captcha onToken={setCaptchaToken} />
+
           <Button
             type="submit" fullWidth variant="contained" size="large" disabled={loading}
-            sx={{ py: 1.5, borderRadius: 2, fontWeight: 700 }}
+            sx={{ py: 1.5, borderRadius: 2, fontWeight: 700, mt: 1 }}
           >
             {loading ? <CircularProgress size={24} color="inherit" /> : 'Crear cuenta gratis'}
           </Button>

@@ -44,6 +44,7 @@ import { gruposNegocioService, type GrupoNegocio } from '../../services/grupos-n
 import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
+import { VerificacionBanner } from '../common/VerificacionBanner';
 import NotificationsMenu from './NotificationsMenu';
 import { TourOverlay, TourAutostart } from '../tour';
 import { useTourStore } from '../../store/tourStore';
@@ -921,6 +922,7 @@ export default function Layout() {
         }}
       >
         <Toolbar />
+        <VerificacionBanner />
         <Box sx={{ px: 3, pt: 2, pb: 3, flexGrow: 1, minWidth: 0 }}>
           <AppBreadcrumbs />
           <Outlet />

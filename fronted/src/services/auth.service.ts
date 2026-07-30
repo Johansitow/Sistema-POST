@@ -16,6 +16,8 @@ export interface RegistroData {
   usuario: string;
   password: string;
   acepta_habeas_data: boolean;
+  /** Token del captcha (Turnstile). Opcional: en dev sin captcha no se envía. */
+  captchaToken?: string;
 }
 
 export const authService = {
@@ -47,6 +49,32 @@ export const authService = {
 
   async changePassword(currentPassword: string, newPassword: string): Promise<void> {
     await api.put('/auth/change-password', { currentPassword, newPassword });
+  },
+
+  // ── Verificación de correo y recuperación de contraseña ─────────────────────
+
+  /** Confirma el correo con el token del enlace (público). */
+  async verificarEmail(token: string): Promise<{ message: string }> {
+    const res = await api.post('/auth/verificar-email', { token });
+    return res.data;
+  },
+
+  /** Reenvía el enlace de verificación al usuario autenticado. */
+  async reenviarVerificacion(): Promise<{ message: string }> {
+    const res = await api.post('/auth/reenviar-verificacion');
+    return res.data;
+  },
+
+  /** Solicita el correo de restablecimiento (respuesta genérica, no revela existencia). */
+  async solicitarReset(email: string, captchaToken?: string): Promise<{ message: string }> {
+    const res = await api.post('/auth/solicitar-reset', { email, captchaToken });
+    return res.data;
+  },
+
+  /** Fija la nueva contraseña con el token del correo (público). */
+  async confirmarReset(token: string, password: string): Promise<{ message: string }> {
+    const res = await api.post('/auth/confirmar-reset', { token, password });
+    return res.data;
   },
 
   // ── Portal del trabajador ───────────────────────────────────────────────────

@@ -4,6 +4,18 @@
 
 import { z } from 'zod';
 
+/**
+ * passwordFuerte — política de contraseña compartida por registro y reset.
+ * Min 8, con al menos una mayúscula, una minúscula y un número. La igualdad de
+ * "confirmar contraseña" se valida en el frontend (UX); aquí llega una sola clave.
+ */
+export const passwordFuerte = z.string()
+  .min(8, 'La contraseña debe tener al menos 8 caracteres')
+  .max(100)
+  .regex(/[A-Z]/, 'Debe incluir al menos una mayúscula')
+  .regex(/[a-z]/, 'Debe incluir al menos una minúscula')
+  .regex(/[0-9]/, 'Debe incluir al menos un número');
+
 export const loginSchema = z.object({
   usuario:  z.string().min(1, 'Usuario requerido'),
   password: z.string().min(1, 'Contraseña requerida'),
@@ -25,15 +37,34 @@ export const registroSchema = z.object({
   usuario:         z.string()
                     .min(3, 'El usuario debe tener al menos 3 caracteres').max(50)
                     .regex(/^[a-zA-Z0-9._-]+$/, 'Solo letras, números, punto, guion y guion bajo'),
-  password:        z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(100),
+  password:        passwordFuerte,
   acepta_habeas_data: z.literal(true, {
     errorMap: () => ({ message: 'Debes aceptar el tratamiento de datos para continuar' }),
   }),
+  // Token del captcha (Turnstile). Opcional: en dev sin captcha configurado no llega.
+  captchaToken:    z.string().optional(),
 });
 
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Contraseña actual requerida'),
-  newPassword:     z.string().min(8, 'La nueva contraseña debe tener al menos 8 caracteres'),
+  newPassword:     passwordFuerte,
+});
+
+/** Solicitar el correo de restablecimiento (no revela si el email existe). */
+export const solicitarResetSchema = z.object({
+  email:        z.string().email('Correo inválido').max(150),
+  captchaToken: z.string().optional(),
+});
+
+/** Confirmar el restablecimiento con el token del correo + la nueva contraseña. */
+export const confirmarResetSchema = z.object({
+  token:    z.string().min(1, 'Token requerido'),
+  password: passwordFuerte,
+});
+
+/** Verificar el correo con el token del enlace. */
+export const verificarEmailSchema = z.object({
+  token: z.string().min(1, 'Token requerido'),
 });
 
 /**
@@ -72,3 +103,6 @@ export type MiTutorialDTO     = z.infer<typeof miTutorialSchema>;
 export type MiPerfilDTO       = z.infer<typeof miPerfilSchema>;
 export type RefreshTokenDTO   = z.infer<typeof refreshTokenSchema>;
 export type ChangePasswordDTO = z.infer<typeof changePasswordSchema>;
+export type SolicitarResetDTO = z.infer<typeof solicitarResetSchema>;
+export type ConfirmarResetDTO = z.infer<typeof confirmarResetSchema>;
+export type VerificarEmailDTO = z.infer<typeof verificarEmailSchema>;

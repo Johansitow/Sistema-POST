@@ -46,6 +46,25 @@ export const envSchema = z
     // En desarrollo/test puede omitirse (se usa DEV_SUPER_ADMIN_UUID).
     // En producción DEBE estar presente y coincidir con Usuario.uuid en DB.
     SUPER_ADMIN_UUID: z.string().uuid('SUPER_ADMIN_UUID debe ser un UUID válido').optional(),
+
+    // URL pública del frontend — base de los enlaces de verificación/reset del correo.
+    APP_URL: z.string().url().default('http://localhost:5173'),
+
+    // SMTP (opcional — sin esto el correo se loguea en consola, no rompe el flujo).
+    // Para producción: Brevo/Resend/SendGrid/Gmail u otro SMTP.
+    SMTP_HOST:   z.string().optional(),
+    SMTP_PORT:   z.string().default('587'),
+    SMTP_USER:   z.string().optional(),
+    SMTP_PASS:   z.string().optional(),
+    SMTP_FROM:   z.string().default('Krezco <no-reply@krezco.app>'),
+    SMTP_SECURE: z.string().default('false'), // 'true' para puerto 465
+
+    // Captcha Cloudflare Turnstile (opcional — sin secret se omite la verificación).
+    TURNSTILE_SECRET_KEY: z.string().optional(),
+
+    // Rate limit dedicado a los endpoints sensibles de auth (registro, reset).
+    AUTH_SENSITIVE_RATE_MAX:       z.string().default('5'),
+    AUTH_SENSITIVE_RATE_WINDOW_MS: z.string().default('900000'), // 15 min
   })
   .superRefine((val, ctx) => {
     // En producción no se permite arrancar sin SUPER_ADMIN_UUID explícito:

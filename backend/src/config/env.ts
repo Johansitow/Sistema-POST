@@ -74,6 +74,30 @@ export const config = {
     // en desarrollo/test se cae al UUID que crea el seed.
     uuid: env.SUPER_ADMIN_UUID ?? DEV_SUPER_ADMIN_UUID,
   },
+
+  // URL pública del frontend (base de los enlaces de correo)
+  appUrl: env.APP_URL,
+
+  // SMTP — host vacío = modo consola (fail-open, ver email.service.ts)
+  smtp: {
+    host:   env.SMTP_HOST,
+    port:   parseInt(env.SMTP_PORT, 10),
+    user:   env.SMTP_USER,
+    pass:   env.SMTP_PASS,
+    from:   env.SMTP_FROM,
+    secure: env.SMTP_SECURE === 'true',
+  },
+
+  // Captcha (Turnstile) — secret vacío = bypass en dev
+  turnstile: {
+    secretKey: env.TURNSTILE_SECRET_KEY,
+  },
+
+  // Rate limit dedicado a endpoints sensibles de auth
+  authRateLimit: {
+    max:      parseInt(env.AUTH_SENSITIVE_RATE_MAX, 10),
+    windowMs: parseInt(env.AUTH_SENSITIVE_RATE_WINDOW_MS, 10),
+  },
 } as const;
 
 export default config;

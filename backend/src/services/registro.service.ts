@@ -22,6 +22,9 @@ import bcrypt from 'bcrypt';
 import { RolGrupo } from '@prisma/client';
 import prisma from '../config/database';
 import { authService } from './auth.service';
+import { tokenAuthService } from './tokenAuth.service';
+import { emailService, plantillaVerificacion } from './email.service';
+import { config } from '../config/env';
 import { getPlan } from '../lib/planes/catalogo';
 import { ConflictError } from '../exceptions/HttpErrors';
 
@@ -139,6 +142,18 @@ export const registroService = {
       });
 
       return { usuarioCreado: usuario };
+    });
+
+    // Verificación de correo (estilo suave): la cuenta ya quedó activa y el usuario
+    // entrará de una, pero se envía el enlace de verificación. Fuera de la
+    // transacción y con fail-open: si el correo no sale (sin SMTP en dev, o falla),
+    // el registro NO se cae — el usuario puede reenviar la verificación luego.
+    const tokenVerif = await tokenAuthService.emitir(usuarioCreado.id, 'verificacion_email');
+    await emailService.enviarEmail({
+      to:      usuarioCreado.email,
+      subject: 'Confirma tu correo',
+      html:    plantillaVerificacion(usuarioCreado.nombre_completo, `${config.appUrl}/verificar-email?token=${tokenVerif}`),
+      text:    `Verifica tu correo: ${config.appUrl}/verificar-email?token=${tokenVerif}`,
     });
 
     // Emitir sesión fuera de la transacción (recarga desde BD con la sede ya

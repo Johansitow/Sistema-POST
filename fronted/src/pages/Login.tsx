@@ -249,6 +249,12 @@ export function Login() {
           >
             {loading ? <CircularProgress size={24} color="inherit" /> : 'Iniciar Sesión'}
           </Button>
+
+          <Typography variant="body2" sx={{ textAlign: 'center', mt: 2 }}>
+            <Button variant="text" size="small" onClick={() => navigate('/olvide-password')}>
+              ¿Olvidaste tu contraseña?
+            </Button>
+          </Typography>
         </Box>
 
         <Typography

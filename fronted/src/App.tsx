@@ -47,6 +47,9 @@ import { VerificarDocumento } from './pages/VerificarDocumento';
 import { Landing }      from './pages/Landing';
 import { Precios }      from './pages/Precios';
 import { Registro }     from './pages/Registro';
+import { VerificarEmail }       from './pages/VerificarEmail';
+import { OlvidePassword }       from './pages/OlvidePassword';
+import { RestablecerPassword }  from './pages/RestablecerPassword';
 import { useAuthBootstrap } from './hooks/useAuthBootstrap';
 
 // Las cuatro páginas operativas más pesadas también van en lazy. Sumaban ~6.000
@@ -171,6 +174,10 @@ export default function App() {
           {/* Página de precios y alta self-serve: el embudo masivo, sin sesión. */}
           <Route path="/precios"  element={<Precios />} />
           <Route path="/registro" element={<Registro />} />
+          {/* Verificación de correo y recuperación de contraseña (self-serve). */}
+          <Route path="/verificar-email"      element={<VerificarEmail />} />
+          <Route path="/olvide-password"      element={<OlvidePassword />} />
+          <Route path="/restablecer-password" element={<RestablecerPassword />} />
           {/* Verificación de documentos laborales: destino del QR impreso.  */}
           {/* Va FUERA del guard a propósito — quien verifica (un banco, una */}
           {/* embajada) no tiene cuenta en el sistema.                       */}

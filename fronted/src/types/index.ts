@@ -44,6 +44,8 @@ export interface UsuarioAuth {
    * SIEMPRE usar este campo para decisiones de acceso en el frontend.
    */
   es_super_admin: boolean;
+  /** ¿Correo verificado? Viene en el token; controla el banner de verificación. */
+  email_verificado?: boolean;
   /**
    * Progreso del modo tutorial (product tour), por usuario. false ⇒ se auto-dispara
    * el tour de bienvenida. Viene en el token de login/refresh.

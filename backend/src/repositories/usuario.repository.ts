@@ -75,6 +75,9 @@ export type UsuarioUpdateData = Partial<{
   // Progreso del modo tutorial (product tour), por usuario
   tutorial_completado:    boolean;
   tutorial_completado_en: Date | null;
+  // Verificación de correo
+  email_verificado:       boolean;
+  email_verificado_en:    Date | null;
 } & EmpleadoFields>;
 
 const selectPublico = {
@@ -93,6 +96,9 @@ const selectPublico = {
   // Progreso del modo tutorial (product tour), por usuario
   tutorial_completado:    true,
   tutorial_completado_en: true,
+  // Verificación de correo
+  email_verificado:       true,
+  email_verificado_en:    true,
   // Datos personales del empleado
   tipo_documento:               true,
   documento_identidad:          true,

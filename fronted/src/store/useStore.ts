@@ -83,6 +83,9 @@ interface AuthState {
    */
   setTutorialCompletado: (v: boolean) => void;
 
+  /** Marca el correo como verificado en el usuario en memoria (tras confirmar el enlace). */
+  setEmailVerificado: (v: boolean) => void;
+
   /**
    * Verifica si el usuario actual es super admin.
    * Usa optional chaining defensivo por si el store se rehidrata
@@ -130,6 +133,13 @@ export const useAuthStore = create<AuthState>()(
         set(state => {
           if (!state.user) return {};
           const user = { ...state.user, tutorial_completado: v };
+          return { user, usuario: user };
+        }),
+
+      setEmailVerificado: (v) =>
+        set(state => {
+          if (!state.user) return {};
+          const user = { ...state.user, email_verificado: v };
           return { user, usuario: user };
         }),
 
