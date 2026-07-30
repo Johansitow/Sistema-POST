@@ -4,8 +4,9 @@
 
 import { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
+import { registroService } from '../services/registro.service';
 import { asyncHandler } from '../middlewares/error.middleware';
-import { loginSchema, refreshTokenSchema, changePasswordSchema } from '../dto/auth.dto';
+import { loginSchema, registroSchema, refreshTokenSchema, changePasswordSchema, miPerfilSchema, miTutorialSchema, solicitarResetSchema, confirmarResetSchema, verificarEmailSchema } from '../dto/auth.dto';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
 export const login = asyncHandler(async (req: Request, res: Response) => {
@@ -23,6 +24,24 @@ export const login = asyncHandler(async (req: Request, res: Response) => {
   res.json({ message: 'Login exitoso', user: result.user, tokens: result.tokens });
 });
 
+export const registro = asyncHandler(async (req: Request, res: Response) => {
+  const data = registroSchema.parse(req.body);
+  const result = await registroService.registrar(data, {
+    ip:        req.auditContext?.ip,
+    userAgent: req.auditContext?.userAgent,
+  });
+
+  registrarAuditoria({
+    id_usuario: result.user.id,
+    accion:     'REGISTRO_PUBLICO',
+    modulo:     'auth',
+    ip_address: req.auditContext?.ip,
+    user_agent: req.auditContext?.userAgent,
+  });
+
+  res.status(201).json({ message: 'Cuenta creada correctamente', user: result.user, tokens: result.tokens });
+});
+
 export const refreshToken = asyncHandler(async (req: Request, res: Response) => {
   const { refreshToken } = refreshTokenSchema.parse(req.body);
   const tokens = await authService.refreshToken(refreshToken);
@@ -32,6 +51,37 @@ export const refreshToken = asyncHandler(async (req: Request, res: Response) => 
 export const getProfile = asyncHandler(async (req: Request, res: Response) => {
   const user = await authService.getProfile((req as any).user!.id);
   res.json({ user });
+});
+
+export const getMiNomina = asyncHandler(async (req: Request, res: Response) => {
+  const data = await authService.getMiNomina((req as any).user!.id);
+  res.json(data);
+});
+
+export const actualizarMiPerfil = asyncHandler(async (req: Request, res: Response) => {
+  const data = miPerfilSchema.parse(req.body);
+  const usuarioId = (req as any).user!.id;
+  const user = await authService.actualizarMiPerfil(usuarioId, data);
+
+  registrarAuditoria({
+    id_usuario:     usuarioId,
+    accion:         'ACTUALIZAR_MI_PERFIL',
+    modulo:         'auth',
+    tabla_afectada: 'usuarios',
+    id_registro_afectado: usuarioId,
+    datos_nuevos:   data,
+    ip_address:     req.auditContext?.ip,
+    user_agent:     req.auditContext?.userAgent,
+  });
+
+  res.json({ message: 'Datos actualizados correctamente', user });
+});
+
+export const marcarMiTutorial = asyncHandler(async (req: Request, res: Response) => {
+  const { completado } = miTutorialSchema.parse(req.body);
+  const usuarioId = (req as any).user!.id;
+  const result = await authService.marcarTutorial(usuarioId, completado);
+  res.json(result);
 });
 
 export const changePassword = asyncHandler(async (req: Request, res: Response) => {
@@ -47,6 +97,52 @@ export const changePassword = asyncHandler(async (req: Request, res: Response) =
   });
 
   res.json(result);
+});
+
+// ── Verificación de correo y recuperación de contraseña ───────────────────────
+
+export const verificarEmail = asyncHandler(async (req: Request, res: Response) => {
+  const { token } = verificarEmailSchema.parse(req.body);
+  const { message, id_usuario } = await authService.verificarEmail(token);
+
+  registrarAuditoria({
+    id_usuario, accion: 'VERIFICAR_EMAIL', modulo: 'auth',
+    ip_address: req.auditContext?.ip, user_agent: req.auditContext?.userAgent,
+  });
+
+  res.json({ message });
+});
+
+export const reenviarVerificacion = asyncHandler(async (req: Request, res: Response) => {
+  const usuarioId = (req as any).user!.id;
+  const result = await authService.reenviarVerificacion(usuarioId);
+
+  registrarAuditoria({
+    id_usuario: usuarioId, accion: 'REENVIAR_VERIFICACION', modulo: 'auth',
+    ip_address: req.auditContext?.ip, user_agent: req.auditContext?.userAgent,
+  });
+
+  res.json(result);
+});
+
+export const solicitarReset = asyncHandler(async (req: Request, res: Response) => {
+  const { email } = solicitarResetSchema.parse(req.body);
+  // Respuesta genérica (no revela si el email existe). No se audita con id porque
+  // no debemos confirmar la existencia del usuario en el flujo público.
+  const result = await authService.solicitarReset(email);
+  res.json(result);
+});
+
+export const confirmarReset = asyncHandler(async (req: Request, res: Response) => {
+  const { token, password } = confirmarResetSchema.parse(req.body);
+  const { message, id_usuario } = await authService.confirmarReset(token, password);
+
+  registrarAuditoria({
+    id_usuario, accion: 'RESET_PASSWORD', modulo: 'auth',
+    ip_address: req.auditContext?.ip, user_agent: req.auditContext?.userAgent,
+  });
+
+  res.json({ message });
 });
 
 export const logout = asyncHandler(async (req: Request, res: Response) => {

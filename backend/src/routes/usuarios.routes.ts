@@ -3,9 +3,10 @@
  */
 
 import { Router } from 'express';
-import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina, listarAdminsDeGrupo, listarPermisosDirectos, sincronizarPermisosDirectos } from '../controller/usuarios.controller';
+import { listar, obtener, crear, actualizar, cambiarEstado, resetPassword, asignarRol, listarRoles, estadisticas, getNomina, upsertNomina, listarHistorialSalarios, obtenerResumen, listarAdminsDeGrupo, listarPermisosDirectos, sincronizarPermisosDirectos } from '../controller/usuarios.controller';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware';
 import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
+import { requireEmailVerificado } from '../middlewares/emailVerificado.middleware';
 import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { sanitizarSuperAdminFlag, protegerSuperAdmin } from '../middlewares/superAdmin.guard';
 
@@ -27,8 +28,9 @@ router.put('/:id/permisos',         requireSuperAdmin, sincronizarPermisosDirect
 
 router.get('/:id',                  obtener);
 
-// Creación: eliminar es_super_admin del body antes de llegar al controller
-router.post('/',                    sanitizarSuperAdminFlag, crear);
+// Creación: exige correo verificado (acción sensible; el SA siempre pasa) y
+// elimina es_super_admin del body antes de llegar al controller
+router.post('/',                    requireEmailVerificado, sanitizarSuperAdminFlag, crear);
 
 // Actualización completa: sanitizar flag + proteger al SA de ser modificado
 router.put('/:id',                  sanitizarSuperAdminFlag, protegerSuperAdmin, actualizar);
@@ -44,5 +46,11 @@ router.patch('/:id/rol',            protegerSuperAdmin, asignarRol);
 
 router.get('/:id/nomina',           getNomina);
 router.put('/:id/nomina',           upsertNomina);
+
+// Historial salarial — solo lectura; se escribe automáticamente al guardar nómina
+router.get('/:id/historial-salarios', listarHistorialSalarios);
+
+// KPIs para la cabecera de la ficha del empleado
+router.get('/:id/resumen',            obtenerResumen);
 
 export default router;

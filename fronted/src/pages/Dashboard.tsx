@@ -178,18 +178,18 @@ export const Dashboard: React.FC = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-md w-full border border-red-100">
-          <div className="flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mx-auto mb-4">
-            <AlertTriangle className="w-8 h-8 text-red-600" />
+      <div className="flex items-center justify-center py-16">
+        <div className="bg-white rounded-2xl shadow-md p-8 max-w-md w-full border border-peligro-200">
+          <div className="flex items-center justify-center w-16 h-16 bg-peligro-100 rounded-full mx-auto mb-4">
+            <AlertTriangle className="w-8 h-8 text-peligro-600" />
           </div>
-          <h2 className="text-2xl font-bold text-slate-800 text-center mb-2">
+          <h2 className="text-2xl font-bold text-neutro-800 text-center mb-2">
             Error al cargar
           </h2>
-          <p className="text-slate-600 text-center mb-6">{error}</p>
+          <p className="text-neutro-600 text-center mb-6">{error}</p>
           <button
             onClick={cargarDatos}
-            className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-6 rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center gap-2"
+            className="w-full bg-brand-600 text-white min-h-toque px-6 rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm flex items-center justify-center gap-2"
           >
             <RefreshCw className="w-5 h-5" />
             Reintentar
@@ -203,28 +203,20 @@ export const Dashboard: React.FC = () => {
   // ← ELIMINADO: const formatDate = ...       (viene de utils/format.ts)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100">
+    <div>
+      <div>
 
-      {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-6 pt-2 pb-8">
-
-        {/* Sub-header: fecha + restaurante activo + botón actualizar */}
+        {/* Encabezado. La sede activa ya se muestra en el AppBar del Layout, así
+            que aquí no se repite: solo queda la fecha y el botón de recarga. */}
         <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4 text-slate-500">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4" />
-              <span className="text-sm capitalize">{formatDate()}</span>
-            </div>
-            {restauranteActivo && (
-              <span className="text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-1 shadow-sm">
-                📍 {restauranteActivo.nombre}
-              </span>
-            )}
+          <div className="flex items-center gap-2 text-neutro-500">
+            <Calendar className="w-4 h-4" />
+            <span className="text-sm capitalize">{formatDate()}</span>
           </div>
           <button
             onClick={cargarDatos}
             disabled={loading}
-            className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-2 px-4 rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 transition-all duration-200 shadow-md hover:shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            className="bg-brand-600 text-white min-h-toque px-4 rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed text-sm"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             Actualizar

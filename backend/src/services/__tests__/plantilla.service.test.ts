@@ -140,6 +140,14 @@ describe('plantillaService.obtenerDefault', () => {
     const result = await plantillaService.obtenerDefault('comanda');
     expect(result?.es_default).toBe(true);
   });
+
+  it('reenvía el tenant al repositorio para la precedencia sede > grupo > global', async () => {
+    repo.findDefault.mockResolvedValue(null);
+
+    await plantillaService.obtenerDefault('ticket', { id_restaurante: 10, id_grupo: 1 });
+
+    expect(repo.findDefault).toHaveBeenCalledWith('ticket', { id_restaurante: 10, id_grupo: 1 });
+  });
 });
 
 // ── crear — assertGrupoCtx ────────────────────────────────────────────────────
@@ -183,7 +191,7 @@ describe('plantillaService.crear — assertGrupoCtx', () => {
 
     expect(prisma.$transaction).toHaveBeenCalledOnce();
     expect(result.tipo).toBe('ticket');
-    expect(cacheDel).toHaveBeenCalledWith('plantillas:all', 'plantillas:tipo:ticket', 'plantilla:default:ticket');
+    expect(cacheDel).toHaveBeenCalledWith('plantillas:all', 'plantillas:tipo:ticket');
   });
 
   it('superadmin sin grupoId crea plantilla global (id_grupo=null)', async () => {
@@ -296,7 +304,6 @@ describe('plantillaService.actualizar — tenant guard', () => {
 
     const deletedKeys = (cacheDel as any).mock.calls[0];
     expect(deletedKeys).toContain('plantillas:tipo:ticket');
-    expect(deletedKeys).toContain('plantilla:default:ticket');
     expect(deletedKeys).toContain('plantillas:tipo:comanda');
   });
 
@@ -379,7 +386,6 @@ describe('plantillaService.eliminar — tenant guard', () => {
       'plantillas:all',
       'plantilla:1',
       'plantillas:tipo:ticket',
-      'plantilla:default:ticket',
     );
   });
 

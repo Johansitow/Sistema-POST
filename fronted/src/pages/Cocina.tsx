@@ -11,41 +11,47 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, ChefHat, CheckCircle2, RefreshCw, Package, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Clock, ChefHat, CheckCircle2, RefreshCw, Package, ArrowRight, ArrowLeft } from 'lucide-react';
 import { ordenesService, type OrdenSede } from '../services/ordenes.service';
 import { formatDateTime, formatCurrency } from '../utils';
 import { LoadingScreen } from '../components/common';
 import { useSocket } from '../hooks/useSocket';
 import { toast } from '../store/uiStore';
+import { clasesEstado } from '../theme/estados';
 
 // ─── Helpers visuales ────────────────────────────────────────────────────────
 
+// Los colores salen de theme/estados.ts (mismo vocabulario que Órdenes y las
+// insignias de estado del resto de la app). Lo que se queda aquí es lo propio
+// del KDS: la etiqueta de columna, el texto del botón de avance y el ícono —
+// una cocina no habla de "Pendiente" sino de "Nuevas".
 const ESTADO_CFG = {
   PENDIENTE: {
     label:   'Nuevas',
-    dot:     'bg-amber-400',
-    card:    'border-amber-200 bg-amber-50',
-    header:  'bg-amber-100 text-amber-800',
-    btn:     'bg-amber-500 hover:bg-amber-600 text-white',
+    dot:     clasesEstado('PENDIENTE').punto,
+    card:    clasesEstado('PENDIENTE').tarjeta,
+    header:  'bg-alerta-100 text-alerta-800',
+    btn:     'bg-alerta-500 hover:bg-alerta-600 text-white',
     btnText: 'Iniciar preparación',
     icon:    <Clock className="w-5 h-5" />,
     priority: 0,
   },
   EN_PREPARACION: {
     label:   'En preparación',
-    dot:     'bg-blue-500',
-    card:    'border-blue-200 bg-blue-50',
-    header:  'bg-blue-100 text-blue-800',
-    btn:     'bg-blue-500 hover:bg-blue-600 text-white',
+    dot:     clasesEstado('EN_PREPARACION').punto,
+    card:    clasesEstado('EN_PREPARACION').tarjeta,
+    header:  'bg-info-100 text-info-800',
+    btn:     'bg-info-500 hover:bg-info-600 text-white',
     btnText: 'Marcar lista',
     icon:    <ChefHat className="w-5 h-5" />,
     priority: 1,
   },
   LISTA: {
     label:   'Listas para cobro',
-    dot:     'bg-emerald-500',
-    card:    'border-emerald-200 bg-emerald-50',
-    header:  'bg-emerald-100 text-emerald-800',
+    dot:     clasesEstado('LISTA').punto,
+    card:    clasesEstado('LISTA').tarjeta,
+    header:  'bg-exito-100 text-exito-800',
     btn:     null,
     btnText: '',
     icon:    <CheckCircle2 className="w-5 h-5" />,
@@ -216,33 +222,41 @@ export const Cocina: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
 
-      {/* Header */}
+      {/* Header. La pantalla ya no vive dentro del Layout, así que este es el
+          único encabezado y tiene que traer la salida al sistema. */}
       <div className="bg-slate-800 border-b border-slate-700 px-6 py-4">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="bg-orange-500 p-2 rounded-xl">
+            <div className="bg-brand-600 p-2 rounded-xl">
               <ChefHat className="w-6 h-6 text-white" />
             </div>
             <div>
               <h1 className="text-xl font-bold">Pantalla de Cocina</h1>
-              <p className="text-slate-400 text-xs">
+              <p className="text-slate-400 text-sm">
                 {totalActivas > 0
                   ? `${totalActivas} sede${totalActivas !== 1 ? 's' : ''} en preparación`
                   : 'Sin pedidos activos'}
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-slate-400 text-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400 text-sm hidden md:inline">
               Actualizado {formatDateTime(lastUpdate.toISOString())}
             </span>
             <button
               onClick={cargar}
-              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors"
+              aria-label="Recargar pedidos"
+              className="p-2 min-h-toque min-w-toque flex items-center justify-center bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors"
               title="Recargar"
             >
-              <RefreshCw className="w-4 h-4 text-slate-300" />
+              <RefreshCw className="w-5 h-5 text-slate-300" />
             </button>
+            <Link
+              to="/dashboard"
+              className="flex items-center gap-2 px-4 min-h-toque bg-slate-700 hover:bg-slate-600 rounded-xl transition-colors text-sm font-semibold text-slate-200"
+            >
+              <ArrowLeft className="w-4 h-4" /> Salir
+            </Link>
           </div>
         </div>
       </div>

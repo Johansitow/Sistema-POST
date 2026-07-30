@@ -13,6 +13,9 @@ export interface PlantillaImpresion {
   es_default: boolean;
   plantilla:  Record<string, unknown>;
   estado:     string;
+  /** null = plantilla de todo el grupo; con valor = específica de esa sede. */
+  id_restaurante?: number | null;
+  id_grupo?:       number | null;
   fecha_creacion:    string;
   fecha_modificacion: string;
 }
@@ -21,6 +24,8 @@ export interface CreatePlantillaDto {
   nombre:     string;
   tipo:       TipoPlantilla;
   es_default?: boolean;
+  /** true → aplica solo a la sede activa; false/omitido → a todo el grupo. */
+  solo_sede?:  boolean;
   plantilla:  Record<string, unknown>;
 }
 

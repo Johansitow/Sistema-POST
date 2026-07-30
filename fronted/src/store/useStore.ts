@@ -77,6 +77,16 @@ interface AuthState {
   logout:         () => void;
 
   /**
+   * Marca el modo tutorial como completado/omitido en el usuario en memoria, para
+   * que el auto-arranque no lo vuelva a disparar sin esperar a un refresh de token.
+   * El backend es la fuente de verdad; esto solo evita el re-disparo en la sesión.
+   */
+  setTutorialCompletado: (v: boolean) => void;
+
+  /** Marca el correo como verificado en el usuario en memoria (tras confirmar el enlace). */
+  setEmailVerificado: (v: boolean) => void;
+
+  /**
    * Verifica si el usuario actual es super admin.
    * Usa optional chaining defensivo por si el store se rehidrata
    * con datos de una versión anterior del token (sin campo rol)
@@ -118,6 +128,20 @@ export const useAuthStore = create<AuthState>()(
 
       logout: () =>
         set({ user: null, usuario: null, accessToken: null, refreshToken: null, isAuthenticated: false }),
+
+      setTutorialCompletado: (v) =>
+        set(state => {
+          if (!state.user) return {};
+          const user = { ...state.user, tutorial_completado: v };
+          return { user, usuario: user };
+        }),
+
+      setEmailVerificado: (v) =>
+        set(state => {
+          if (!state.user) return {};
+          const user = { ...state.user, email_verificado: v };
+          return { user, usuario: user };
+        }),
 
       isSuperAdmin: () => {
         const user = get().user;

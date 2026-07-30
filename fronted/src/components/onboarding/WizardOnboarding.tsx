@@ -27,11 +27,12 @@ import {
 import {
   ArrowBack, ArrowForward, CheckCircleOutline, Check,
   PauseCircleOutline, Lock, HelpOutline, Message,
-  WhatsApp, MailOutline, WarningAmber,
+  WhatsApp, MailOutline, WarningAmber, PlayArrow,
   TwoWheeler, DinnerDining, Fastfood, Coffee, SportsBar, Storefront,
 } from '@mui/icons-material';
 import { onboardingService } from '../../services/onboarding.service';
 import { useFeatureFlagStore } from '../../store/featureFlagStore';
+import { useEntrarSandbox } from '../../lib/onboarding/entrarSandbox';
 import {
   ARQUETIPOS_UI,
   PREGUNTAS_EJE,
@@ -352,6 +353,7 @@ function Paso3Revisar({
   applying,
   error,
   modo,
+  multisede,
   onAtras,
   onConfirmar,
   onReiniciar,
@@ -361,8 +363,10 @@ function Paso3Revisar({
   applying: boolean;
   error: string | null;
   modo: ModoWizard;
+  /** Solo modo prueba: el perfil crea un grupo de sedes en vez de una sola. */
+  multisede: boolean;
   onAtras: () => void;
-  onConfirmar?: () => void;  // undefined en modo prueba → no se puede aplicar
+  onConfirmar?: () => void;
   onReiniciar: () => void;
 }) {
   if (loading) {
@@ -493,13 +497,20 @@ function Paso3Revisar({
         </Button>
 
         {modo === 'prueba' ? (
-          /* Modo prueba: solo lectura. No hay botón de aplicar. */
+          /* Modo prueba: crea un tenant desechable con esta config y entra a él. */
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <Alert severity="info" icon={false} sx={{ py: 0.5, px: 1.5, fontSize: 13 }}>
-              Modo prueba — esta vista previa no guarda nada.
-            </Alert>
-            <Button variant="outlined" onClick={onReiniciar}>
+            <Button variant="text" onClick={onReiniciar} disabled={applying}>
               Probar otra configuración
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={applying ? <CircularProgress size={16} color="inherit" /> : <PlayArrow />}
+              onClick={onConfirmar}
+              disabled={applying || loading}
+            >
+              {applying
+                ? 'Creando…'
+                : multisede ? 'Crear grupo de prueba y entrar' : 'Crear restaurante de prueba y entrar'}
             </Button>
           </Box>
         ) : (
@@ -588,6 +599,7 @@ function ContactoPanel({ onVolver }: { onVolver: () => void }) {
 export function WizardOnboarding({ modo = 'onboarding' }: { modo?: ModoWizard }) {
   const navigate = useNavigate();
   const reloadFlags = useFeatureFlagStore(s => s.reloadFlags);
+  const entrarSandbox = useEntrarSandbox();
 
   const [state, setState] = useState<WizardState>({
     paso:           1,
@@ -635,7 +647,7 @@ export function WizardOnboarding({ modo = 'onboarding' }: { modo?: ModoWizard })
     }
   }
 
-  // ── Confirmar y aplicar ──────────────────────────────────────────────────────
+  // ── Confirmar y aplicar (modo onboarding) ────────────────────────────────────
   async function confirmar() {
     if (!state.arquetipo) return;
     set({ applying: true, error: null });
@@ -655,6 +667,28 @@ export function WizardOnboarding({ modo = 'onboarding' }: { modo?: ModoWizard })
       set({ applying: false, error: msg });
     }
   }
+
+  // ── Crear sandbox y entrar (modo prueba) ─────────────────────────────────────
+  async function confirmarPrueba() {
+    if (!state.arquetipo) return;
+    set({ applying: true, error: null });
+    try {
+      const creado = await onboardingService.sandbox.crear({
+        arquetipo: state.arquetipo,
+        ejes: state.overrides,
+      });
+      await entrarSandbox(creado);
+    } catch {
+      set({
+        applying: false,
+        error: 'No se pudo crear el entorno de prueba. Intenta de nuevo.',
+      });
+    }
+  }
+
+  // El perfil crea un grupo de sedes (multisede) o un solo restaurante.
+  const previewMultisede =
+    state.preview?.flags?.some(f => f.nombre === 'estructura.multisede' && f.habilitado) ?? false;
 
   return (
     <Box
@@ -692,8 +726,9 @@ export function WizardOnboarding({ modo = 'onboarding' }: { modo?: ModoWizard })
           applying={state.applying}
           error={state.error}
           modo={modo}
+          multisede={previewMultisede}
           onAtras={() => set({ paso: 2, error: null })}
-          onConfirmar={modo === 'onboarding' ? confirmar : undefined}
+          onConfirmar={modo === 'onboarding' ? confirmar : confirmarPrueba}
           onReiniciar={reiniciar}
         />
       )}

@@ -8,15 +8,18 @@ import { facturaService, Factura } from '../services/servicios-gestion';
 import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
-import { EmptyState, LoadingScreen } from '../components/common';
-import { printFactura } from '../utils/print';
-import { Z_INDEX } from '../lib/zIndex';
-import { useEscapeKey } from '../hooks/useEscapeKey';
+import { EmptyState, LoadingScreen, Modal } from '../components/common';
+import { printFactura, type PrintTemplateConfig } from '../utils/print';
+import { cargarConfigImpresion } from '../lib/plantillas/negocio';
+import { plantillasService } from '../services/plantillas.service';
+import { clasesEstado, definirEstado } from '../theme/estados';
 
+// Color y etiqueta vienen de theme/estados.ts (dominio 'factura'); aquí solo
+// queda el ícono, que es lo propio de esta pantalla.
 const ESTADO_CFG: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {
-  pendiente: { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700 border border-amber-200',      icon: <Clock       className="w-3.5 h-3.5" /> },
-  pagada:    { label: 'Pagada',    cls: 'bg-emerald-100 text-emerald-700 border border-emerald-200', icon: <CheckCircle className="w-3.5 h-3.5" /> },
-  anulada:   { label: 'Anulada',   cls: 'bg-red-100 text-red-700 border border-red-200',             icon: <XCircle     className="w-3.5 h-3.5" /> },
+  pendiente: { ...definirEstado('pendiente', 'factura'), cls: clasesEstado('pendiente', 'factura').insignia, icon: <Clock       className="w-3.5 h-3.5" /> },
+  pagada:    { ...definirEstado('pagada',    'factura'), cls: clasesEstado('pagada',    'factura').insignia, icon: <CheckCircle className="w-3.5 h-3.5" /> },
+  anulada:   { ...definirEstado('anulada',   'factura'), cls: clasesEstado('anulada',   'factura').insignia, icon: <XCircle     className="w-3.5 h-3.5" /> },
 };
 
 // Resuelve las líneas de producto de una orden, sin importar si es legado (orden.detalles)
@@ -42,7 +45,7 @@ const resolverItemsFactura = (ordenFull: any): Array<{ nombre: string; cantidad:
 const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ factura, onClose }) => {
   const cfg = ESTADO_CFG[factura.estado_factura] || ESTADO_CFG.pendiente;
   const [ordenFull, setOrdenFull] = useState<any | null>(null);
-  useEscapeKey(onClose);
+  // Escape, focus trap, scroll lock y devolución del foco los gestiona <Modal>.
 
   useEffect(() => {
     api.get(`/ordenes/${factura.id_orden}`)
@@ -52,12 +55,24 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
 
   const items = resolverItemsFactura(ordenFull);
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     const detalles = items;
     const pagos = (ordenFull?.pagos ?? []).map((p: any) => ({
       metodo: p.metodo_pago?.nombre ?? 'Pago',
       monto:  p.monto,
     }));
+    const [def, cfgImpr] = await Promise.all([
+      plantillasService.obtenerDefault('ticket').catch(() => null),
+      cargarConfigImpresion(),
+    ]);
+    const cfgPl = def?.plantilla as any;
+    const tmpl: PrintTemplateConfig = {
+      paperWidth: cfgPl?.config?.paperWidth,
+      fontSize:   cfgPl?.config?.fontSize,
+      showLogo:   cfgPl?.config?.showLogo,
+      sections:   cfgPl?.sections,
+      footerText: cfgImpr.pieTicket,
+    };
     printFactura(
       {
         numero_orden:      ordenFull?.numero_orden ?? factura.orden?.numero_orden ?? `#${factura.id_orden}`,
@@ -75,18 +90,17 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
         detalles,
       },
       pagos,
-      { nombre: 'Cocina Oculta' },
+      cfgImpr.negocio,
       factura.numero_factura,
+      tmpl,
     );
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="bg-gradient-to-r from-violet-600 to-purple-600 px-6 py-4 flex items-center justify-between">
+    <Modal titulo={`Detalle de la factura ${factura.numero_factura}`} onClose={onClose} ancho="md">
+        <div className="bg-brand-600 px-6 py-4 flex items-center justify-between">
           <div>
-            <p className="text-violet-200 text-xs">Factura</p>
+            <p className="text-white/70 text-xs">Factura</p>
             <h2 className="text-white font-bold text-lg">{factura.numero_factura}</h2>
           </div>
           <div className="flex items-center gap-2">
@@ -97,7 +111,11 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
             >
               <Printer className="w-3.5 h-3.5" /> Imprimir
             </button>
-            <button onClick={onClose} className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors">✕</button>
+            <button
+              onClick={onClose}
+              aria-label="Cerrar detalle de factura"
+              className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors"
+            >✕</button>
           </div>
         </div>
         <div className="p-6 space-y-4">
@@ -122,16 +140,15 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
               ))}
             </div>
           )}
-          <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-4 space-y-2">
-            <div className="flex justify-between text-sm text-slate-600"><span>Subtotal</span><span>{formatCurrency(factura.subtotal)}</span></div>
-            <div className="flex justify-between text-sm text-slate-600"><span>Impuestos</span><span>{formatCurrency(factura.impuestos)}</span></div>
-            <div className="border-t border-slate-200 pt-2 flex justify-between font-bold text-slate-800">
+          <div className="bg-neutro-50 rounded-xl p-4 space-y-2">
+            <div className="flex justify-between text-sm text-neutro-600"><span>Subtotal</span><span>{formatCurrency(factura.subtotal)}</span></div>
+            <div className="flex justify-between text-sm text-neutro-600"><span>Impuestos</span><span>{formatCurrency(factura.impuestos)}</span></div>
+            <div className="border-t border-neutro-200 pt-2 flex justify-between font-bold text-neutro-800">
               <span>Total</span><span className="text-lg">{formatCurrency(factura.total)}</span>
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };
 
@@ -196,15 +213,14 @@ export const Facturas: React.FC = () => {
   if (loading && facturas.length === 0) return <LoadingScreen message="Cargando facturas..." />;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-violet-50/20 to-slate-100">
-      <div className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-6 py-5">
-          <h1 className="text-2xl font-bold text-slate-800">Facturas</h1>
-          <p className="text-slate-500 text-sm mt-0.5">Historial de facturas generadas automáticamente</p>
-        </div>
+    <div className="space-y-6">
+      {/* Encabezado. El fondo y el ancho los pone el <main> del Layout. */}
+      <div>
+        <h1 className="text-2xl font-bold text-neutro-800">Facturas</h1>
+        <p className="text-neutro-500 text-sm mt-0.5">Historial de facturas generadas automáticamente</p>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+      <div className="space-y-5">
         {/* Stats */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[

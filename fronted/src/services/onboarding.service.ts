@@ -9,7 +9,9 @@
  */
 
 import api from './api';
-import type { EntradaOnboarding, PerfilResuelta } from '../types/onboarding.types';
+import type {
+  EntradaOnboarding, PerfilResuelta, SandboxResumen, SandboxCreado,
+} from '../types/onboarding.types';
 
 interface ApiSuccess<T> {
   success: boolean;
@@ -41,5 +43,31 @@ export const onboardingService = {
       input,
     );
     return data.data;
+  },
+
+  /**
+   * sandbox — tenants desechables de "Probar configuración" (solo superadmin).
+   * crear/entrar devuelven una sesión fresca que ya incluye la sede de prueba,
+   * para que el frontend pueda cambiar de contexto y navegar el POS.
+   */
+  sandbox: {
+    crear: async (input: EntradaOnboarding): Promise<SandboxCreado> => {
+      const { data } = await api.post<ApiSuccess<SandboxCreado>>('/onboarding/sandbox', input);
+      return data.data;
+    },
+
+    listar: async (): Promise<SandboxResumen[]> => {
+      const { data } = await api.get<ApiSuccess<SandboxResumen[]>>('/onboarding/sandbox');
+      return data.data;
+    },
+
+    entrar: async (idGrupo: number): Promise<SandboxCreado> => {
+      const { data } = await api.post<ApiSuccess<SandboxCreado>>(`/onboarding/sandbox/${idGrupo}/entrar`);
+      return data.data;
+    },
+
+    eliminar: async (idGrupo: number): Promise<void> => {
+      await api.delete(`/onboarding/sandbox/${idGrupo}`);
+    },
   },
 };

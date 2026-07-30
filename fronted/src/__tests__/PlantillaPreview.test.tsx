@@ -389,3 +389,83 @@ describe('PlantillaPreview — hoja elástica (fix alto desbordante)', () => {
     expect(css).not.toContain('height: 700'); // la altura fija nunca estuvo en el renderer
   });
 });
+
+// ── Pie de ticket personalizado ───────────────────────────────────────────────
+
+describe('ticketRenderer — pie de ticket (footerText)', () => {
+  it('usa footerText cuando se proporciona (en vez del "¡Gracias!" por defecto)', () => {
+    const tmpl = { ...configToTmpl(mkConfig()), footerText: 'Síguenos en @mirestaurante' };
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, undefined, tmpl);
+    expect(html).toContain('Síguenos en @mirestaurante');
+    expect(html).not.toContain('¡Gracias por su compra!');
+  });
+
+  it('cae al mensaje por defecto cuando footerText está vacío', () => {
+    const tmpl = { ...configToTmpl(mkConfig()), footerText: '' };
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, undefined, tmpl);
+    expect(html).toContain('¡Gracias por su compra!');
+  });
+
+  it('no imprime pie si el campo "gracias" está desactivado', () => {
+    const tmpl = configToTmpl(mkConfig({
+      sections: [
+        { id: 'header', tipo: 'header', visible: true, orden: 0, campos: {} },
+        { id: 'items',  tipo: 'items',  visible: true, orden: 1, campos: {} },
+        { id: 'totals', tipo: 'totals', visible: true, orden: 2, campos: {} },
+        { id: 'footer', tipo: 'footer', visible: true, orden: 3, campos: { gracias: false } },
+      ],
+    }));
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, undefined,
+      { ...tmpl, footerText: 'No debe salir' });
+    expect(html).not.toContain('No debe salir');
+    expect(html).not.toContain('¡Gracias por su compra!');
+  });
+});
+
+// ── Logo del negocio ──────────────────────────────────────────────────────────
+
+describe('ticketRenderer — logo', () => {
+  it('dibuja el logo cuando showLogo=true y el negocio tiene logoUrl', () => {
+    const tmpl = { ...configToTmpl(mkConfig({ config: { paperWidth: '80mm', fontSize: 'medium', showLogo: true } })) };
+    const negocio = { ...NEGOCIO_EJEMPLO, logoUrl: 'data:image/png;base64,ABC' };
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, negocio, undefined, tmpl);
+    expect(html).toContain('class="logo"');
+    expect(html).toContain('data:image/png;base64,ABC');
+  });
+
+  it('no dibuja logo si showLogo=false', () => {
+    const tmpl = { ...configToTmpl(mkConfig({ config: { paperWidth: '80mm', fontSize: 'medium', showLogo: false } })) };
+    const negocio = { ...NEGOCIO_EJEMPLO, logoUrl: 'data:image/png;base64,ABC' };
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, negocio, undefined, tmpl);
+    expect(html).not.toContain('class="logo"');
+  });
+
+  it('no dibuja logo si el negocio no tiene logoUrl aunque showLogo=true', () => {
+    const tmpl = { ...configToTmpl(mkConfig({ config: { paperWidth: '80mm', fontSize: 'medium', showLogo: true } })) };
+    const negocio = { ...NEGOCIO_EJEMPLO, logoUrl: undefined };
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, negocio, undefined, tmpl);
+    expect(html).not.toContain('class="logo"');
+  });
+});
+
+// ── Reordenamiento de secciones ───────────────────────────────────────────────
+
+describe('ticketRenderer — orden de secciones', () => {
+  it('respeta el campo `orden`: footer antes que items si así se configura', () => {
+    // footer con orden 0 (arriba), items con orden 3 (abajo)
+    const tmpl = configToTmpl(mkConfig({
+      sections: [
+        { id: 'header', tipo: 'header', visible: false, orden: 1, campos: {} },
+        { id: 'items',  tipo: 'items',  visible: true,  orden: 3, campos: { nombre: true } },
+        { id: 'totals', tipo: 'totals', visible: false, orden: 2, campos: {} },
+        { id: 'footer', tipo: 'footer', visible: true,  orden: 0, campos: { gracias: true } },
+      ],
+    }));
+    const html = buildFacturaHTML(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, undefined, tmpl);
+    const posFooter = html.indexOf('¡Gracias por su compra!');
+    const posItems  = html.indexOf('Producto');
+    expect(posFooter).toBeGreaterThanOrEqual(0);
+    expect(posItems).toBeGreaterThanOrEqual(0);
+    expect(posFooter).toBeLessThan(posItems); // footer quedó ANTES que los items
+  });
+});

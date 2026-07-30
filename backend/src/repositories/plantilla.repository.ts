@@ -55,9 +55,32 @@ class PlantillaRepositoryImpl extends TenantRepository {
     );
   }
 
-  findDefault(tipo: string) {
+  /**
+   * Plantilla por defecto de un tipo, con precedencia multi-tenant:
+   *   1. sede    (id_restaurante = tenant.id_restaurante)   ← mayor precedencia
+   *   2. grupo   (id_grupo = tenant.id_grupo, sin sede)
+   *   3. global  (id_grupo = null, id_restaurante = null)
+   * Devuelve la primera que exista. Sin tenant, solo busca la global.
+   */
+  async findDefault(tipo: string, tenant?: { id_restaurante?: number; id_grupo?: number }) {
+    const base = { tipo, es_default: true, estado: { not: EstadoGeneral.eliminado } };
+
+    if (tenant?.id_restaurante) {
+      const sede = await prisma.plantillaImpresion.findFirst({
+        where: { ...base, id_restaurante: tenant.id_restaurante },
+      });
+      if (sede) return sede;
+    }
+
+    if (tenant?.id_grupo) {
+      const grupo = await prisma.plantillaImpresion.findFirst({
+        where: { ...base, id_grupo: tenant.id_grupo, id_restaurante: null },
+      });
+      if (grupo) return grupo;
+    }
+
     return prisma.plantillaImpresion.findFirst({
-      where: { tipo, es_default: true, estado: { not: EstadoGeneral.eliminado } },
+      where: { ...base, id_grupo: null, id_restaurante: null },
     });
   }
 

@@ -50,8 +50,15 @@ function printWindow(html: string): void {
 
 // ─── API pública ─────────────────────────────────────────────────────────────
 
-export function printComanda(orden: PrintOrden, tmpl?: PrintTemplateConfig): void {
-  printWindow(buildFullHTML(buildComandaHTML(orden, tmpl), tmpl));
+export function printComanda(orden: PrintOrden, tmpl?: PrintTemplateConfig, copias = 1): void {
+  const html = buildFullHTML(buildComandaHTML(orden, tmpl), tmpl);
+  const n = Math.max(1, Math.min(5, Math.round(copias)));
+  // Cada copia es una impresión física independiente (cocina suele querer 2:
+  // una para la parrilla y otra para el pase). Se abren de forma escalonada para
+  // no disparar el bloqueo de popups del navegador.
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => printWindow(html), i * 500);
+  }
 }
 
 export function printFactura(

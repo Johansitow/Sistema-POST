@@ -1,0 +1,64 @@
+# ============================================================================
+# Despliegue del POS con Docker Compose.
+#
+# Arquitectura:
+#   frontend (Caddy)  → sirve la SPA, termina HTTPS y proxya /api y /socket.io
+#   backend  (Node)   → API Express + Socket.IO (aplica migraciones al arrancar)
+#   redis             → caché (opcional; el sistema funciona sin él)
+#   PostgreSQL        → NO está aquí: se usa una base ADMINISTRADA (Neon/Supabase).
+#                       Su cadena va en backend/.env.production (DATABASE_URL).
+#
+# Uso: ver DEPLOYMENT.md
+# ============================================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+    env_file:
+      - ./backend/.env.production
+    environment:
+      NODE_ENV: production
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    # Caché efímero: sin persistencia en disco.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./fronted
+      args:
+        VITE_API_URL: /api/v1
+        VITE_SOCKET_URL: /
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    depends_on:
+      - backend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

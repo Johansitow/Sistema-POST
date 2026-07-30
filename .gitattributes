@@ -1,0 +1,7 @@
+# Forzar saltos de línea LF en scripts y archivos de contenedor.
+# En Windows el checkout por defecto usa CRLF, y un CRLF en un .sh rompe su
+# ejecución dentro de los contenedores Linux (p.ej. el docker-entrypoint).
+*.sh            text eol=lf
+docker-entrypoint.sh text eol=lf
+Dockerfile      text eol=lf
+Caddyfile       text eol=lf

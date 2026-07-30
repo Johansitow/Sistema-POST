@@ -11,11 +11,7 @@
 import { TipoOrden } from '@prisma/client';
 import prisma from '../config/database';
 import { NotFoundError } from '../exceptions/HttpErrors';
-
-const getEstadoFinalId = async (): Promise<number> => {
-  const estado = await prisma.estadoOrden.findFirst({ where: { codigo: 'ENTREGADA' } });
-  return estado?.id ?? 0;
-};
+import { getEstadoFinalId } from '../lib/estadoOrden';
 
 const buildFechaWhere = (desde?: Date, hasta?: Date) => {
   if (!desde && !hasta) return undefined;

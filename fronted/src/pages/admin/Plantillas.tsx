@@ -24,8 +24,12 @@ import {
   type TipoPlantilla,
   PLANTILLA_DEFAULTS,
 } from '../../services/plantillas.service';
-import { PlantillaPreview } from '../../components/plantillas/PlantillaPreview';
+import { PlantillaPreview, configToTmpl } from '../../components/plantillas/PlantillaPreview';
 import { uiConfigService } from '../../services/ui-config.service';
+import { invalidarConfigImpresion } from '../../lib/plantillas/negocio';
+import { printComanda, printFactura } from '../../utils/print';
+import { ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO } from '../../lib/plantillas/ejemploDatos';
+import { useRestauranteStore } from '../../store/restauranteStore';
 import { LoadingScreen, EmptyState, ConfirmDialog } from '../../components/common';
 
 // ── Impresión defaults ────────────────────────────────────────────────────────
@@ -40,6 +44,7 @@ function ImpresionDefaultsPanel() {
   const [anchoPapel,    setAnchoPapel]    = useState('80mm');
   const [copiasComanda, setCopiasComanda] = useState(1);
   const [pieTicket,     setPieTicket]     = useState('¡Gracias por su compra!');
+  const [resolucionDian, setResolucionDian] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [toast,   setToast]   = useState('');
@@ -49,10 +54,12 @@ function ImpresionDefaultsPanel() {
       uiConfigService.getConfig('impresion', 'ancho_papel'),
       uiConfigService.getConfig('impresion', 'copias_comanda'),
       uiConfigService.getConfig('impresion', 'pie_ticket'),
-    ]).then(([papel, copias, pie]) => {
+      uiConfigService.getConfig('impresion', 'resolucion_dian'),
+    ]).then(([papel, copias, pie, dian]) => {
       if (papel?.valor)  setAnchoPapel(String(papel.valor));
       if (copias?.valor) setCopiasComanda(Number(copias.valor));
       if (pie?.valor)    setPieTicket(String(pie.valor));
+      if (dian?.valor)   setResolucionDian(String(dian.valor));
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
@@ -63,7 +70,9 @@ function ImpresionDefaultsPanel() {
         uiConfigService.setConfig('impresion', 'ancho_papel',    anchoPapel),
         uiConfigService.setConfig('impresion', 'copias_comanda', copiasComanda),
         uiConfigService.setConfig('impresion', 'pie_ticket',     pieTicket),
+        uiConfigService.setConfig('impresion', 'resolucion_dian', resolucionDian),
       ]);
+      invalidarConfigImpresion(); // refresca lo que usan Ordenes/Facturas al imprimir
       setToast('Configuración de impresión guardada');
     } catch { setToast('Error al guardar'); }
     finally { setSaving(false); }
@@ -86,9 +95,12 @@ function ImpresionDefaultsPanel() {
       </Box>
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 520 }}>
-        {/* Ancho de papel */}
+        {/* Ancho de papel — valor inicial para plantillas NUEVAS (cada plantilla define el suyo) */}
         <Box>
-          <Typography variant="subtitle2" fontWeight={700} gutterBottom>Tamaño del papel</Typography>
+          <Typography variant="subtitle2" fontWeight={700} gutterBottom>Tamaño de papel por defecto</Typography>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Ancho con el que nacen las plantillas nuevas. Cada plantilla puede cambiarlo en su editor.
+          </Typography>
           <Box sx={{ display: 'flex', gap: 2, mt: 1 }}>
             {PAPEL_OPCIONES.map(opt => {
               const sel = anchoPapel === opt.value;
@@ -149,6 +161,18 @@ function ImpresionDefaultsPanel() {
               {pieTicket || '(sin mensaje)'}
             </Typography>
           </Paper>
+        </Box>
+
+        {/* Resolución DIAN */}
+        <Box>
+          <Typography variant="subtitle2" fontWeight={700} gutterBottom>Resolución DIAN</Typography>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Número de resolución de facturación. Se imprime en la factura si activas el campo
+            "Resolución DIAN" en la plantilla.
+          </Typography>
+          <TextField value={resolucionDian} onChange={e => setResolucionDian(e.target.value)}
+            placeholder="Ej: 18764000125671" fullWidth size="small"
+            inputProps={{ maxLength: 60 }} />
         </Box>
       </Box>
 
@@ -227,6 +251,16 @@ function SectionEditor({
     updateSection(secIdx, { campos: { ...sec.campos, [campo]: !sec.campos[campo] } });
   };
 
+  // Reordena secciones: intercambia posiciones y reasigna `orden` (0..n) para que
+  // el renderer (ticketRenderer) imprima en el nuevo orden. El preview lo refleja.
+  const moveSection = (idx: number, dir: -1 | 1) => {
+    const j = idx + dir;
+    if (j < 0 || j >= config.sections.length) return;
+    const sections = [...config.sections];
+    [sections[idx], sections[j]] = [sections[j], sections[idx]];
+    onChange({ ...config, sections: sections.map((s, i) => ({ ...s, orden: i })) });
+  };
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
       {/* Config global */}
@@ -273,9 +307,29 @@ function SectionEditor({
         <Card key={sec.id} variant="outlined" sx={{ opacity: sec.visible ? 1 : 0.5 }}>
           <CardContent sx={{ py: '10px !important' }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-              <Typography variant="subtitle2" fontWeight={700}>
-                {SECTION_LABELS[sec.tipo] ?? sec.tipo}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                  <Tooltip title="Subir sección">
+                    <span>
+                      <IconButton size="small" sx={{ p: 0.25 }} disabled={idx === 0}
+                        onClick={() => moveSection(idx, -1)}>
+                        <KeyboardArrowUp sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                  <Tooltip title="Bajar sección">
+                    <span>
+                      <IconButton size="small" sx={{ p: 0.25 }} disabled={idx === config.sections.length - 1}
+                        onClick={() => moveSection(idx, 1)}>
+                        <KeyboardArrowDown sx={{ fontSize: 16 }} />
+                      </IconButton>
+                    </span>
+                  </Tooltip>
+                </Box>
+                <Typography variant="subtitle2" fontWeight={700}>
+                  {SECTION_LABELS[sec.tipo] ?? sec.tipo}
+                </Typography>
+              </Box>
               <FormControlLabel
                 control={
                   <Switch
@@ -323,9 +377,11 @@ function PlantillaDialog({
   onSaved: (p: PlantillaImpresion) => void;
 }) {
   const isEdit = !!item;
+  const activo = useRestauranteStore(s => s.activo);
   const [nombre,    setNombre]    = useState('');
   const [tipo,      setTipo]      = useState<TipoPlantilla>('ticket');
   const [esDefault, setEsDefault] = useState(false);
+  const [soloSede,  setSoloSede]  = useState(false);
   const [config,    setConfig]    = useState<PlantillaConfig>(
     (PLANTILLA_DEFAULTS.ticket as unknown) as PlantillaConfig
   );
@@ -339,11 +395,13 @@ function PlantillaDialog({
       setNombre(item.nombre);
       setTipo(item.tipo as TipoPlantilla);
       setEsDefault(item.es_default);
+      setSoloSede(item.id_restaurante != null);
       setConfig((item.plantilla as unknown) as PlantillaConfig);
     } else {
       setNombre('');
       setTipo('ticket');
       setEsDefault(false);
+      setSoloSede(false);
       setConfig((PLANTILLA_DEFAULTS.ticket as unknown) as PlantillaConfig);
     }
   }, [open, item]);
@@ -358,7 +416,7 @@ function PlantillaDialog({
     if (!nombre.trim()) { setError('El nombre es obligatorio'); return; }
     setLoading(true);
     try {
-      const dto = { nombre: nombre.trim(), tipo, es_default: esDefault, plantilla: config as any };
+      const dto = { nombre: nombre.trim(), tipo, es_default: esDefault, solo_sede: soloSede, plantilla: config as any };
       const saved = isEdit
         ? await plantillasService.actualizar(item!.id, dto)
         : await plantillasService.crear(dto);
@@ -368,6 +426,17 @@ function PlantillaDialog({
       setError(err.response?.data?.error || 'Error al guardar');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Impresión de prueba con datos de ejemplo — permite ver el resultado en papel
+  // sin necesidad de abrir una orden real. Usa el mismo camino que la impresión real.
+  const handleTestPrint = () => {
+    const tmpl = configToTmpl(config);
+    if (tipo === 'comanda' || tipo === 'cocina') {
+      printComanda(ORDEN_EJEMPLO, tmpl);
+    } else {
+      printFactura(ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO, 'FAC-000123', tmpl);
     }
   };
 
@@ -418,6 +487,18 @@ function PlantillaDialog({
                   label="Predeterminada"
                 />
               </Box>
+              <FormControlLabel
+                control={<Switch checked={soloSede} onChange={e => setSoloSede(e.target.checked)} />}
+                label={
+                  <Typography variant="body2">
+                    Aplicar solo a la sede actual
+                    {activo?.nombre ? ` (${activo.nombre})` : ''}
+                    <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                      Si se apaga, la plantilla aplica a todo el grupo.
+                    </Typography>
+                  </Typography>
+                }
+              />
               <Divider>
                 <Typography variant="caption" color="text.secondary">Configurar secciones</Typography>
               </Divider>
@@ -426,7 +507,11 @@ function PlantillaDialog({
           </Box>
 
           {/* Acciones en el pie de la columna izquierda */}
-          <Box sx={{ px: 2.5, py: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+          <Box sx={{ px: 2.5, py: 1.5, borderTop: 1, borderColor: 'divider', display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Button startIcon={<Print />} onClick={handleTestPrint} disabled={loading}>
+              Imprimir prueba
+            </Button>
+            <Box sx={{ flexGrow: 1 }} />
             <Button onClick={onClose} disabled={loading}>Cancelar</Button>
             <Button variant="contained" onClick={handleSave} disabled={loading}>
               {loading ? <CircularProgress size={20} /> : isEdit ? 'Guardar cambios' : 'Crear plantilla'}
@@ -599,6 +684,13 @@ export function Plantillas() {
                       {p.es_default && (
                         <Chip size="small" label="Predeterminada" color="success" sx={{ height: 18, fontSize: '0.65rem' }} />
                       )}
+                      <Chip
+                        size="small"
+                        label={p.id_restaurante != null ? 'Solo esta sede' : 'Todo el grupo'}
+                        variant="outlined"
+                        color={p.id_restaurante != null ? 'info' : 'default'}
+                        sx={{ height: 18, fontSize: '0.65rem' }}
+                      />
                     </Box>
                     <Typography variant="caption" color="text.secondary">
                       {secVisible}/{secTotal} secciones visibles

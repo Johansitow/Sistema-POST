@@ -20,6 +20,7 @@
 
 import { Chip } from '@mui/material';
 import type { ChipProps } from '@mui/material';
+import { colorMuiEstado, definirEstado } from '../../theme/estados';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -35,24 +36,11 @@ interface StatusChipProps {
   variant?: ChipProps['variant'];
 }
 
-// ─── Mapas de color y label ───────────────────────────────────────────────────
-
-const ENTIDAD_CONFIG: Record<string, { color: ChipProps['color']; label: string }> = {
-  activo:    { color: 'success', label: 'Activo' },
-  inactivo:  { color: 'default', label: 'Inactivo' },
-  eliminado: { color: 'error',   label: 'Eliminado' },
-};
-
-const ORDEN_CONFIG: Record<string, { color: ChipProps['color']; label: string }> = {
-  PENDIENTE:  { color: 'warning', label: 'Pendiente' },
-  CONFIRMADA: { color: 'info',    label: 'Confirmada' },
-  EN_PROCESO: { color: 'primary', label: 'En proceso' },
-  LISTA:      { color: 'success', label: 'Lista' },
-  ENTREGADA:  { color: 'success', label: 'Entregada' },
-  CANCELADA:  { color: 'error',   label: 'Cancelada' },
-};
-
 // ─── Componente ───────────────────────────────────────────────────────────────
+//
+// Los dos mapas que vivían aquí (ENTIDAD_CONFIG y ORDEN_CONFIG) se movieron a
+// theme/estados.ts, donde también están los que usaban Órdenes, Cocina y
+// Facturas. Antes "Pendiente" se definía cinco veces y se desincronizaban.
 
 export function StatusChip({
   estado,
@@ -60,15 +48,12 @@ export function StatusChip({
   size    = 'small',
   variant = 'outlined',
 }: StatusChipProps) {
-  const config =
-    type === 'orden'
-      ? ORDEN_CONFIG[estado]  ?? { color: 'default' as const, label: estado }
-      : ENTIDAD_CONFIG[estado] ?? { color: 'default' as const, label: estado };
+  const dominio = type === 'orden' ? 'orden' : 'entidad';
 
   return (
     <Chip
-      label={config.label}
-      color={config.color}
+      label={definirEstado(estado, dominio).label}
+      color={colorMuiEstado(estado, dominio)}
       size={size}
       variant={variant}
     />

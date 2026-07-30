@@ -24,12 +24,15 @@ import { useAuthStore } from '../../store/useStore';
 import { menuService, type GuardarMenuGrupo } from '../../services/menu.service';
 import { useMenuStore } from '../../store/menuStore';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS } from '../../config/menuCatalog';
+import { DEFAULTS } from '../../services/ui-config.schema';
 
 // ── Panel: Apariencia ─────────────────────────────────────────────────────────
 
 function AparienciaPanel() {
   const [nombreSistema, setNombreSistema] = useState('');
-  const [colorPrimario, setColorPrimario] = useState('#e53935');
+  // El default sale del esquema, no de un hex repetido aquí: si cambia el color
+  // por defecto del producto, cambia en un solo sitio.
+  const [colorPrimario, setColorPrimario] = useState(DEFAULTS.apariencia.color_primario);
   const [logoUrl,       setLogoUrl]       = useState('');
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
@@ -119,7 +122,7 @@ function AparienciaPanel() {
             <TextField value={colorPrimario} onChange={e => setColorPrimario(e.target.value)}
               size="small" sx={{ width: 120, '& input': { fontFamily: 'monospace' } }} />
             <Box sx={{ display: 'flex', gap: 1 }}>
-              {['#e53935', '#1e88e5', '#43a047', '#fb8c00', '#8e24aa'].map(c => (
+              {['#10B981', '#e53935', '#1e88e5', '#fb8c00', '#8e24aa'].map(c => (
                 <Box key={c} onClick={() => setColorPrimario(c)} sx={{
                   width: 24, height: 24, borderRadius: '50%', bgcolor: c, cursor: 'pointer',
                   border: '2px solid',

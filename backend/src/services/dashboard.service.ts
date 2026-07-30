@@ -17,18 +17,10 @@ import prisma from '../config/database';
 import { ordenRepository } from '../repositories/orden.repository';
 import { productoRepository } from '../repositories/producto.repository';
 import { productoService } from './producto.service';
+import { getEstadoFinalId } from '../lib/estadoOrden';
 
-/**
- * Busca el id del estado 'ENTREGADA' en BD.
- * Se usa para filtrar solo órdenes completadas en ventas y top productos.
- * Retorna 0 si no existe el estado (evita crash, simplemente no habrá resultados).
- */
-const getEstadoFinalId = async (): Promise<number> => {
-  const estado = await prisma.estadoOrden.findFirst({
-    where: { codigo: 'ENTREGADA' },
-  });
-  return estado?.id ?? 0;
-};
+// getEstadoFinalId vive en lib/estadoOrden.ts: lo comparten dashboard,
+// reportes y los KPIs del empleado para medir "venta completada" igual.
 
 export const dashboardService = {
 

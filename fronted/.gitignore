@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json SÍ se versiona: el build de Docker usa `npm ci`, que lo exige.
 yarn.lock
 pnpm-lock.yaml
 

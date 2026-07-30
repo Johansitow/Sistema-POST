@@ -35,6 +35,8 @@ export interface ImpresionConfig {
   ancho_papel:    '58' | '80';
   copias_comanda: number;
   pie_ticket:     string;
+  /** Resolución DIAN a imprimir en la factura (opcional; no hay campo en Restaurante). */
+  resolucion_dian: string;
 }
 
 // ── Valores por defecto ──────────────────────────────────────────────────────
@@ -49,16 +51,17 @@ export const DEFAULTS: {
     orden_items:   [],
   },
   apariencia: {
-    nombre_sistema: 'POS Restaurante',
-    // Mismo rojo que ya usan Layout.tsx/Login.tsx hardcodeado hoy — evita un
-    // salto de color sorpresa en instalaciones que nunca personalizaron esto.
-    color_primario: '#e53935',
+    nombre_sistema: 'Krezco',
+    // Verde esmeralda: color de identidad de la marca Krezco (de "crecer").
+    // Es solo el default cuando un tenant no configuró su propio color.
+    color_primario: '#10B981',
     logo_url:       '',
   },
   impresion: {
     ancho_papel:    '80',
     copias_comanda: 1,
     pie_ticket:     '',
+    resolucion_dian: '',
   },
 };
 
@@ -95,6 +98,7 @@ export const CONFIG_KEYS = {
     ancho_papel:    'ancho_papel',
     copias_comanda: 'copias_comanda',
     pie_ticket:     'pie_ticket',
+    resolucion_dian: 'resolucion_dian',
   },
 } as const;
 

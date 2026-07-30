@@ -2,45 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom Scrollbar */
+/* ── Scrollbar ─────────────────────────────────────────────────────────────
+   Colores en variables para que el modo oscuro del KDS (y un tema oscuro
+   futuro) los pueda sobrescribir sin duplicar las reglas. */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: var(--scrollbar-track, #f1f5f9);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: var(--scrollbar-thumb, #cbd5e1);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: var(--scrollbar-thumb-hover, #94a3b8);
 }
 
-/* Smooth transitions */
-* {
-  transition-property: background-color, border-color, color, fill, stroke;
-  transition-duration: 200ms;
+/* ── Transiciones ──────────────────────────────────────────────────────────
+   Antes esto era un selector `*` que aplicaba transición a CADA elemento del
+   DOM. En una tabla de 500 filas × 8 celdas son 4.000 elementos animados, y
+   además hacía que el hover se sintiera blando.
+   Ahora solo lo reciben los elementos interactivos, que son los únicos que
+   cambian de color al interactuar. */
+a,
+button,
+input,
+select,
+textarea,
+summary,
+[role='button'],
+[role='tab'],
+[role='option'] {
+  transition-property: background-color, border-color, color, fill, stroke, box-shadow;
+  transition-duration: 150ms;
   transition-timing-function: ease-in-out;
 }
 
-/* Remove default button styles */
+/* ── Botones ───────────────────────────────────────────────────────────────
+   El anillo de foco usa el color de marca del tenant (--brand-500, emitido
+   por el tema en src/theme). El fallback cubre el instante previo a que
+   cargue la marca. */
 button {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 
-button:focus-visible {
-  outline: 2px solid #3b82f6;
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--brand-500, 59 130 246));
   outline-offset: 2px;
+  border-radius: 2px;
 }
 
-/* Animations */
+/* ── Animaciones ───────────────────────────────────────────────────────────── */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -56,30 +75,16 @@ button:focus-visible {
   animation: fadeIn 0.3s ease-out;
 }
 
-/* Card hover effect */
-.card-hover {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card-hover:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-}
-
-/* Gradient animations */
-@keyframes gradient {
-  0% {
-    background-position: 0% 50%;
+/* ── Accesibilidad: respetar "reducir movimiento" ──────────────────────────
+   Requisito WCAG 2.3.3. Sin esto, quien tiene sensibilidad vestibular recibe
+   todas las animaciones igual. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
-}
-
-.animate-gradient {
-  background-size: 200% 200%;
-  animation: gradient 3s ease infinite;
 }

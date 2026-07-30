@@ -18,6 +18,7 @@ export { ErrorAlert     } from './ErrorAlert';
 export { ErrorBoundary  } from './ErrorBoundary';
 export { GlobalSnackbar } from './GlobalSnackbar';
 export { LoadingScreen  } from './LoadingScreen';
+export { Modal          } from './Modal';
 export { PageHeader     } from './PageHeader';
 export { StatusChip     } from './StatusChip';
 export { TableSkeleton, CardSkeleton, FormSkeleton, ListSkeleton } from './Skeletons';

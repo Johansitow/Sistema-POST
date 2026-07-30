@@ -30,6 +30,18 @@ vi.mock('../../repositories/usuario.repository', () => ({
     findAdminsDeGrupo:      vi.fn(),
     findNomina:             vi.fn(),
     upsertNomina:           vi.fn(),
+    findCodigosEmpleado:    vi.fn(() => Promise.resolve([])),
+    createHistorialSalario: vi.fn(),
+    findHistorialSalarios:  vi.fn(),
+  },
+}));
+
+// usuarioService.crear/upsertNomina envuelven varias escrituras en una
+// $transaction. Sin este mock el test abriría una transacción real contra
+// PostgreSQL; aquí basta con ejecutar el callback con un tx de mentira.
+vi.mock('../../config/database', () => ({
+  default: {
+    $transaction: <T>(fn: (tx: unknown) => T): T => fn({}),
   },
 }));
 
@@ -136,7 +148,10 @@ describe('usuarioService — scope de admin de grupo', () => {
       1,
       GRUPO,
     );
-    expect(grupoNegocioRepository.upsertMiembro).toHaveBeenCalledWith(42, GRUPO, 'operador');
+    // El 4º argumento es el cliente transaccional (la creación del usuario y
+    // su membresía de grupo van en la misma transacción).
+    expect(grupoNegocioRepository.upsertMiembro)
+      .toHaveBeenCalledWith(42, GRUPO, 'operador', expect.anything());
   });
 
   it('listarRoles con scope: oculta los roles superadmin', async () => {

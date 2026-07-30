@@ -124,6 +124,25 @@ export const getNomina = asyncHandler(async (req: Request, res: Response) => {
 
 export const upsertNomina = asyncHandler(async (req: Request, res: Response) => {
   const data   = nominaSchema.parse(req.body);
-  const nomina = await usuarioService.upsertNomina(pid(req.params.id), grupoScope(req), data);
+  const nomina = await usuarioService.upsertNomina(
+    pid(req.params.id),
+    grupoScope(req),
+    data,
+    (req as any).user!.id,   // queda registrado quién cambió el salario
+  );
   res.json({ message: 'Nómina guardada correctamente', nomina });
+});
+
+export const obtenerResumen = asyncHandler(async (req: Request, res: Response) => {
+  const dias = qs(req.query.dias) ? parseInt(qs(req.query.dias)!, 10) : undefined;
+  if (dias !== undefined && (isNaN(dias) || dias < 1 || dias > 365)) {
+    throw new BadRequestError('El periodo debe estar entre 1 y 365 días');
+  }
+  const resumen = await usuarioService.obtenerResumen(pid(req.params.id), grupoScope(req), dias);
+  res.json({ resumen });
+});
+
+export const listarHistorialSalarios = asyncHandler(async (req: Request, res: Response) => {
+  const historial = await usuarioService.listarHistorialSalarios(pid(req.params.id), grupoScope(req));
+  res.json({ historial });
 });

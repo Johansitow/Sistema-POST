@@ -31,6 +31,8 @@ import listaComprasRoutes  from './lista-compras.routes';
 import variantesRoutes     from './variantes.routes';
 import featureFlagsRoutes  from './feature-flags.routes';
 import plantillasRoutes    from './plantillas.routes';
+import documentosRoutes    from './documentos.routes';
+import nominaRoutes        from './nomina.routes';
 import restaurantesRoutes  from './restaurante.routes';
 import grupoNegocioRoutes  from './grupo-negocio.routes';
 import ordenSedesRoutes    from './orden-sedes.routes';
@@ -39,6 +41,7 @@ import uiConfigRoutes      from './ui-config.routes';
 import adminRoutes         from './admin.routes';
 import onboardingRoutes    from './onboarding.routes';
 import menuRoutes          from './menu.routes';
+import planesRoutes        from './planes.routes';
 
 // ─── Router v1 ────────────────────────────────────────────────────────────────
 const v1 = Router();
@@ -69,6 +72,8 @@ v1.use('/metodos-pago',   metodoPagoRoutes);
 v1.use('/listas-compras', listaComprasRoutes);
 v1.use('/feature-flags',  featureFlagsRoutes);
 v1.use('/plantillas',     plantillasRoutes);
+v1.use('/documentos',     documentosRoutes);
+v1.use('/nomina',         nominaRoutes);
 v1.use('/restaurantes',   restaurantesRoutes);
 v1.use('/grupos',         grupoNegocioRoutes);
 v1.use('/orden-sedes',    ordenSedesRoutes);
@@ -77,6 +82,7 @@ v1.use('/ui-config',      uiConfigRoutes);
 v1.use('/admin',          adminRoutes);
 v1.use('/onboarding',     onboardingRoutes);
 v1.use('/menu',           menuRoutes);
+v1.use('/planes',         planesRoutes);
 
 // ─── Exportado como setupRoutes para que coincida con server.ts ───────────────
 export const setupRoutes = (app: Application): void => {

@@ -28,7 +28,7 @@ import {
   ManageSearch, Settings, ChevronLeft,
   Category, Flag, Print, Lock, Palette,
   ArrowBack, AccountTree, SupervisorAccount,
-  PlayCircleOutline,
+  PlayCircleOutline, Paid,
 } from '@mui/icons-material';
 import { useAuthStore, useStore } from '../../store/useStore';
 import { useUIStore }   from '../../store/uiStore';
@@ -44,7 +44,10 @@ import { gruposNegocioService, type GrupoNegocio } from '../../services/grupos-n
 import { socket, connectGlobal } from '../../lib/socket';
 // useAdminModules removed — admin sidebar now uses static groups
 import { AppBreadcrumbs } from '../common/AppBreadcrumbs';
+import { VerificacionBanner } from '../common/VerificacionBanner';
 import NotificationsMenu from './NotificationsMenu';
+import { TourOverlay, TourAutostart } from '../tour';
+import { useTourStore } from '../../store/tourStore';
 
 const DRAWER_WIDTH    = 248;
 const COLLAPSED_WIDTH = 64;
@@ -68,7 +71,8 @@ const ADMIN_GROUPS: { label: string; items: AdminItem[] }[] = [
   {
     label: 'Gestión',
     items: [
-      { text: 'Usuarios',     icon: <People />,         path: '/admin/usuarios',     permiso: 'usuarios.gestionar' },
+      { text: 'Personal',     icon: <People />,         path: '/admin/usuarios',     permiso: 'usuarios.gestionar' },
+      { text: 'Nómina',       icon: <Paid />,           path: '/admin/nomina',       permiso: 'usuarios.gestionar' },
       { text: 'Restaurantes', icon: <Business />,       path: '/admin/restaurantes', permiso: 'sedes.gestionar'    },
       { text: 'Grupos',       icon: <AccountTree />,    path: '/admin/grupos'        /* solo superadmin */         },
       { text: 'Permisos',     icon: <Lock />,           path: '/admin/permisos',     permiso: 'permisos.gestionar' },
@@ -161,6 +165,7 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { usuario, logout, isSuperAdmin, esAdminGrupo, hasPermission } = useAuthStore();
+  const iniciarTour = useTourStore(s => s.iniciar);
 
   // ── Módulos de administración visibles para este usuario ───────────────────
   // Superadmin ve todo; un admin de grupo solo los módulos cuyo permiso le
@@ -299,6 +304,7 @@ export default function Layout() {
         <Tooltip title={collapsed ? item.text : ''} placement="right" arrow>
           <ListItemButton
             component={Link} to={item.path} selected={active}
+            data-tour={`nav-${item.path}`}
             sx={{
               borderRadius: 2,
               justifyContent: collapsed ? 'center' : 'flex-start',
@@ -749,6 +755,7 @@ export default function Layout() {
             <>
               <Tooltip title={restaurantes.length > 1 ? 'Cambiar restaurante' : 'Restaurante activo'}>
                 <Box
+                  data-tour="selector-sede"
                   onClick={restaurantes.length > 1 ? (e => setRestAnchorEl(e.currentTarget)) : undefined}
                   sx={{
                     display: 'flex', alignItems: 'center', gap: 0.75,
@@ -811,11 +818,16 @@ export default function Layout() {
           )}
 
           {/* Campana de notificaciones (solo en sección principal) */}
-          {!isAdminSection && <NotificationsMenu />}
+          {!isAdminSection && (
+            <Box component="span" data-tour="notificaciones" sx={{ display: 'inline-flex' }}>
+              <NotificationsMenu />
+            </Box>
+          )}
 
           {/* Menú usuario */}
           <Tooltip title="Mi cuenta">
             <Box
+              data-tour="usuario-menu"
               onClick={e => setAnchorEl(e.currentTarget)}
               sx={{
                 display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer',
@@ -841,6 +853,10 @@ export default function Layout() {
             <MenuItem onClick={() => { setAnchorEl(null); navigate('/perfil'); }}>
               <ListItemIcon><Person fontSize="small" /></ListItemIcon>
               Mi perfil
+            </MenuItem>
+            <MenuItem onClick={() => { setAnchorEl(null); iniciarTour(); }}>
+              <ListItemIcon><PlayCircleOutline fontSize="small" /></ListItemIcon>
+              Ver tutorial
             </MenuItem>
             <MenuItem onClick={() => { setAnchorEl(null); handleLogout(); }} sx={{ color: 'error.main' }}>
               <ListItemIcon><Logout fontSize="small" color="error" /></ListItemIcon>
@@ -879,21 +895,38 @@ export default function Layout() {
 
       {/* Contenido principal — usa <Outlet /> para renderizar la página activa.
           El key por sede re-monta la página al cambiar de sucursal, garantizando
-          que todos sus datos se recarguen con el nuevo X-Restaurante-Id. */}
+          que todos sus datos se recarguen con el nuevo X-Restaurante-Id.
+
+          El fondo se pinta AQUÍ, una sola vez. Antes cada página traía su propio
+          `min-h-screen` con un gradiente de tinte distinto (teal en Clientes,
+          violeta en Facturas, índigo en Inventario, esmeralda en Órdenes…), así
+          que el fondo de la app cambiaba de color al navegar. Y como ese
+          `min-h-screen` (100vh) vivía dentro de este <main>, que ya suma el
+          Toolbar (64px) y el padding (48px), toda página producía scroll
+          vertical aunque estuviera vacía.
+
+          `minHeight: 100dvh` sobre el contenedor —y no sobre el hijo— da el
+          fondo a pantalla completa sin sumar altura al contenido. */}
       <Box
         component="main"
         key={restauranteActivo?.id ?? 'sin-sede'}
         sx={{
           flexGrow: 1,
-          p: 3,
           width: { sm: `calc(100% - ${drawerWidth}px)` },
           transition: 'width 0.2s',
           minWidth: 0,
+          minHeight: '100dvh',
+          bgcolor: 'background.default',
+          display: 'flex',
+          flexDirection: 'column',
         }}
       >
         <Toolbar />
-        <AppBreadcrumbs />
-        <Outlet />
+        <VerificacionBanner />
+        <Box sx={{ px: 3, pt: 2, pb: 3, flexGrow: 1, minWidth: 0 }}>
+          <AppBreadcrumbs />
+          <Outlet />
+        </Box>
       </Box>
 
       {/* Confirmación: cambiar de sede con una orden sin guardar */}
@@ -929,6 +962,10 @@ export default function Layout() {
         <CircularProgress color="inherit" />
         <Typography fontWeight={600}>Cambiando a {restauranteActivo?.nombre}…</Typography>
       </Backdrop>
+
+      {/* Modo tutorial (product tour): auto-arranque la primera vez + capa visual */}
+      <TourAutostart />
+      <TourOverlay />
     </Box>
   );
 }

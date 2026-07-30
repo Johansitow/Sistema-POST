@@ -9,12 +9,11 @@
 import React, { useState } from 'react';
 import { RefreshCw, Check } from 'lucide-react';
 import ModalHeader from './ModalHeader';
+import { Modal } from './Modal';
 import { ErrorAlert } from './ErrorAlert';
 import { clienteService } from '../../services/cliente.service';
 import { getErrorMessage } from '../../services/api';
 import { toast } from '../../store/uiStore';
-import { Z_INDEX } from '../../lib/zIndex';
-import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 const FORM_INITIAL = {
   nombre_completo: '', email: '', telefono: '', telefono_alterno: '',
@@ -22,26 +21,40 @@ const FORM_INITIAL = {
   canal_adquisicion: '', puntos_bienvenida: false,
 };
 
+// El <label> ahora se asocia al <input> con htmlFor/id. Antes eran hermanos
+// sueltos: un lector de pantalla leía el campo como "cuadro de texto" sin
+// nombre, y hacer clic en la etiqueta no enfocaba el campo. El mensaje de
+// error se enlaza con aria-describedby y el campo se marca con aria-invalid.
 const Field: React.FC<{
   label: string; name: string; type?: string; placeholder?: string; required?: boolean;
   form: Record<string, any>; errors: Record<string, string>; set: (k: string, v: any) => void;
-}> = ({ label, name, type = 'text', placeholder, required, form, errors, set }) => (
-  <div>
-    <label className="block text-xs font-semibold text-slate-500 mb-1.5">
-      {label}{required && <span className="text-red-400 ml-1">*</span>}
-    </label>
-    <input
-      type={type}
-      value={form[name] || ''}
-      onChange={e => set(name, e.target.value)}
-      placeholder={placeholder}
-      className={`w-full px-3 py-2.5 border rounded-xl text-sm outline-none transition-all
-        focus:ring-2 focus:ring-teal-500 focus:border-teal-400
-        ${errors[name] ? 'border-red-300 bg-red-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-    />
-    {errors[name] && <p className="text-xs text-red-500 mt-1">{errors[name]}</p>}
-  </div>
-);
+}> = ({ label, name, type = 'text', placeholder, required, form, errors, set }) => {
+  const campoId = `cliente-${name}`;
+  const errorId = `${campoId}-error`;
+  const tieneError = Boolean(errors[name]);
+
+  return (
+    <div>
+      <label htmlFor={campoId} className="block text-xs font-semibold text-neutro-500 mb-1.5">
+        {label}{required && <span className="text-peligro-500 ml-1" aria-hidden="true">*</span>}
+      </label>
+      <input
+        id={campoId}
+        type={type}
+        required={required}
+        aria-invalid={tieneError || undefined}
+        aria-describedby={tieneError ? errorId : undefined}
+        value={form[name] || ''}
+        onChange={e => set(name, e.target.value)}
+        placeholder={placeholder}
+        className={`w-full px-3 min-h-toque border rounded-xl text-sm outline-none transition-colors
+          focus:ring-2 focus:ring-brand-500 focus:border-brand-400
+          ${tieneError ? 'border-peligro-300 bg-peligro-50' : 'border-neutro-200 bg-white hover:border-neutro-300'}`}
+      />
+      {tieneError && <p id={errorId} className="text-xs text-peligro-600 mt-1">{errors[name]}</p>}
+    </div>
+  );
+};
 
 export const ClienteFormModal: React.FC<{
   /** Cliente a editar. Si se pasa, el formulario entra en modo edición. */
@@ -51,7 +64,8 @@ export const ClienteFormModal: React.FC<{
   onClose: () => void;
   onSaved: (cliente: any) => void;
 }> = ({ cliente, initialValues, onClose, onSaved }) => {
-  useEscapeKey(onClose);
+  // El cierre con Escape lo gestiona <Modal>, junto con el focus trap,
+  // el scroll lock y la devolución del foco.
   const [form, setForm]     = useState({ ...FORM_INITIAL, ...(cliente || initialValues || {}) });
   const [saving, setSaving] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -96,16 +110,19 @@ export const ClienteFormModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4" style={{ zIndex: Z_INDEX.MODAL_BASE }}>
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
-
+    <Modal
+      titulo={isEdit ? `Editar cliente ${cliente!.nombre_completo}` : 'Registrar cliente'}
+      onClose={onClose}
+      ancho="lg"
+      // Es un formulario con datos escritos: un clic fuera no debe descartarlos.
+      cerrarAlTocarFondo={false}
+      className="max-h-[90vh] flex flex-col"
+    >
         {/* Header */}
         <ModalHeader
           title={isEdit ? cliente!.nombre_completo : 'Registrar cliente'}
           subtitle={isEdit ? 'Editar' : 'Nuevo cliente'}
           onClose={onClose}
-          gradient="from-teal-600 to-emerald-600"
         />
 
         {/* Body */}
@@ -205,20 +222,19 @@ export const ClienteFormModal: React.FC<{
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3 shrink-0 bg-slate-50/50">
-          <button onClick={onClose} className="px-5 py-2.5 text-sm border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-100 transition-colors">
+        <div className="px-6 py-4 border-t border-neutro-100 flex justify-end gap-3 shrink-0 bg-neutro-50/50">
+          <button onClick={onClose} className="px-5 min-h-toque text-sm border border-neutro-200 rounded-xl text-neutro-600 hover:bg-neutro-100 transition-colors">
             Cancelar
           </button>
           <button
             onClick={handleSubmit}
             disabled={saving}
-            className="px-6 py-2.5 text-sm bg-gradient-to-r from-teal-600 to-emerald-600 text-white rounded-xl font-semibold hover:from-teal-700 hover:to-emerald-700 transition-all shadow-sm disabled:opacity-60 flex items-center gap-2"
+            className="px-6 min-h-toque text-sm bg-brand-600 text-white rounded-xl font-semibold hover:bg-brand-700 transition-colors shadow-sm disabled:opacity-60 flex items-center gap-2"
           >
             {saving ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Registrar cliente'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 };

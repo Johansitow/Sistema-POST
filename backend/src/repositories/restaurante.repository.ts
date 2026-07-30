@@ -13,7 +13,12 @@ export const restauranteRepository = {
     }),
 
   findAllIncludeInactive: () =>
-    prisma.restaurante.findMany({ orderBy: { nombre: 'asc' } }),
+    // Excluye sedes de sandbox: la gestión de sedes no lista tenants de prueba
+    // (se administran desde "Probar configuración").
+    prisma.restaurante.findMany({
+      where:   { grupo: { es_sandbox: false } },
+      orderBy: { nombre: 'asc' },
+    }),
 
   findById: (id: number) =>
     prisma.restaurante.findUnique({ where: { id } }),

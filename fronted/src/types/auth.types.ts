@@ -30,6 +30,11 @@ export interface UsuarioAuth {
    * SIEMPRE usar este campo para decisiones de acceso en el frontend.
    */
   es_super_admin: boolean;
+  /**
+   * Progreso del modo tutorial (product tour), por usuario. false ⇒ se auto-dispara
+   * el tour de bienvenida. Viene en el token de login/refresh.
+   */
+  tutorial_completado?: boolean;
   /** Permisos efectivos: rol (RolPermiso) ∪ directos (UsuarioPermiso) */
   permisos?: string[];
   /** Grupos donde el usuario es owner/admin — habilita el panel de administración de grupo */

@@ -12,6 +12,9 @@ import { getPaginationParams, buildPaginatedResult } from '../lib/pagination';
 import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 import { assertGrupoId } from '../lib/tenantQuery';
 import { precioCompra, type PrecioProveedor } from '../lib/costoProveedor';
+import { grupoNegocioRepository } from '../repositories/grupo-negocio.repository';
+import { getPlan, excedeLimite } from '../lib/planes/catalogo';
+import { ForbiddenError } from '../exceptions/HttpErrors';
 
 const keyOne  = (id: number)  => `prod:${id}`;
 const keySKU  = (sku: string) => `prod:sku:${sku}`;
@@ -99,6 +102,21 @@ export const productoService = {
   async crear(data: any) {
     // Los productos son catálogo de grupo — siempre deben tener id_grupo
     assertGrupoId(data.id_grupo as number | undefined);
+
+    // Límite de productos según el plan del grupo (cuenta solo el catálogo
+    // propio, no los productos globales del sistema).
+    const grupoId = data.id_grupo as number;
+    const grupo = await grupoNegocioRepository.findById(grupoId);
+    if (grupo?.plan) {
+      const def = getPlan(grupo.plan);
+      const actuales = await productoRepository.countByGrupo(grupoId);
+      if (excedeLimite(actuales, def.limites.max_productos)) {
+        throw new ForbiddenError(
+          `Tu plan (${def.nombre}) permite máximo ${def.limites.max_productos} productos. ` +
+          'Mejora tu plan para agregar más.'
+        );
+      }
+    }
 
     const existeSKU = await productoRepository.findBySKU(data.sku);
     if (existeSKU) throw new ConflictError('Ya existe un producto con ese SKU');

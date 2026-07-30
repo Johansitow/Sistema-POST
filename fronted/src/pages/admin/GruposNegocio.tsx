@@ -1,17 +1,18 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  Alert, Autocomplete, Box, Button, Card, CardContent, Chip, CircularProgress,
-  Dialog, DialogActions, DialogContent, DialogTitle, Divider,
+  Alert, Autocomplete, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress,
+  Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel,
   IconButton, List, ListItem, ListItemSecondaryAction, ListItemText,
   MenuItem, Select, TextField, Tooltip, Typography,
 } from '@mui/material';
-import { Add, AccountTree, Check, Close, Delete, Edit, ManageAccounts, People } from '@mui/icons-material';
+import { Add, AccountTree, Check, Close, Delete, DeleteForever, Edit, ManageAccounts, People } from '@mui/icons-material';
 import {
   grupoNegocioService,
   type GrupoNegocio, type GrupoMiembro, type CreateGrupoDto,
 } from '../../services/grupo-negocio.service';
 import { usuariosService } from '../../services/usuarios.service';
-import { LoadingScreen, EmptyState } from '../../components/common';
+import { LoadingScreen, EmptyState, ConfirmDialog } from '../../components/common';
+import { useAuthStore } from '../../store/useStore';
 
 const PLAN_LABELS: Record<string, string> = {
   starter:    'Starter',
@@ -271,6 +272,12 @@ export default function GruposNegocio() {
   const [error, setError]           = useState('');
   const [dialog, setDialog]         = useState<{ open: boolean; item: GrupoNegocio | null }>({ open: false, item: null });
   const [miembrosGrupo, setMiembrosGrupo] = useState<GrupoNegocio | null>(null);
+  const [aEliminar, setAEliminar]   = useState<GrupoNegocio | null>(null);
+  const [confirmoBorrado, setConfirmoBorrado] = useState(false);
+
+  // Grupos del superadmin actual: NUNCA se ofrece borrarlos (es el negocio principal).
+  const usuario = useAuthStore(s => s.user);
+  const misGrupos = new Set((usuario?.restaurantes ?? []).map(r => r.id_grupo));
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -293,6 +300,20 @@ export default function GruposNegocio() {
       if (idx >= 0) { const next = [...prev]; next[idx] = g; return next; }
       return [g, ...prev];
     });
+  };
+
+  const handleEliminar = async () => {
+    if (!aEliminar) return;
+    try {
+      await grupoNegocioService.eliminar(aEliminar.id);
+      setGrupos(prev => prev.filter(x => x.id !== aEliminar.id));
+      setAEliminar(null);
+      setConfirmoBorrado(false);
+    } catch (e: any) {
+      setError(e.response?.data?.error || 'No se pudo eliminar el negocio');
+      setAEliminar(null);
+      setConfirmoBorrado(false);
+    }
   };
 
   return (
@@ -368,6 +389,15 @@ export default function GruposNegocio() {
                     <Edit fontSize="small" />
                   </IconButton>
                 </Tooltip>
+                {/* Eliminar negocio: no se ofrece para el propio negocio del superadmin */}
+                {!misGrupos.has(g.id) && (
+                  <Tooltip title="Eliminar negocio">
+                    <IconButton size="small" color="error" aria-label="Eliminar negocio"
+                      onClick={() => { setConfirmoBorrado(false); setAEliminar(g); }}>
+                      <DeleteForever fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Box>
             </Box>
 
@@ -407,6 +437,26 @@ export default function GruposNegocio() {
           onClose={() => setMiembrosGrupo(null)}
         />
       )}
+
+      {/* Confirmación de borrado total del negocio */}
+      <ConfirmDialog
+        open={!!aEliminar}
+        title="Eliminar negocio"
+        message={aEliminar
+          ? `Se eliminará PERMANENTEMENTE "${aEliminar.nombre}", sus ${aEliminar._count.restaurantes} sede(s), ${aEliminar._count.usuarios} usuario(s) —incluido el dueño— y todos sus datos. Esta acción no se puede deshacer.`
+          : ''}
+        confirmText="Eliminar definitivamente"
+        confirmColor="error"
+        disabled={!confirmoBorrado}
+        onConfirm={handleEliminar}
+        onClose={() => { setAEliminar(null); setConfirmoBorrado(false); }}
+      >
+        <FormControlLabel
+          sx={{ mt: 2 }}
+          control={<Checkbox checked={confirmoBorrado} onChange={e => setConfirmoBorrado(e.target.checked)} color="error" />}
+          label={<Typography variant="body2">Entiendo que esta acción es permanente.</Typography>}
+        />
+      </ConfirmDialog>
     </Box>
   );
 }

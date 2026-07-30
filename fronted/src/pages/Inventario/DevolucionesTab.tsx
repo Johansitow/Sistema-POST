@@ -118,20 +118,18 @@ export const DevolucionesTab: React.FC = () => {
 
   return (
     <>
-      {/* Sub-header: subtítulo + acción principal de esta pestaña */}
-      <div className="bg-white border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <p className="text-slate-500 text-sm">
-            Pérdida ligada a un lote cuando se le entrega un producto nuevo al cliente
-          </p>
-          <button onClick={() => setShowNuevaDevolucion(true)}
-            className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-xl text-sm font-semibold hover:from-violet-700 hover:to-purple-700 transition-all shadow-sm">
-            <Plus className="w-4 h-4" /> Nueva Devolución
-          </button>
-        </div>
+      {/* Subtítulo + acción de esta pestaña (ver nota en LotesTab). */}
+      <div className="flex items-center justify-between mb-6">
+        <p className="text-neutro-500 text-sm">
+          Pérdida ligada a un lote cuando se le entrega un producto nuevo al cliente
+        </p>
+        <button onClick={() => setShowNuevaDevolucion(true)}
+          className="flex items-center gap-2 px-4 min-h-toque bg-brand-600 text-white rounded-xl text-sm font-semibold hover:bg-brand-700 transition-colors shadow-sm">
+          <Plus className="w-4 h-4" /> Nueva Devolución
+        </button>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
+      <div className="space-y-6">
         <DevolucionesHistorial
           devoluciones={devoluciones}
           loading={loadingDevoluciones}

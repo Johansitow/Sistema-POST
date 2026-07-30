@@ -20,8 +20,9 @@
 
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
-import { CircularProgress, Box } from '@mui/material';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
+import { CircularProgress, Box, GlobalStyles } from '@mui/material';
+import { ThemeProvider } from '@mui/material/styles';
+import { construirTema, construirVariablesCSS } from './theme';
 import Layout from './components/layout/Layout';
 import { useAuthStore } from './store/useStore';
 import { useBrandingStore } from './store/brandingStore';
@@ -35,21 +36,35 @@ import { OnboardingGuard }     from './components/common/OnboardingGuard';
 import { Login }        from './pages/Login';
 import { Onboarding }   from './pages/Onboarding';
 import { Dashboard }    from './pages/Dashboard';
-import { Inventario }   from './pages/Inventario';
-import { Ordenes }      from './pages/Ordenes';
-import { Reportes }     from './pages/Reportes';
 import { Clientes }     from './pages/Clientes';
 import { Proveedores }  from './pages/Proveedores';
 import { Facturas }     from './pages/Facturas';
-import { Recetas }      from './pages/Recetas';
 import { CierreCaja }   from './pages/CierreCaja';
 import { ListaCompras } from './pages/ListaCompras';
 import { Cocina }       from './pages/Cocina';
 import { Perfil }       from './pages/Perfil';
+import { VerificarDocumento } from './pages/VerificarDocumento';
+import { Landing }      from './pages/Landing';
+import { Precios }      from './pages/Precios';
+import { Registro }     from './pages/Registro';
+import { VerificarEmail }       from './pages/VerificarEmail';
+import { OlvidePassword }       from './pages/OlvidePassword';
+import { RestablecerPassword }  from './pages/RestablecerPassword';
+import { useAuthBootstrap } from './hooks/useAuthBootstrap';
+
+// Las cuatro páginas operativas más pesadas también van en lazy. Sumaban ~6.000
+// líneas en el bundle inicial (ProductosTab 1.954, Ordenes 1.870, Recetas 1.324,
+// Reportes 840) y no todos los roles las abren: un cajero nunca entra a Recetas.
+const Inventario = lazy(() => import('./pages/Inventario').then(m => ({ default: m.Inventario })));
+const Ordenes    = lazy(() => import('./pages/Ordenes').then(m    => ({ default: m.Ordenes    })));
+const Reportes   = lazy(() => import('./pages/Reportes').then(m   => ({ default: m.Reportes   })));
+const Recetas    = lazy(() => import('./pages/Recetas').then(m    => ({ default: m.Recetas    })));
 
 // ── Páginas de admin (lazy: solo se cargan al navegar a /admin/*) ─────────────
 
 const Usuarios        = lazy(() => import('./pages/admin/Usuarios'));
+const FichaEmpleado   = lazy(() => import('./pages/admin/FichaEmpleado'));
+const Nomina          = lazy(() => import('./pages/admin/Nomina'));
 const Auditoria       = lazy(() => import('./pages/admin/Auditoria').then(m => ({ default: m.Auditoria })));
 const Configuracion   = lazy(() => import('./pages/admin/Configuracion').then(m => ({ default: m.Configuracion })));
 const Restaurantes    = lazy(() => import('./pages/admin/Restaurantes').then(m => ({ default: m.Restaurantes })));
@@ -61,6 +76,7 @@ const Permisos        = lazy(() => import('./pages/admin/Permisos').then(m => ({
 const Apariencia      = lazy(() => import('./pages/admin/Apariencia'));
 const GruposNegocio   = lazy(() => import('./pages/admin/GruposNegocio'));
 const OnboardingPrueba = lazy(() => import('./pages/admin/OnboardingPrueba').then(m => ({ default: m.OnboardingPrueba })));
+const MiPlan          = lazy(() => import('./pages/admin/MiPlan'));
 
 // ── Fallback mientras el chunk lazy se descarga ────────────────────────────────
 
@@ -75,10 +91,15 @@ const PageFallback = () => (
 /**
  * PrivateGuard — Redirige a /login si no hay sesión activa.
  * Usa <Outlet /> para que funcione como route layout element.
+ *
+ * Exige la bandera `isAuthenticated` Y la presencia del token: la bandera se
+ * rehidrata de localStorage, pero sin token no hay forma de autenticar ningún
+ * request. La validación real del token contra el backend la hace useAuthBootstrap
+ * al arrancar (App), antes de montar estas rutas.
  */
 const PrivateGuard: React.FC = () => {
-  const { isAuthenticated } = useAuthStore();
-  return isAuthenticated ? <Outlet /> : <Navigate to="/login" replace />;
+  const { isAuthenticated, accessToken } = useAuthStore();
+  return isAuthenticated && accessToken ? <Outlet /> : <Navigate to="/login" replace />;
 };
 
 /**
@@ -103,26 +124,65 @@ const AdminGuard: React.FC<{ children: React.ReactNode; permiso?: string }> = ({
 
 export default function App() {
   const colorPrimario = useBrandingStore(s => s.colorPrimario);
+  const nombreSistema = useBrandingStore(s => s.nombreSistema);
   const loadBranding  = useBrandingStore(s => s.loadBranding);
 
   // Carga la marca (nombre/color/logo) una sola vez, antes de que se monten
   // Login o Layout — ambos la necesitan y ninguno debe disparar el fetch dos veces.
   useEffect(() => { loadBranding(); }, [loadBranding]);
 
-  // Tema MUI centralizado: color_primario alimenta palette.primary en toda la app
-  // (botones, tabs, switches, etc.), en vez de los hex hardcodeados de antes.
-  const theme = useMemo(() => createTheme({
-    palette: { primary: { main: colorPrimario } },
-  }), [colorPrimario]);
+  // El nombre del tenant manda en la pestaña del navegador y en los marcadores.
+  // El <title> de index.html es solo el valor previo a que cargue la marca.
+  useEffect(() => {
+    if (nombreSistema) document.title = nombreSistema;
+  }, [nombreSistema]);
+
+  // Tema completo desde src/theme: color, tipografía, radios y overrides de
+  // componentes salen todos de los mismos tokens.
+  const theme = useMemo(() => construirTema(colorPrimario), [colorPrimario]);
+
+  // El otro extremo del puente: las mismas escalas publicadas como CSS
+  // variables en :root, que es de donde las lee tailwind.config.js.
+  //
+  // Sin esto, el color de marca del tenant solo llegaba a los componentes MUI
+  // (login y admin) y las pantallas operativas —Órdenes, Dashboard, Cocina,
+  // Inventario— se quedaban con el azul y el verde quemados a mano.
+  const variablesCSS = useMemo(() => construirVariablesCSS(colorPrimario), [colorPrimario]);
+
+  // Valida el token contra el backend antes de montar las rutas. Mientras corre,
+  // se muestra una pantalla de carga: así jamás se pinta UI protegida con un token
+  // sin verificar (el flash de "sesión falsa" que se veía al recargar).
+  const authReady = useAuthBootstrap();
 
   return (
     <ThemeProvider theme={theme}>
+    <GlobalStyles styles={variablesCSS} />
     <ErrorBoundary>
+      {!authReady ? (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+          <CircularProgress />
+        </Box>
+      ) : (
       <BrowserRouter>
         <Routes>
 
           {/* ── Pública ─────────────────────────────────────────────────── */}
-          <Route path="/login" element={<Login />} />
+          {/* Home de marketing: primera pantalla del sitio. Si ya hay sesión */}
+          {/* válida, Landing redirige al panel por sí misma.                 */}
+          <Route path="/"          element={<Landing />} />
+          <Route path="/login"    element={<Login />} />
+          {/* Página de precios y alta self-serve: el embudo masivo, sin sesión. */}
+          <Route path="/precios"  element={<Precios />} />
+          <Route path="/registro" element={<Registro />} />
+          {/* Verificación de correo y recuperación de contraseña (self-serve). */}
+          <Route path="/verificar-email"      element={<VerificarEmail />} />
+          <Route path="/olvide-password"      element={<OlvidePassword />} />
+          <Route path="/restablecer-password" element={<RestablecerPassword />} />
+          {/* Verificación de documentos laborales: destino del QR impreso.  */}
+          {/* Va FUERA del guard a propósito — quien verifica (un banco, una */}
+          {/* embajada) no tiene cuenta en el sistema.                       */}
+          <Route path="/verificar/:codigo" element={<VerificarDocumento />} />
+          <Route path="/verificar"         element={<VerificarDocumento />} />
 
           {/* ── Privadas — Layout persiste en TODAS estas rutas ─────────── */}
           {/*                                                                 */}
@@ -131,6 +191,14 @@ export default function App() {
           {/* el <Outlet /> al cambiar de ruta. El sidebar nunca se remonta.  */}
 
           <Route element={<PrivateGuard />}>
+
+            {/* KDS de cocina — protegido pero SIN Layout, a propósito.
+                Es una pantalla montada en pared que se mira a 2-3 metros: el
+                sidebar de 248px no lo usa nadie en la cocina, y el AppBar claro
+                y los breadcrumbs encima de una pantalla oscura solo encandilan.
+                Va a pantalla completa, con su propia salida. */}
+            <Route path="/cocina" element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
+
             <Route element={<Layout />}>
 
               {/*
@@ -146,9 +214,8 @@ export default function App() {
                */}
               <Route element={<OnboardingGuard />}>
 
-              {/* Raíz → dashboard */}
-              <Route index element={<Navigate to="/dashboard" replace />} />
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              {/* La raíz "/" es pública (Landing) y vive fuera de este guard.
+                  El destino tras iniciar sesión es /dashboard (ver Login). */}
 
               {/* Sistema principal */}
               <Route path="/dashboard"     element={<Dashboard   />} />
@@ -166,7 +233,6 @@ export default function App() {
               <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
               {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
               <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
-              <Route path="/cocina"       element={<RequireRestaurante><Cocina /></RequireRestaurante>} />
 
               {/* Administración — AdminGuard al nivel del element, no del Route.     */}
               {/* Esto mantiene el mismo Layout pero añade la verificación de permisos */}
@@ -176,6 +242,24 @@ export default function App() {
                 element={
                   <AdminGuard permiso="usuarios.gestionar">
                     <Suspense fallback={<PageFallback />}><Usuarios /></Suspense>
+                  </AdminGuard>
+                }
+              />
+              {/* Nómina — mismo permiso que la gestión de personal */}
+              <Route
+                path="/admin/nomina"
+                element={
+                  <AdminGuard permiso="usuarios.gestionar">
+                    <Suspense fallback={<PageFallback />}><Nomina /></Suspense>
+                  </AdminGuard>
+                }
+              />
+              {/* Ficha 360 del empleado — mismo permiso que el listado */}
+              <Route
+                path="/admin/personal/:id"
+                element={
+                  <AdminGuard permiso="usuarios.gestionar">
+                    <Suspense fallback={<PageFallback />}><FichaEmpleado /></Suspense>
                   </AdminGuard>
                 }
               />
@@ -267,18 +351,29 @@ export default function App() {
                   </AdminGuard>
                 }
               />
+              {/* Mi plan — consumo vs. límites y escalera de planes (dueño del grupo) */}
+              <Route
+                path="/admin/mi-plan"
+                element={
+                  <AdminGuard permiso="config.sistema">
+                    <Suspense fallback={<PageFallback />}><MiPlan /></Suspense>
+                  </AdminGuard>
+                }
+              />
 
               </Route>{/* /OnboardingGuard */}
 
             </Route>
           </Route>
 
-          {/* Fallback */}
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          {/* Fallback → la raíz (Landing decide: con sesión válida va al panel;
+              sin sesión muestra el home). Evita rebotes raros a /login. */}
+          <Route path="*" element={<Navigate to="/" replace />} />
 
         </Routes>
         <GlobalSnackbar />
       </BrowserRouter>
+      )}
     </ErrorBoundary>
     </ThemeProvider>
   );

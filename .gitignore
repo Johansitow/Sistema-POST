@@ -1,9 +1,17 @@
 node_modules
 # Keep environment variables out of version control
 .env
+# Variantes de entorno (.env.production, .env.local, etc.) — nunca versionar
+# secretos. Se conservan los *.example para documentar las variables.
+.env.*
+!.env.example
+!.env.*.example
 
 /generated/prisma
 
 # Artefactos de build y logs del backend
 backend/dist/
 backend/logs/
+# Respaldos de la base de datos (ver backend/scripts) — datos sensibles
+backend/backups/*
+!backend/backups/.gitignore

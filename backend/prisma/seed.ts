@@ -14,10 +14,33 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
+// UUID del superadmin SOLO para desarrollo/test. En producción manda
+// process.env.SUPER_ADMIN_UUID (obligatorio). Se define aquí en vez de
+// importarlo de ../src para que el seed sea autocontenido y corra dentro de la
+// imagen de producción (que solo lleva prisma/ y dist/, no src/).
+const DEV_SUPER_ADMIN_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+
 const prisma = new PrismaClient();
 
 async function main() {
   console.log('🌱 Iniciando seed...');
+
+  // ============================================================
+  // CREDENCIALES DEL SUPERADMIN
+  // En producción DEBEN venir por entorno; nunca se permite quedar
+  // con el UUID/contraseña por defecto (que son públicos en el repo).
+  // ============================================================
+  const isProduction = process.env.NODE_ENV === 'production';
+  const SUPER_ADMIN_UUID = process.env.SUPER_ADMIN_UUID ?? DEV_SUPER_ADMIN_UUID;
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'Admin123!';
+  const adminPasswordEsPorDefecto = !process.env.SEED_ADMIN_PASSWORD;
+
+  if (isProduction && (!process.env.SUPER_ADMIN_UUID || !process.env.SEED_ADMIN_PASSWORD)) {
+    throw new Error(
+      'En producción el seed exige SUPER_ADMIN_UUID y SEED_ADMIN_PASSWORD en el entorno ' +
+        '(no se permiten credenciales por defecto). Defínelas antes de sembrar.',
+    );
+  }
 
   // ============================================================
   // LIMPIAR DATOS EXISTENTES (orden correcto por dependencias)
@@ -27,7 +50,6 @@ async function main() {
   await prisma.alerta.deleteMany();
 
   // Nivel 2: Pagos y facturas (dependen de orden)
-  await prisma.pagoGrupo.deleteMany();
   await prisma.pago.deleteMany();
   await prisma.factura.deleteMany();
 
@@ -38,9 +60,8 @@ async function main() {
   await prisma.clientePunto.deleteMany();
   await prisma.cliente.deleteMany();       // cascade elimina ClienteDireccion
 
-  // Nivel 5: Órdenes y grupos de órdenes
+  // Nivel 5: Órdenes (cascada a OrdenSede/OrdenSedeItem/PagoOrden/OrdenEvento)
   await prisma.orden.deleteMany();
-  await prisma.ordenGrupo.deleteMany();
 
   // Nivel 6: Movimientos e inventario
   await prisma.movimiento.deleteMany();
@@ -185,14 +206,11 @@ async function main() {
   // USUARIOS
   // ============================================================
   console.log('👤 Creando usuarios...');
-  const passwordHash = await bcrypt.hash('Admin123!', 10);
+  const passwordHash = await bcrypt.hash(adminPassword, 10);
 
   // ─── SUPER ADMIN ÚNICO ────────────────────────────────────────────────────
-  // UUID fijo que identifica al superadmin en el sistema.
-  // DEBE coincidir con SUPER_ADMIN_UUID en el archivo .env.
-  // NUNCA cambiar este UUID en producción.
-  const SUPER_ADMIN_UUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
-
+  // El UUID (SUPER_ADMIN_UUID) se resolvió arriba: por entorno en producción,
+  // o DEV_SUPER_ADMIN_UUID en desarrollo. DEBE coincidir con Usuario.uuid en DB.
   const usuarioAdmin = await prisma.usuario.create({
     data: {
       uuid:            SUPER_ADMIN_UUID,  // UUID fijo e inmutable
@@ -520,8 +538,12 @@ async function main() {
   console.log('✅ Lotes y movimientos creados');
 
   // ============================================================
-  // ÓRDENES DE EJEMPLO
+  // ÓRDENES DE EJEMPLO (solo desarrollo)
+  // Son datos de demo del modelo Orden legacy que quedaron desactualizados
+  // contra el schema actual; en producción se omiten (el flujo real usa
+  // OrdenSede y cada tenant genera sus propias órdenes).
   // ============================================================
+  if (!isProduction) {
   console.log('🛒 Creando órdenes de ejemplo...');
   const orden1 = await prisma.orden.create({
     data: {
@@ -553,6 +575,9 @@ async function main() {
     },
   });
   console.log('✅ 2 órdenes de ejemplo creadas');
+  } else {
+    console.log('⏭️  Órdenes de ejemplo omitidas (producción)');
+  }
 
   // ============================================================
   // FEATURE FLAGS
@@ -616,7 +641,11 @@ async function main() {
   console.log('\n✨ ¡Seed completado exitosamente!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('👤 Usuarios:');
-  console.log('   admin   / Admin123!   → Administrador (superadmin)');
+  console.log(
+    adminPasswordEsPorDefecto
+      ? '   admin   / Admin123!   → Administrador (superadmin) — ⚠️ contraseña por defecto, cámbiala'
+      : '   admin   / (contraseña de SEED_ADMIN_PASSWORD)  → Administrador (superadmin)',
+  );
   console.log('   cajero1 / Cajero123!  → Cajero');
   console.log('   cocina1 / Cocina123!  → Cocina');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

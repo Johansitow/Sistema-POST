@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { CheckCircle2, AlertTriangle, Archive, Layers } from 'lucide-react';
+import { clasesEstado, definirEstado } from '../../theme/estados';
 
 export type EstadoLote = 'activo' | 'vencido' | 'agotado' | 'en_produccion';
 
@@ -38,35 +39,34 @@ export interface Lote {
   } | null;
 }
 
-export const ESTADO_CONFIG: Record<EstadoLote, {
-  label: string; icon: React.ReactNode;
-  badge: string; row: string;
-}> = {
-  activo: {
-    label: 'Activo',
-    icon:  React.createElement(CheckCircle2, { className: 'w-3.5 h-3.5' }),
-    badge: 'bg-emerald-100 text-emerald-700 border border-emerald-200',
-    row:   '',
-  },
-  vencido: {
-    label: 'Vencido',
-    icon:  React.createElement(AlertTriangle, { className: 'w-3.5 h-3.5' }),
-    badge: 'bg-red-100 text-red-700 border border-red-200',
-    row:   'bg-red-50/40',
-  },
-  agotado: {
-    label: 'Agotado',
-    icon:  React.createElement(Archive, { className: 'w-3.5 h-3.5' }),
-    badge: 'bg-slate-100 text-slate-600 border border-slate-200',
-    row:   'opacity-60',
-  },
-  en_produccion: {
-    label: 'En producción',
-    icon:  React.createElement(Layers, { className: 'w-3.5 h-3.5' }),
-    badge: 'bg-blue-100 text-blue-700 border border-blue-200',
-    row:   '',
-  },
+// Etiqueta y color vienen de theme/estados.ts (dominio 'lote'). Lo específico
+// del inventario es el ícono y el resaltado de la fila: un lote vencido se tiñe
+// de rojo en la tabla y uno agotado se atenúa.
+const ICONO_LOTE: Record<EstadoLote, React.ReactNode> = {
+  activo:        React.createElement(CheckCircle2,  { className: 'w-3.5 h-3.5' }),
+  vencido:       React.createElement(AlertTriangle, { className: 'w-3.5 h-3.5' }),
+  agotado:       React.createElement(Archive,       { className: 'w-3.5 h-3.5' }),
+  en_produccion: React.createElement(Layers,        { className: 'w-3.5 h-3.5' }),
 };
+
+const FILA_LOTE: Record<EstadoLote, string> = {
+  activo:        '',
+  vencido:       'bg-peligro-50/40',
+  agotado:       'opacity-60',
+  en_produccion: '',
+};
+
+export const ESTADO_CONFIG = Object.fromEntries(
+  (Object.keys(ICONO_LOTE) as EstadoLote[]).map(estado => [
+    estado,
+    {
+      label: definirEstado(estado, 'lote').label,
+      icon:  ICONO_LOTE[estado],
+      badge: clasesEstado(estado, 'lote').insignia,
+      row:   FILA_LOTE[estado],
+    },
+  ]),
+) as Record<EstadoLote, { label: string; icon: React.ReactNode; badge: string; row: string }>;
 
 export function diasHastaVencer(fecha: string | null): number | null {
   if (!fecha) return null;
