@@ -10,6 +10,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth.middleware'
 import { grupoNegocioService }        from '../services/grupo-negocio.service';
 import { successResponse }            from '../lib/response';
 import { asyncHandler }               from '../middlewares/error.middleware';
+import { registrarAuditoria }         from '../repositories/auditoria.repository';
 import prisma                         from '../config/database';
 
 const router = Router();
@@ -69,6 +70,27 @@ router.patch('/:id', asyncHandler(async (req: Request, res: Response) => {
   const data  = actualizarSchema.parse(req.body);
   const grupo = await grupoNegocioService.actualizar(Number(req.params.id), data);
   res.json(successResponse(grupo, 'Grupo actualizado'));
+}));
+
+// ── Eliminar grupo por completo (borrado total del tenant) ─────────────────────
+// Solo superadmin (router-level). Borra el negocio, sus sedes, datos y usuarios
+// propios. El service rechaza el negocio que contenga al superadministrador.
+
+router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  await grupoNegocioService.eliminarGrupo(id);
+
+  registrarAuditoria({
+    id_usuario:           req.user?.id,
+    accion:               'ELIMINAR_GRUPO',
+    modulo:               'grupos',
+    tabla_afectada:       'grupos_negocio',
+    id_registro_afectado: id,
+    ip_address:           req.auditContext?.ip,
+    user_agent:           req.auditContext?.userAgent,
+  });
+
+  res.json(successResponse(null, 'Negocio eliminado'));
 }));
 
 // ── Miembros del grupo ─────────────────────────────────────────────────────────

@@ -79,6 +79,11 @@ export const grupoNegocioService = {
     await api.delete(`${BASE}/${id}/miembros/${id_usuario}`);
   },
 
+  /** Borrado total del negocio (grupo + sedes + datos + usuarios propios). Irreversible. */
+  async eliminar(id: number): Promise<void> {
+    await api.delete(`${BASE}/${id}`);
+  },
+
   async dashboard(id: number): Promise<GrupoDashboard> {
     const { data } = await api.get(`${BASE}/${id}/dashboard`);
     return data.data;
