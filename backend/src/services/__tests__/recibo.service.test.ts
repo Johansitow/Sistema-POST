@@ -9,6 +9,7 @@
  *     - cálculo de cambio (pagado > total)
  *     - cambio = 0 cuando pago exacto
  *     - lanza NotFoundError si la orden no existe
+ *     - aislamiento multi-tenant (IDOR): orden de otro restaurante → NotFound
  *
  *   generarRecibo
  *     - delega a generarReciboSimple
@@ -28,11 +29,15 @@ vi.mock('../../config/database', () => ({
 
 // ── Imports DESPUÉS de los mocks ───────────────────────────────────────────────
 
-import { reciboService }  from '../recibo.service';
-import prisma             from '../../config/database';
-import { NotFoundError }  from '../../exceptions/HttpErrors';
+import { reciboService }             from '../recibo.service';
+import prisma                        from '../../config/database';
+import { NotFoundError, ForbiddenError } from '../../exceptions/HttpErrors';
+import type { TenantCtx }            from '../../lib/tenantCtx';
 
 const pm = prisma as any;
+
+// El restaurante dueño de la orden de prueba.
+const ctx: TenantCtx = { restauranteId: 7, esSuperAdmin: false };
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +67,7 @@ const makePago = (monto = 10000) => ({
 
 const makeOrdenSimple = (overrides: Partial<any> = {}) => ({
   id:             42,
+  id_restaurante: 7,
   numero_orden:   'ORD-000042',
   fecha_apertura: new Date('2026-03-28T14:00:00Z'),
   restaurante:    { nombre: 'Restaurante Norte' },
@@ -87,7 +93,7 @@ describe('reciboService.generarReciboSimple', () => {
   it('retorna estructura ReciboSimple completa', async () => {
     pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
 
     expect(recibo.tipo).toBe('simple');
     expect(recibo.numero).toBe('ORD-000042');
@@ -110,7 +116,7 @@ describe('reciboService.generarReciboSimple', () => {
     // total = 11900, pagado = 12000 → cambio = 100
     pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.cambio).toBe(100);
   });
 
@@ -120,7 +126,7 @@ describe('reciboService.generarReciboSimple', () => {
       makeOrdenSimple({ pagos: [makePago(11900)] }),
     );
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.cambio).toBe(0);
   });
 
@@ -130,14 +136,14 @@ describe('reciboService.generarReciboSimple', () => {
       makeOrdenSimple({ pagos: [makePago(5000)] }),
     );
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.cambio).toBe(0);
   });
 
   it('usa "Consumidor final" si la orden no tiene cliente', async () => {
     pm.orden.findUnique.mockResolvedValue(makeOrdenSimple({ cliente: null }));
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.cliente).toBe('Consumidor final');
   });
 
@@ -146,7 +152,7 @@ describe('reciboService.generarReciboSimple', () => {
       makeOrdenSimple({ detalles: [makeDetalleConVariante()] }),
     );
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.items[0].nombre).toBe('Café Americano — Grande');
   });
 
@@ -155,7 +161,7 @@ describe('reciboService.generarReciboSimple', () => {
       makeOrdenSimple({ detalles: [makeDetalle({ notas: 'Sin azúcar' })] }),
     );
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.items[0].notas).toBe('Sin azúcar');
   });
 
@@ -164,15 +170,42 @@ describe('reciboService.generarReciboSimple', () => {
       makeOrdenSimple({ costo_domicilio: new Decimal('3500') }),
     );
 
-    const recibo = await reciboService.generarReciboSimple(42);
+    const recibo = await reciboService.generarReciboSimple(42, ctx);
     expect(recibo.costo_domicilio).toBe(3500);
   });
 
   it('lanza NotFoundError si la orden no existe', async () => {
     pm.orden.findUnique.mockResolvedValue(null);
 
-    await expect(reciboService.generarReciboSimple(999))
+    await expect(reciboService.generarReciboSimple(999, ctx))
       .rejects.toThrow(NotFoundError);
+  });
+
+  // ── Aislamiento multi-tenant (IDOR) ──────────────────────────────────────────
+
+  it('lanza NotFoundError si la orden es de OTRO restaurante (no revela existencia)', async () => {
+    // Orden del restaurante 7, pero el usuario pertenece al restaurante 999.
+    pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
+    const ctxAjeno: TenantCtx = { restauranteId: 999, esSuperAdmin: false };
+
+    await expect(reciboService.generarReciboSimple(42, ctxAjeno))
+      .rejects.toThrow(NotFoundError);
+  });
+
+  it('lanza ForbiddenError si el usuario no tiene contexto de restaurante', async () => {
+    pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
+    const ctxSinTenant: TenantCtx = { esSuperAdmin: false };
+
+    await expect(reciboService.generarReciboSimple(42, ctxSinTenant))
+      .rejects.toThrow(ForbiddenError);
+  });
+
+  it('superadmin accede al recibo de cualquier restaurante', async () => {
+    pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
+    const ctxSuper: TenantCtx = { esSuperAdmin: true };
+
+    const recibo = await reciboService.generarReciboSimple(42, ctxSuper);
+    expect(recibo.numero).toBe('ORD-000042');
   });
 });
 
@@ -184,7 +217,7 @@ describe('reciboService.generarRecibo', () => {
   it('delega a generarReciboSimple', async () => {
     pm.orden.findUnique.mockResolvedValue(makeOrdenSimple());
 
-    const recibo = await reciboService.generarRecibo({ idOrden: 42 });
+    const recibo = await reciboService.generarRecibo({ idOrden: 42 }, ctx);
 
     expect(recibo.tipo).toBe('simple');
     expect(recibo.numero).toBe('ORD-000042');
@@ -193,12 +226,12 @@ describe('reciboService.generarRecibo', () => {
   it('lanza NotFoundError si la orden no existe', async () => {
     pm.orden.findUnique.mockResolvedValue(null);
 
-    await expect(reciboService.generarRecibo({ idOrden: 999 }))
+    await expect(reciboService.generarRecibo({ idOrden: 999 }, ctx))
       .rejects.toThrow(NotFoundError);
   });
 
   it('lanza Error si no se pasa idOrden', async () => {
-    await expect(reciboService.generarRecibo({}))
+    await expect(reciboService.generarRecibo({}, ctx))
       .rejects.toThrow('Se requiere idOrden');
   });
 });

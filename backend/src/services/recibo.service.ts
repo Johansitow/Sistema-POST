@@ -10,7 +10,8 @@
  */
 
 import prisma from '../config/database';
-import { NotFoundError } from '../exceptions/HttpErrors';
+import { NotFoundError, ForbiddenError } from '../exceptions/HttpErrors';
+import type { TenantCtx } from '../lib/tenantCtx';
 
 // ─── Tipos de retorno ─────────────────────────────────────────────────────────
 
@@ -66,8 +67,13 @@ export const reciboService = {
    * generarReciboSimple — recibo para una orden única (un restaurante).
    *
    * Incluye todos los pagos asociados a la orden individual.
+   *
+   * Aislamiento multi-tenant: el recibo (con datos de cliente y pagos) solo es
+   * visible para el restaurante dueño de la orden. Aplica el mismo criterio que
+   * TenantRepository._scopedLookup — responde NotFound ante una orden de otro
+   * tenant para no revelar su existencia.
    */
-  async generarReciboSimple(idOrden: number): Promise<ReciboSimple> {
+  async generarReciboSimple(idOrden: number, ctx: TenantCtx): Promise<ReciboSimple> {
     const orden = await prisma.orden.findUnique({
       where:   { id: idOrden },
       include: {
@@ -88,6 +94,19 @@ export const reciboService = {
     }) as any; // Prisma include payload — campos include verificados en runtime
 
     if (!orden) throw new NotFoundError('Orden');
+
+    if (!ctx.esSuperAdmin) {
+      if (ctx.restauranteId === undefined || ctx.restauranteId === null) {
+        throw new ForbiddenError('Se requiere contexto de restaurante para esta operación');
+      }
+      if (orden.id_restaurante !== ctx.restauranteId) {
+        console.warn(
+          `[TenantGuard] IDOR attempt: restaurante ${ctx.restauranteId} intentó acceder al ` +
+          `recibo de la orden ${idOrden} (id_restaurante=${orden.id_restaurante})`,
+        );
+        throw new NotFoundError('Orden');
+      }
+    }
 
     const items: ReciboItem[] = orden.detalles.map((d: any) => ({
       nombre:          d.variante
@@ -131,10 +150,10 @@ export const reciboService = {
    * generarRecibo — punto de entrada.
    *
    * Uso recomendado desde el controller:
-   *   const recibo = await reciboService.generarRecibo({ idOrden: 42 });
+   *   const recibo = await reciboService.generarRecibo({ idOrden: 42 }, ctx);
    */
-  async generarRecibo(params: { idOrden?: number }): Promise<ReciboSimple> {
+  async generarRecibo(params: { idOrden?: number }, ctx: TenantCtx): Promise<ReciboSimple> {
     if (!params.idOrden) throw new Error('Se requiere idOrden');
-    return this.generarReciboSimple(params.idOrden);
+    return this.generarReciboSimple(params.idOrden, ctx);
   },
 };

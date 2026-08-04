@@ -4,25 +4,26 @@
 
 import { Request, Response } from 'express';
 import { varianteService } from '../services/variante.service';
+import { buildTenantCtx } from '../lib/tenantCtx';
 import { asyncHandler } from '../middlewares/error.middleware';
 import { createVarianteSchema, updateVarianteSchema, reorderVariantesSchema } from '../dto/variantes.dto';
 import { registrarAuditoria } from '../repositories/auditoria.repository';
 
 export const getAll = asyncHandler(async (req: Request, res: Response) => {
   const id_producto = Number(req.params.productoId);
-  const variantes = await varianteService.listarPorProducto(id_producto);
+  const variantes = await varianteService.listarPorProducto(id_producto, buildTenantCtx(req));
   res.json({ success: true, data: variantes });
 });
 
 export const getById = asyncHandler(async (req: Request, res: Response) => {
-  const variante = await varianteService.obtenerPorId(Number(req.params.id));
+  const variante = await varianteService.obtenerPorId(Number(req.params.id), buildTenantCtx(req));
   res.json({ success: true, data: variante });
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
   const id_producto = Number(req.params.productoId);
   const data = createVarianteSchema.parse(req.body);
-  const variante = await varianteService.crear(id_producto, data as any);
+  const variante = await varianteService.crear(id_producto, data as any, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -41,7 +42,7 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
 export const update = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const data = updateVarianteSchema.parse(req.body);
-  const variante = await varianteService.actualizar(id, data as any);
+  const variante = await varianteService.actualizar(id, data as any, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -59,7 +60,7 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
   const id = Number(req.params.id);
-  await varianteService.eliminar(id);
+  await varianteService.eliminar(id, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,
@@ -77,7 +78,7 @@ export const remove = asyncHandler(async (req: Request, res: Response) => {
 export const reorder = asyncHandler(async (req: Request, res: Response) => {
   const id_producto = Number(req.params.productoId);
   const { items } = reorderVariantesSchema.parse(req.body);
-  await varianteService.reordenar(id_producto, items);
+  await varianteService.reordenar(id_producto, items, buildTenantCtx(req));
 
   registrarAuditoria({
     id_usuario:           (req as any).user?.id,

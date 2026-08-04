@@ -151,8 +151,8 @@ router.use(authenticate, tenantContextOptional, tenantIsolation);
  *       200: { description: Orden actualizado }
  *       400: { description: IDs inválidos, orden duplicado o lista incompleta }
  */
-router.get('/',                    getAll);
-router.get('/:id',                 getById);
+router.get('/',    requirePermission('productos.ver'), getAll);
+router.get('/:id', requirePermission('productos.ver'), getById);
 router.post('/',    requirePermission('productos.crear'),   create);
 router.put('/:id',  requirePermission('productos.editar'),  update);
 router.delete('/:id', requirePermission('productos.eliminar'), remove);
