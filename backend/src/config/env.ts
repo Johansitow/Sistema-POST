@@ -98,6 +98,16 @@ export const config = {
     max:      parseInt(env.AUTH_SENSITIVE_RATE_MAX, 10),
     windowMs: parseInt(env.AUTH_SENSITIVE_RATE_WINDOW_MS, 10),
   },
+
+  // Pagos / suscripciones — driver `off` (noop, simula) o `wompi` (real)
+  wompi: {
+    driver:          env.PAGOS_DRIVER,
+    baseUrl:         env.WOMPI_BASE_URL,
+    publicKey:       env.WOMPI_PUBLIC_KEY,
+    privateKey:      env.WOMPI_PRIVATE_KEY,
+    eventsSecret:    env.WOMPI_EVENTS_SECRET,
+    integritySecret: env.WOMPI_INTEGRITY_SECRET,
+  },
 } as const;
 
 export default config;

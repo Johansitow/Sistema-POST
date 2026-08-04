@@ -29,6 +29,7 @@ import { usuariosPlugin }        from './plugins/core/usuarios.plugin';
 import { restaurantesPlugin }    from './plugins/core/restaurantes.plugin';
 import { categoriasPlugin }      from './plugins/core/categorias.plugin';
 import { startInventarioJob } from './jobs/inventario.job';
+import { startSuscripcionesJob } from './jobs/suscripciones.job';
 import logger from './config/logger';
 import { config } from './config/env';
 import prisma from './config/database';
@@ -175,6 +176,7 @@ pluginLoader.loadAll(app).catch((err) =>
 
 // Iniciar jobs periódicos
 startInventarioJob();
+startSuscripcionesJob();
 
 // Iniciar servidor
 server.listen(PORT, () => {

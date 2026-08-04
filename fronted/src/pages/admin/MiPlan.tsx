@@ -1,18 +1,23 @@
 /**
- * MiPlan — plan actual del grupo, consumo vs. límites y la escalera de planes.
+ * MiPlan — plan actual del grupo, consumo vs. límites, estado de suscripción y
+ * checkout de mejora de plan (Wompi: Nequi tokenizado / PSE puntual).
  *
- * En esta fase el botón "Mejorar" solo informa (el cobro con Wompi llega en la
- * Fase B). El consumo se lee de GET /planes/mi-plan; la escalera de GET /planes.
+ * El consumo/plan se lee de GET /planes/mi-plan (todo miembro) y el estado de
+ * suscripción de GET /suscripciones/estado (owner/admin; si 403, se ocultan las
+ * acciones de cobro). En modo sin llaves (dev) el cobro se simula.
  */
 
 import { useEffect, useState } from 'react';
 import {
   Box, Card, CardContent, Chip, Divider, LinearProgress, Typography,
   List, ListItem, ListItemIcon, ListItemText, Button, Alert,
+  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
+  ToggleButton, ToggleButtonGroup, CircularProgress,
 } from '@mui/material';
 import { CheckCircle } from '@mui/icons-material';
 import { usePlanStore } from '../../store/planStore';
 import { planesService, formatoCOP, esIlimitado, type Plan } from '../../services/planes.service';
+import { suscripcionService, type EstadoSuscripcion, type MetodoPago } from '../../services/suscripcion.service';
 
 /** Barra de consumo de un recurso; ilimitado se muestra sin barra. */
 function Medidor({ etiqueta, actual, max }: { etiqueta: string; actual: number; max: number }) {
@@ -35,21 +40,134 @@ function Medidor({ etiqueta, actual, max }: { etiqueta: string; actual: number; 
   );
 }
 
+/** Banner del estado de la suscripción (vencida / pendiente / activa / simulado). */
+function BannerSuscripcion({ estado }: { estado: EstadoSuscripcion }) {
+  const sub = estado.suscripcion;
+  if (!estado.cobro_real) {
+    return (
+      <Alert severity="info" variant="outlined" sx={{ mb: 3 }}>
+        Modo de prueba: el cobro está simulado (sin pasarela configurada). Al "Mejorar" el plan se
+        activa al instante para que puedas probar el flujo.
+      </Alert>
+    );
+  }
+  if (!sub) return null;
+  if (sub.estado === 'vencida') {
+    return <Alert severity="warning" sx={{ mb: 3 }}>Tu suscripción venció y volviste al plan Gratis. Vuelve a activar un plan cuando quieras.</Alert>;
+  }
+  if (sub.estado === 'pendiente_pago') {
+    return <Alert severity="warning" sx={{ mb: 3 }}>Tu pago está pendiente. Completa el pago para mantener tu plan.</Alert>;
+  }
+  if (sub.estado === 'activa' && sub.proximo_cobro) {
+    return <Alert severity="success" variant="outlined" sx={{ mb: 3 }}>Suscripción activa. Próximo cobro: {new Date(sub.proximo_cobro).toLocaleDateString('es-CO')}.</Alert>;
+  }
+  return null;
+}
+
+/** Modal de checkout: elige método y confirma la mejora de plan. */
+function CheckoutModal({ plan, onClose, onHecho }: { plan: Plan; onClose: () => void; onHecho: (msg: string) => void }) {
+  const [metodo, setMetodo] = useState<MetodoPago>('nequi');
+  const [celular, setCelular] = useState('');
+  const [cargando, setCargando] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirmar = async () => {
+    setError(null);
+    if (metodo === 'nequi' && !/^3\d{9}$/.test(celular)) {
+      setError('Ingresa un número de celular Nequi válido (10 dígitos).');
+      return;
+    }
+    setCargando(true);
+    try {
+      const datos = metodo === 'nequi' ? { phone_number: celular } : {};
+      const res = await suscripcionService.checkout(plan.codigo, metodo, datos);
+      if (res.url_redireccion) {
+        window.location.href = res.url_redireccion; // PSE: redirección al banco
+        return;
+      }
+      if (res.estado === 'aprobada') onHecho(`¡Listo! Tu plan ${plan.nombre} quedó activo.`);
+      else onHecho('Tu pago quedó en proceso. Te avisaremos cuando se confirme.');
+    } catch (e: any) {
+      setError(e?.response?.data?.error ?? 'No se pudo iniciar el pago. Intenta de nuevo.');
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  return (
+    <Dialog open onClose={cargando ? undefined : onClose} maxWidth="xs" fullWidth>
+      <DialogTitle>Mejorar a {plan.nombre} — {formatoCOP(plan.precio_mensual_cop)}/mes</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Elige cómo quieres pagar tu suscripción mensual.
+        </Typography>
+        <ToggleButtonGroup
+          exclusive fullWidth value={metodo} onChange={(_, v) => v && setMetodo(v)} sx={{ mb: 2 }}
+        >
+          <ToggleButton value="nequi">Nequi (cobro automático)</ToggleButton>
+          <ToggleButton value="pse">PSE (pago manual)</ToggleButton>
+        </ToggleButtonGroup>
+
+        {metodo === 'nequi' && (
+          <TextField
+            fullWidth label="Celular Nequi" placeholder="3001234567" value={celular}
+            onChange={(e) => setCelular(e.target.value.replace(/\D/g, '').slice(0, 10))}
+            inputProps={{ inputMode: 'numeric' }}
+          />
+        )}
+        {metodo === 'pse' && (
+          <Alert severity="info" variant="outlined">
+            Te llevaremos al portal de tu banco para completar el pago del período. PSE no permite
+            cobro automático; cada mes deberás renovar manualmente.
+          </Alert>
+        )}
+        {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={cargando}>Cancelar</Button>
+        <Button variant="contained" onClick={confirmar} disabled={cargando}
+          startIcon={cargando ? <CircularProgress size={16} /> : undefined}>
+          {cargando ? 'Procesando…' : 'Pagar'}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 export default function MiPlan() {
-  const { planYUso, loading, loadMiPlan } = usePlanStore();
+  const { planYUso, loading, loadMiPlan, reloadMiPlan } = usePlanStore();
   const [planes, setPlanes] = useState<Plan[]>([]);
+  const [estadoSub, setEstadoSub] = useState<EstadoSuscripcion | null>(null);
+  const [puedeGestionar, setPuedeGestionar] = useState(false);
+  const [planEnCheckout, setPlanEnCheckout] = useState<Plan | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+
+  const cargarEstado = () =>
+    suscripcionService.estado()
+      .then((e) => { setEstadoSub(e); setPuedeGestionar(true); })
+      .catch(() => { setPuedeGestionar(false); }); // 403 = no es owner/admin
 
   useEffect(() => { loadMiPlan(); }, [loadMiPlan]);
   useEffect(() => { planesService.listar().then(setPlanes).catch(() => {}); }, []);
+  useEffect(() => { cargarEstado(); }, []);
+
+  const alHecho = (msg: string) => {
+    setPlanEnCheckout(null);
+    setAviso(msg);
+    reloadMiPlan();
+    cargarEstado();
+  };
 
   return (
     <Box sx={{ p: { xs: 2, md: 3 }, maxWidth: 1100, mx: 'auto' }}>
       <Typography variant="h4" fontWeight={800} gutterBottom>Mi plan</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-        Revisa tu consumo y descubre lo que incluye cada plan.
+        Revisa tu consumo, gestiona tu suscripción y descubre lo que incluye cada plan.
       </Typography>
 
       {loading && <LinearProgress sx={{ mb: 3 }} />}
+      {aviso && <Alert severity="success" sx={{ mb: 3 }} onClose={() => setAviso(null)}>{aviso}</Alert>}
+      {estadoSub && <BannerSuscripcion estado={estadoSub} />}
 
       {/* ── Plan actual + consumo ── */}
       {planYUso && (
@@ -77,6 +195,7 @@ export default function MiPlan() {
       }}>
         {planes.map(plan => {
           const esActual = planYUso?.plan === plan.codigo;
+          const esGratis = plan.precio_mensual_cop === 0;
           return (
             <Card key={plan.codigo} variant={esActual ? 'elevation' : 'outlined'} elevation={esActual ? 6 : 0}
               sx={{ borderColor: esActual ? 'primary.main' : 'divider', display: 'flex', flexDirection: 'column' }}>
@@ -86,7 +205,7 @@ export default function MiPlan() {
                   {esActual && <Chip label="Tu plan" size="small" color="primary" />}
                 </Box>
                 <Typography variant="h4" fontWeight={800} sx={{ my: 1 }}>
-                  {plan.precio_mensual_cop === 0 ? 'Gratis' : formatoCOP(plan.precio_mensual_cop)}
+                  {esGratis ? 'Gratis' : formatoCOP(plan.precio_mensual_cop)}
                 </Typography>
                 <List dense sx={{ flexGrow: 1 }}>
                   {plan.modulos.map((m, i) => (
@@ -97,11 +216,12 @@ export default function MiPlan() {
                   ))}
                 </List>
                 <Button
-                  fullWidth variant={esActual ? 'outlined' : 'contained'} disabled={esActual}
+                  fullWidth variant={esActual ? 'outlined' : 'contained'}
+                  disabled={esActual || esGratis || !puedeGestionar}
                   sx={{ mt: 2, fontWeight: 700 }}
-                  onClick={() => { /* Fase B: checkout con Wompi */ }}
+                  onClick={() => setPlanEnCheckout(plan)}
                 >
-                  {esActual ? 'Plan actual' : 'Mejorar (próximamente)'}
+                  {esActual ? 'Plan actual' : esGratis ? 'Plan de entrada' : 'Mejorar'}
                 </Button>
               </CardContent>
             </Card>
@@ -109,10 +229,15 @@ export default function MiPlan() {
         })}
       </Box>
 
-      <Alert severity="info" variant="outlined">
-        El pago en línea (PSE y tarjeta) estará disponible muy pronto. Por ahora, para cambiar de
-        plan escríbenos y lo activamos manualmente.
-      </Alert>
+      {!puedeGestionar && (
+        <Alert severity="info" variant="outlined">
+          Solo el propietario o un administrador del negocio puede cambiar el plan.
+        </Alert>
+      )}
+
+      {planEnCheckout && (
+        <CheckoutModal plan={planEnCheckout} onClose={() => setPlanEnCheckout(null)} onHecho={alHecho} />
+      )}
     </Box>
   );
 }

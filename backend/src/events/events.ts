@@ -37,6 +37,11 @@ export const EVENTS = {
 
   // Feature flags
   FEATURE_FLAG_CAMBIADO:  'feature_flag.cambiado',
+
+  // Suscripciones (billing SaaS)
+  SUSCRIPCION_ACTIVADA:     'suscripcion.activada',
+  SUSCRIPCION_VENCIDA:      'suscripcion.vencida',
+  SUSCRIPCION_PAGO_FALLIDO: 'suscripcion.pago_fallido',
 } as const;
 
 export type EventName = typeof EVENTS[keyof typeof EVENTS];
@@ -132,6 +137,25 @@ export interface FeatureFlagCambiadoPayload {
   nombre:     string;
   habilitado: boolean;
   accion:     'crear' | 'actualizar' | 'eliminar' | 'asignacion';
+}
+
+// ── Suscripciones (billing SaaS) ──────────────────────────────────────────────
+
+export interface SuscripcionActivadaPayload {
+  idGrupo:    number;
+  plan:       string;
+  metodo:     string;
+  periodoFin: Date;
+}
+
+export interface SuscripcionVencidaPayload {
+  idGrupo:      number;
+  planAnterior: string;
+}
+
+export interface SuscripcionPagoFallidoPayload {
+  idGrupo:    number;
+  reintentos: number;
 }
 
 // ── Nueva arquitectura ────────────────────────────────────────────────────────

@@ -65,6 +65,16 @@ export const envSchema = z
     // Rate limit dedicado a los endpoints sensibles de auth (registro, reset).
     AUTH_SENSITIVE_RATE_MAX:       z.string().default('5'),
     AUTH_SENSITIVE_RATE_WINDOW_MS: z.string().default('900000'), // 15 min
+
+    // ── Pagos / suscripciones (Wompi) ────────────────────────────────────────
+    // `off`   → sin cobro real; el driver noop simula aprobaciones (dev/sin llaves).
+    // `wompi` → integración real; requiere las 4 llaves (obligatorias en producción).
+    PAGOS_DRIVER:           z.enum(['off', 'wompi']).default('off'),
+    WOMPI_BASE_URL:         z.string().url().default('https://sandbox.wompi.co/v1'),
+    WOMPI_PUBLIC_KEY:       z.string().optional(),
+    WOMPI_PRIVATE_KEY:      z.string().optional(),
+    WOMPI_EVENTS_SECRET:    z.string().optional(), // firma de los webhooks (events)
+    WOMPI_INTEGRITY_SECRET: z.string().optional(), // firma de integridad al crear transacciones
   })
   .superRefine((val, ctx) => {
     // En producción no se permite arrancar sin SUPER_ADMIN_UUID explícito:
@@ -75,6 +85,17 @@ export const envSchema = z
         path: ['SUPER_ADMIN_UUID'],
         message: 'SUPER_ADMIN_UUID es obligatorio en producción (sin valor por defecto)',
       });
+    }
+    // Con driver Wompi en producción, sus llaves son obligatorias: no arrancar
+    // un backend "que cobra" sin credenciales reales.
+    if (val.NODE_ENV === 'production' && val.PAGOS_DRIVER === 'wompi') {
+      const faltantes = (['WOMPI_PUBLIC_KEY', 'WOMPI_PRIVATE_KEY', 'WOMPI_EVENTS_SECRET', 'WOMPI_INTEGRITY_SECRET'] as const)
+        .filter((k) => !val[k]);
+      faltantes.forEach((k) => ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [k],
+        message: `${k} es obligatorio cuando PAGOS_DRIVER=wompi en producción`,
+      }));
     }
   });
 
