@@ -29,6 +29,7 @@ import { useBrandingStore } from './store/brandingStore';
 import { ErrorBoundary }       from './components/common/ErrorBoundary';
 import { GlobalSnackbar }      from './components/common/GlobalSnackbar';
 import { RequireRestaurante }  from './components/common/RequireRestaurante';
+import RequireModulo           from './components/common/RequireModulo';
 import { OnboardingGuard }     from './components/common/OnboardingGuard';
 
 // ── Páginas principales (bundle inicial) ─────────────────────────────────────
@@ -225,12 +226,12 @@ export default function App() {
               <Route path="/inventario/:tab" element={<RequireRestaurante><Inventario /></RequireRestaurante>} />
               <Route path="/ordenes"       element={<RequireRestaurante><Ordenes     /></RequireRestaurante>} />
               <Route path="/reportes"      element={<Reportes    />} />
-              <Route path="/proveedores"   element={<Proveedores />} />
+              <Route path="/proveedores"   element={<RequireModulo modulo="proveedores"><Proveedores /></RequireModulo>} />
               <Route path="/facturas"      element={<RequireRestaurante><Facturas    /></RequireRestaurante>} />
-              <Route path="/recetas"       element={<RequireRestaurante><Recetas     /></RequireRestaurante>} />
-              <Route path="/clientes"      element={<Clientes    />} />
+              <Route path="/recetas"       element={<RequireModulo modulo="recetas"><RequireRestaurante><Recetas     /></RequireRestaurante></RequireModulo>} />
+              <Route path="/clientes"      element={<RequireModulo modulo="clientes"><Clientes /></RequireModulo>} />
               <Route path="/caja"          element={<RequireRestaurante><CierreCaja  /></RequireRestaurante>} />
-              <Route path="/listas-compras" element={<RequireRestaurante><ListaCompras /></RequireRestaurante>} />
+              <Route path="/listas-compras" element={<RequireModulo modulo="listas_compras"><RequireRestaurante><ListaCompras /></RequireRestaurante></RequireModulo>} />
               {/* /lotes ya no existe como página propia — redirige a la pestaña Lotes del módulo Inventario */}
               <Route path="/lotes"         element={<Navigate to="/inventario/lotes" replace />} />
 
@@ -250,7 +251,9 @@ export default function App() {
                 path="/admin/nomina"
                 element={
                   <AdminGuard permiso="usuarios.gestionar">
-                    <Suspense fallback={<PageFallback />}><Nomina /></Suspense>
+                    <RequireModulo modulo="nomina">
+                      <Suspense fallback={<PageFallback />}><Nomina /></Suspense>
+                    </RequireModulo>
                   </AdminGuard>
                 }
               />
@@ -259,7 +262,9 @@ export default function App() {
                 path="/admin/personal/:id"
                 element={
                   <AdminGuard permiso="usuarios.gestionar">
-                    <Suspense fallback={<PageFallback />}><FichaEmpleado /></Suspense>
+                    <RequireModulo modulo="nomina">
+                      <Suspense fallback={<PageFallback />}><FichaEmpleado /></Suspense>
+                    </RequireModulo>
                   </AdminGuard>
                 }
               />

@@ -29,6 +29,20 @@ export const esIlimitado = (valor: number): boolean => valor < 0;
 export const excedeLimite = (actual: number, max: number): boolean =>
   !esIlimitado(max) && actual >= max;
 
+/**
+ * Módulos "cualitativos" que un plan desbloquea (gating por plan).
+ * Mapean 1:1 con routers de negocio. El núcleo (POS, inventario, caja, reportes
+ * básicos) NO se gatea. Multi-sede / reportes avanzados / white-label se manejan
+ * por LÍMITES (max_sedes, historial_reportes_dias, watermark_tickets), no aquí.
+ */
+export type ModuloPlan =
+  | 'recetas'
+  | 'proveedores'
+  | 'listas_compras'
+  | 'clientes'
+  | 'nomina'
+  | 'documentos';
+
 export interface LimitesPlan {
   /** Sedes/restaurantes activos permitidos. Alimenta `plan_max_restaurantes`. */
   max_sedes: number;
@@ -53,6 +67,8 @@ export interface DefinicionPlan {
   limites: LimitesPlan;
   /** Lista legible de lo incluido, para la página de precios. */
   modulos: string[];
+  /** Módulos desbloqueados por este plan (gating). Núcleo no se lista aquí. */
+  modulos_incluidos: ModuloPlan[];
 }
 
 export const CATALOGO_PLANES: Record<PlanSaaS, DefinicionPlan> = {
@@ -75,6 +91,7 @@ export const CATALOGO_PLANES: Record<PlanSaaS, DefinicionPlan> = {
       'Reportes de los últimos 7 días',
       'Hasta 2 usuarios y 60 productos',
     ],
+    modulos_incluidos: [], // solo núcleo
   },
   professional: {
     codigo: 'professional',
@@ -96,6 +113,7 @@ export const CATALOGO_PLANES: Record<PlanSaaS, DefinicionPlan> = {
       'Fidelización de clientes',
       'Reportes avanzados, sin marca de agua',
     ],
+    modulos_incluidos: ['recetas', 'proveedores', 'listas_compras', 'clientes'],
   },
   enterprise: {
     codigo: 'enterprise',
@@ -116,6 +134,7 @@ export const CATALOGO_PLANES: Record<PlanSaaS, DefinicionPlan> = {
       'Nómina colombiana y documentos laborales',
       'Marca propia (white-label)',
     ],
+    modulos_incluidos: ['recetas', 'proveedores', 'listas_compras', 'clientes', 'nomina', 'documentos'],
   },
 };
 
@@ -125,3 +144,14 @@ export const getPlan = (codigo: PlanSaaS): DefinicionPlan => CATALOGO_PLANES[cod
 /** Todos los planes, en orden de precio ascendente (para la página de precios). */
 export const listarPlanes = (): DefinicionPlan[] =>
   Object.values(CATALOGO_PLANES).sort((a, b) => a.precio_mensual_cop - b.precio_mensual_cop);
+
+/** ¿El plan desbloquea este módulo? */
+export const planIncluyeModulo = (plan: PlanSaaS, modulo: ModuloPlan): boolean =>
+  CATALOGO_PLANES[plan].modulos_incluidos.includes(modulo);
+
+/**
+ * Plan mínimo (más barato) que incluye el módulo — para el mensaje de upsell.
+ * Devuelve undefined si ningún plan lo incluye (no debería ocurrir).
+ */
+export const moduloMinimoPlan = (modulo: ModuloPlan): PlanSaaS | undefined =>
+  listarPlanes().find((p) => p.modulos_incluidos.includes(modulo))?.codigo;

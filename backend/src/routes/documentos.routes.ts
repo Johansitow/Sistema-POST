@@ -15,6 +15,7 @@ import {
 import { authenticate } from '../middlewares/auth.middleware';
 import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
+import { requireModulo } from '../middlewares/planGate.middleware';
 
 const router = Router();
 
@@ -24,7 +25,7 @@ router.get('/verificar/:codigo', verificar);
 // ── Protegidas ────────────────────────────────────────────────────────────────
 // Mismo permiso que la gestión de personal: quien administra empleados es quien
 // emite sus documentos.
-router.use(authenticate, tenantContextOptional, requireAdminAccess('usuarios.gestionar'));
+router.use(authenticate, tenantContextOptional, requireAdminAccess('usuarios.gestionar'), requireModulo('documentos'));
 
 router.get('/tipos',     listarTipos);
 router.get('/variables', listarVariables);

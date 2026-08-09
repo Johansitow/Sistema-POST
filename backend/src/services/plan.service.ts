@@ -12,9 +12,9 @@ import { PlanSaaS } from '@prisma/client';
 import { grupoNegocioRepository } from '../repositories/grupo-negocio.repository';
 import { usuarioRepository } from '../repositories/usuario.repository';
 import { productoRepository } from '../repositories/producto.repository';
-import { getPlan, type DefinicionPlan, type LimitesPlan } from '../lib/planes/catalogo';
+import { getPlan, type DefinicionPlan, type LimitesPlan, type ModuloPlan } from '../lib/planes/catalogo';
 import { NotFoundError } from '../exceptions/HttpErrors';
-import { cacheDel } from '../config/redis';
+import { cacheGetOrSet, cacheDel, CACHE_TTL } from '../config/redis';
 
 export interface UsoGrupo {
   sedes: number;
@@ -28,7 +28,14 @@ export interface PlanYUso {
   precio_mensual_cop: number;
   limites: LimitesPlan;
   uso: UsoGrupo;
+  /** Módulos desbloqueados por el plan (para el gating en el frontend). */
+  modulos_incluidos: ModuloPlan[];
+  /** Si false, el grupo está grandfathered (ve todos los módulos). */
+  gating_activo: boolean;
 }
+
+/** Plan + flag de gating de un grupo. Cacheado para no consultar en cada request. */
+const keyPlanGrupo = (grupoId: number) => `grupo:plan:${grupoId}`;
 
 export const planService = {
   /**
@@ -43,7 +50,20 @@ export const planService = {
       plan_max_restaurantes: def.limites.max_sedes,
     });
     await cacheDel('restaurantes:all');
+    await cacheDel(keyPlanGrupo(grupoId)); // invalida el plan cacheado del gating
     return def;
+  },
+
+  /**
+   * getPlanDeGrupo — plan + flag de gating del grupo, cacheado (TTL medio).
+   * Lo usa el middleware requireModulo en cada request sin pegar a DB siempre.
+   */
+  async getPlanDeGrupo(grupoId: number): Promise<{ plan: PlanSaaS; gatingActivo: boolean }> {
+    return cacheGetOrSet(keyPlanGrupo(grupoId), CACHE_TTL.MID, async () => {
+      const grupo = await grupoNegocioRepository.findById(grupoId);
+      if (!grupo) throw new NotFoundError('Grupo de negocio');
+      return { plan: grupo.plan, gatingActivo: grupo.gating_activo };
+    });
   },
 
   /**
@@ -67,6 +87,8 @@ export const planService = {
       precio_mensual_cop: def.precio_mensual_cop,
       limites: def.limites,
       uso: { sedes, usuarios, productos },
+      modulos_incluidos: def.modulos_incluidos,
+      gating_activo: grupo.gating_activo,
     };
   },
 };

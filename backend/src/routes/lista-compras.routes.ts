@@ -11,10 +11,13 @@ import { listaComprasController } from '../controller/lista-compras.controller';
 import { authenticate }           from '../middlewares/auth.middleware';
 import { tenantContext, tenantContextOptional } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
+import { requireModulo } from '../middlewares/planGate.middleware';
 
 const router = Router();
 
-router.use(authenticate);
+// Contexto opcional aquí solo para resolver el grupo del gating; cada ruta vuelve
+// a aplicar tenantContext (estricto) para el aislamiento por sede.
+router.use(authenticate, tenantContextOptional, requireModulo('listas_compras'));
 
 router.get('/',              tenantContextOptional, tenantIsolation, listaComprasController.listar);
 router.get('/:id',           tenantContext,          tenantIsolation, listaComprasController.obtener);

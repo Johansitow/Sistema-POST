@@ -18,10 +18,11 @@ import {
 import { authenticate } from '../middlewares/auth.middleware';
 import { requireAdminAccess } from '../middlewares/adminAccess.middleware';
 import { tenantContextOptional } from '../middlewares/tenantContext.middleware';
+import { requireModulo } from '../middlewares/planGate.middleware';
 
 const router = Router();
 
-router.use(authenticate, tenantContextOptional, requireAdminAccess('usuarios.gestionar'));
+router.use(authenticate, tenantContextOptional, requireAdminAccess('usuarios.gestionar'), requireModulo('nomina'));
 
 // ── Parámetros legales ────────────────────────────────────────────────────────
 router.get('/parametros',            listarParametros);

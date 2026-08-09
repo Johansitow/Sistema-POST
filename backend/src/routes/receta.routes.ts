@@ -8,13 +8,14 @@ import { authenticate }      from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/permission.middleware';
 import { tenantContext }     from '../middlewares/tenantContext.middleware';
 import { tenantIsolation }   from '../middlewares/tenantIsolation.middleware';
+import { requireModulo }     from '../middlewares/planGate.middleware';
 import { successResponse }   from '../lib/response';
 import { buildTenantCtx }    from '../lib/tenantCtx';
 
 const router = Router();
 
-// Todas las rutas requieren auth + contexto de restaurante
-router.use(authenticate, tenantContext, tenantIsolation);
+// Todas las rutas requieren auth + contexto de restaurante + módulo del plan
+router.use(authenticate, tenantContext, tenantIsolation, requireModulo('recetas'));
 
 router.post('/verificar-stock/:id_orden',
   async (req: Request, res: Response, next: NextFunction) => {

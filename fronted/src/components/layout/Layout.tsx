@@ -37,6 +37,8 @@ import { People, Business } from '@mui/icons-material';
 import { useFeatureFlagStore, useFeatureFlag } from '../../store/featureFlagStore';
 import { useBrandingStore } from '../../store/brandingStore';
 import { useMenuStore } from '../../store/menuStore';
+import { usePlanStore, moduloHabilitado } from '../../store/planStore';
+import { MODULO_POR_PATH } from '../../services/planes.service';
 import type { MenuGrupoDTO } from '../../services/menu.service';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS, type ModuloMenu } from '../../config/menuCatalog';
 import { useRestauranteStore, type RestauranteMini, type GrupoMini } from '../../store/restauranteStore';
@@ -180,6 +182,7 @@ export default function Layout() {
     adminGroupsVisibles[0]?.items[0]?.path ?? adminStandaloneVisibles[0]?.path;
   const { loadFlags, reloadFlags, loaded: flagsLoaded } = useFeatureFlagStore();
   const { grupos: menuGrupos, loadMenu, reloadMenu } = useMenuStore();
+  const { planYUso, loadMiPlan } = usePlanStore();
 
   const showListasCompras    = useFeatureFlag('listas_compras');
   const showRecetas          = useFeatureFlag('recetas');
@@ -221,6 +224,7 @@ export default function Layout() {
   }, []);
 
   useEffect(() => { loadMenu(); }, [loadMenu]);
+  useEffect(() => { loadMiPlan(); }, [loadMiPlan]);
 
   // Refresca el menú al volver a esta pestaña (cambio de pestaña, minimizar,
   // o restauración desde bfcache) — cubre el caso de dejar el sidebar abierto
@@ -243,12 +247,16 @@ export default function Layout() {
   const drawerWidth = collapsed ? COLLAPSED_WIDTH : DRAWER_WIDTH;
 
   const effectiveGroups = useMemo(() => {
-    const flagOcultos: string[] = [];
-    if (!showListasCompras) flagOcultos.push('/listas-compras');
-    if (!showRecetas)       flagOcultos.push('/recetas');
-    if (!showClientes)      flagOcultos.push('/clientes');
-    return buildEffectiveGroups(menuGrupos, flagOcultos);
-  }, [menuGrupos, showListasCompras, showRecetas, showClientes]);
+    const ocultos: string[] = [];
+    if (!showListasCompras) ocultos.push('/listas-compras');
+    if (!showRecetas)       ocultos.push('/recetas');
+    if (!showClientes)      ocultos.push('/clientes');
+    // Ocultar módulos que el plan del grupo no incluye (gating). Aditivo a los flags.
+    for (const [path, modulo] of Object.entries(MODULO_POR_PATH)) {
+      if (!moduloHabilitado(planYUso, modulo)) ocultos.push(path);
+    }
+    return buildEffectiveGroups(menuGrupos, ocultos);
+  }, [menuGrupos, showListasCompras, showRecetas, showClientes, planYUso]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 

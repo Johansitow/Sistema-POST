@@ -17,10 +17,11 @@ import { proveedorController } from '../controller/proveedor.controller';
 import { authenticate } from '../middlewares/auth.middleware';
 import { tenantContext } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
+import { requireModulo } from '../middlewares/planGate.middleware';
 
 const router = Router();
 
-router.use(authenticate, tenantContext, tenantIsolation);
+router.use(authenticate, tenantContext, tenantIsolation, requireModulo('proveedores'));
 
 router.get('/',    proveedorController.getAll);
 router.get('/:id', proveedorController.getById);

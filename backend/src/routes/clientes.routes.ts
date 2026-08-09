@@ -22,10 +22,11 @@ import { authenticate } from '../middlewares/auth.middleware';
 import { requirePermission } from '../middlewares/permission.middleware';
 import { tenantContext } from '../middlewares/tenantContext.middleware';
 import { tenantIsolation } from '../middlewares/tenantIsolation.middleware';
+import { requireModulo } from '../middlewares/planGate.middleware';
 
 const router = Router();
 
-router.use(authenticate, tenantContext, tenantIsolation);
+router.use(authenticate, tenantContext, tenantIsolation, requireModulo('clientes'));
 
 // Rutas sin parámetro :id primero — evita que "estadisticas" se resuelva como un ID
 router.get('/estadisticas', requirePermission('clientes.ver'),       clienteController.getEstadisticas);

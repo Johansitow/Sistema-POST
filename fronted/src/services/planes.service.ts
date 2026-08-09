@@ -7,6 +7,10 @@ import api from './api';
 
 export type CodigoPlan = 'starter' | 'professional' | 'enterprise';
 
+/** Módulos que un plan desbloquea (gating). Espeja ModuloPlan del backend. */
+export type ModuloPlan =
+  | 'recetas' | 'proveedores' | 'listas_compras' | 'clientes' | 'nomina' | 'documentos';
+
 /** Centinela de "sin tope" que envía el backend (ILIMITADO = -1). */
 export const ILIMITADO = -1;
 export const esIlimitado = (v: number): boolean => v < 0;
@@ -35,7 +39,19 @@ export interface PlanYUso {
   precio_mensual_cop: number;
   limites: LimitesPlan;
   uso: { sedes: number; usuarios: number; productos: number };
+  /** Módulos desbloqueados por el plan actual (para el gating de UI). */
+  modulos_incluidos: ModuloPlan[];
+  /** Si false, el grupo está grandfathered (ve todos los módulos). */
+  gating_activo: boolean;
 }
+
+/** Ruta de sidebar → módulo gateado (los que aparecen en el menú principal). */
+export const MODULO_POR_PATH: Record<string, ModuloPlan> = {
+  '/recetas':        'recetas',
+  '/proveedores':    'proveedores',
+  '/listas-compras': 'listas_compras',
+  '/clientes':       'clientes',
+};
 
 /** Formatea un valor en pesos colombianos sin decimales. */
 export const formatoCOP = (valor: number): string =>

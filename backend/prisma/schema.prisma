@@ -94,6 +94,9 @@ model GrupoNegocio {
   // Plan SaaS — controla límites y funcionalidades
   plan                  PlanSaaS @default(starter)
   plan_max_restaurantes Int      @default(3)
+  // Gating de módulos por plan. Grupos nuevos nacen con true; los existentes
+  // quedaron en false por la migración (grandfather: conservan todos los módulos).
+  gating_activo         Boolean  @default(true)
 
   // Multi-DB readiness — para futura separación física de datos
   db_schema             String?  @db.VarChar(100) // schema PostgreSQL del grupo
