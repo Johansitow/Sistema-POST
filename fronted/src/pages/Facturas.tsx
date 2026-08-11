@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Receipt, DollarSign, Clock, CheckCircle, XCircle, Eye, Filter, Printer, Search, FileText } from 'lucide-react';
 import { facturaService, Factura } from '../services/servicios-gestion';
 import { facturacionService, TIPOS_DOCUMENTO_DIAN, type FacturaElectronica, type AdquirienteFiscal } from '../services/facturacion.service';
+import { imprimirRecibo } from '../lib/impresion';
 import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
@@ -94,27 +95,29 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
       sections:   cfgPl?.sections,
       footerText: cfgImpr.pieTicket,
     };
-    printFactura(
-      {
-        numero_orden:      ordenFull?.numero_orden ?? factura.orden?.numero_orden ?? `#${factura.id_orden}`,
-        tipo_orden:        ordenFull?.tipo_orden ?? 'local',
-        fecha_apertura:    ordenFull?.fecha_apertura ?? factura.fecha_emision,
-        nombre_contacto:   ordenFull?.nombre_contacto,
-        telefono:          ordenFull?.telefono,
-        direccion_entrega: ordenFull?.direccion_entrega,
-        costo_domicilio:   ordenFull?.costo_domicilio,
-        observaciones:     ordenFull?.observaciones,
-        subtotal:          factura.subtotal,
-        impuestos:         factura.impuestos,
-        impuesto_tipo:     ordenFull?.impuesto_tipo,
-        total:             factura.total,
-        detalles,
-      },
-      pagos,
-      cfgImpr.negocio,
-      factura.numero_factura,
-      tmpl,
-    );
+    const po = {
+      numero_orden:      ordenFull?.numero_orden ?? factura.orden?.numero_orden ?? `#${factura.id_orden}`,
+      tipo_orden:        ordenFull?.tipo_orden ?? 'local',
+      fecha_apertura:    ordenFull?.fecha_apertura ?? factura.fecha_emision,
+      nombre_contacto:   ordenFull?.nombre_contacto,
+      telefono:          ordenFull?.telefono,
+      direccion_entrega: ordenFull?.direccion_entrega,
+      costo_domicilio:   ordenFull?.costo_domicilio,
+      observaciones:     ordenFull?.observaciones,
+      subtotal:          factura.subtotal,
+      impuestos:         factura.impuestos,
+      impuesto_tipo:     ordenFull?.impuesto_tipo,
+      total:             factura.total,
+      detalles,
+    };
+    // Si hay factura electrónica emitida, imprime su CUFE + QR en el ticket.
+    const fe = feResultado?.estado === 'emitida'
+      ? { cufe: feResultado.cufe, numero: feResultado.numero, qr_url: feResultado.qr_url }
+      : undefined;
+    // Térmica (ESC/POS vía QZ) si está configurada; si no, fallback al navegador.
+    if (!(await imprimirRecibo(po, pagos, cfgImpr.negocio, cfgImpr.impresora, fe))) {
+      printFactura(po, pagos, cfgImpr.negocio, factura.numero_factura, tmpl);
+    }
   };
 
   return (

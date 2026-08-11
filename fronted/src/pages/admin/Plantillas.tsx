@@ -26,6 +26,7 @@ import {
 } from '../../services/plantillas.service';
 import { PlantillaPreview, configToTmpl } from '../../components/plantillas/PlantillaPreview';
 import { uiConfigService } from '../../services/ui-config.service';
+import { detectarImpresoras } from '../../lib/impresion';
 import { invalidarConfigImpresion } from '../../lib/plantillas/negocio';
 import { printComanda, printFactura } from '../../utils/print';
 import { ORDEN_EJEMPLO, PAGOS_EJEMPLO, NEGOCIO_EJEMPLO } from '../../lib/plantillas/ejemploDatos';
@@ -45,6 +46,11 @@ function ImpresionDefaultsPanel() {
   const [copiasComanda, setCopiasComanda] = useState(1);
   const [pieTicket,     setPieTicket]     = useState('¡Gracias por su compra!');
   const [resolucionDian, setResolucionDian] = useState('');
+  const [modoImpresion,  setModoImpresion]  = useState<'navegador' | 'termica'>('navegador');
+  const [impresora,      setImpresora]      = useState('');
+  const [abrirCajon,     setAbrirCajon]     = useState(false);
+  const [impresoras,     setImpresoras]     = useState<string[]>([]);
+  const [detectando,     setDetectando]     = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving,  setSaving]  = useState(false);
   const [toast,   setToast]   = useState('');
@@ -55,13 +61,28 @@ function ImpresionDefaultsPanel() {
       uiConfigService.getConfig('impresion', 'copias_comanda'),
       uiConfigService.getConfig('impresion', 'pie_ticket'),
       uiConfigService.getConfig('impresion', 'resolucion_dian'),
-    ]).then(([papel, copias, pie, dian]) => {
+      uiConfigService.getConfig('impresion', 'modo_impresion'),
+      uiConfigService.getConfig('impresion', 'impresora_nombre'),
+      uiConfigService.getConfig('impresion', 'abrir_cajon'),
+    ]).then(([papel, copias, pie, dian, modo, imp, cajon]) => {
       if (papel?.valor)  setAnchoPapel(String(papel.valor));
       if (copias?.valor) setCopiasComanda(Number(copias.valor));
       if (pie?.valor)    setPieTicket(String(pie.valor));
       if (dian?.valor)   setResolucionDian(String(dian.valor));
+      if (modo?.valor === 'termica') setModoImpresion('termica');
+      if (imp?.valor)    setImpresora(String(imp.valor));
+      setAbrirCajon(cajon?.valor === true || cajon?.valor === 'true');
     }).catch(() => {}).finally(() => setLoading(false));
   }, []);
+
+  const handleDetectar = async () => {
+    setDetectando(true);
+    try {
+      const lista = await detectarImpresoras();
+      setImpresoras(lista);
+      if (lista.length === 0) setToast('No se detectó QZ Tray o no hay impresoras. Instala QZ Tray y ábrelo.');
+    } finally { setDetectando(false); }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -71,6 +92,9 @@ function ImpresionDefaultsPanel() {
         uiConfigService.setConfig('impresion', 'copias_comanda', copiasComanda),
         uiConfigService.setConfig('impresion', 'pie_ticket',     pieTicket),
         uiConfigService.setConfig('impresion', 'resolucion_dian', resolucionDian),
+        uiConfigService.setConfig('impresion', 'modo_impresion',  modoImpresion),
+        uiConfigService.setConfig('impresion', 'impresora_nombre', impresora),
+        uiConfigService.setConfig('impresion', 'abrir_cajon',     abrirCajon),
       ]);
       invalidarConfigImpresion(); // refresca lo que usan Ordenes/Facturas al imprimir
       setToast('Configuración de impresión guardada');
@@ -144,6 +168,56 @@ function ImpresionDefaultsPanel() {
               {copiasComanda === 1 ? '1 copia' : `${copiasComanda} copias`}
             </Typography>
           </Box>
+        </Box>
+
+        {/* Impresión térmica (ESC/POS vía QZ Tray) */}
+        <Box>
+          <Typography variant="subtitle2" fontWeight={700} gutterBottom>Impresión térmica (ESC/POS)</Typography>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+            Envía el ticket directo a la impresora térmica vía <b>QZ Tray</b> (agente que se instala en el equipo).
+            En modo "Navegador" se usa la impresión por ventana actual.
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+            {([['navegador', 'Navegador', 'Ventana del navegador (actual)'], ['termica', 'Térmica', 'ESC/POS directo por QZ Tray']] as const).map(([val, label, desc]) => {
+              const sel = modoImpresion === val;
+              return (
+                <Box key={val} onClick={() => setModoImpresion(val)} sx={{
+                  flex: 1, p: 2, borderRadius: 2, border: '2px solid', cursor: 'pointer',
+                  borderColor: sel ? 'primary.main' : 'divider', bgcolor: sel ? 'primary.50' : 'transparent',
+                }}>
+                  <Typography variant="subtitle2" fontWeight={700} color={sel ? 'primary.main' : 'text.primary'}>{label}</Typography>
+                  <Typography variant="caption" color="text.secondary">{desc}</Typography>
+                </Box>
+              );
+            })}
+          </Box>
+
+          {modoImpresion === 'termica' && (
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
+                <TextField label="Impresora (nombre en QZ Tray)" value={impresora}
+                  onChange={e => setImpresora(e.target.value)} fullWidth size="small" />
+                <Button variant="outlined" onClick={handleDetectar} disabled={detectando} sx={{ whiteSpace: 'nowrap', mt: 0.25 }}>
+                  {detectando ? '...' : 'Detectar'}
+                </Button>
+              </Box>
+              {impresoras.length > 0 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                  {impresoras.map(p => (
+                    <Button key={p} size="small" variant={impresora === p ? 'contained' : 'outlined'}
+                      onClick={() => setImpresora(p)}>{p}</Button>
+                  ))}
+                </Box>
+              )}
+              <Box onClick={() => setAbrirCajon(v => !v)} sx={{
+                p: 1.5, borderRadius: 2, border: '2px solid', cursor: 'pointer',
+                borderColor: abrirCajon ? 'primary.main' : 'divider', bgcolor: abrirCajon ? 'primary.50' : 'transparent',
+              }}>
+                <Typography variant="body2" fontWeight={700}>Abrir cajón monedero al cobrar {abrirCajon ? '✓' : ''}</Typography>
+                <Typography variant="caption" color="text.secondary">Envía el pulso de apertura al imprimir el recibo.</Typography>
+              </Box>
+            </Box>
+          )}
         </Box>
 
         {/* Pie del ticket */}

@@ -34,6 +34,7 @@ import {
 import { formatCurrency, formatDateTime, TIPOS_ORDEN as _TIPOS_ORDEN } from '../utils';
 import { configuracionService, cierreCajaService } from '../services/servicios-operacion';
 import { registrarVenta } from '../lib/offline/venta';
+import { imprimirRecibo, imprimirComanda } from '../lib/impresion';
 import { useUIStore, toast }    from '../store/uiStore';
 import { ConfirmDialog }        from '../components/common/ConfirmDialog';
 import { useEscapeKey }         from '../hooks/useEscapeKey';
@@ -408,7 +409,10 @@ const DetalleModal: React.FC<{
       plantillasService.obtenerDefault('comanda').catch(() => null),
       cargarConfigImpresion(),
     ]);
-    printComanda(po, toTmpl(def), cfg.copiasComanda);
+    // Térmica (ESC/POS vía QZ) si está configurada; si no, fallback al navegador.
+    if (!(await imprimirComanda(po, cfg.impresora, cfg.copiasComanda))) {
+      printComanda(po, toTmpl(def), cfg.copiasComanda);
+    }
   };
 
   const handlePrintFactura = async () => {
@@ -425,7 +429,9 @@ const DetalleModal: React.FC<{
     // Consecutivo real solo si la orden ya está facturada; si no, es una PRE-CUENTA
     // (sin número legal) para no fabricar un consecutivo.
     const tmpl: PrintTemplateConfig = { ...(toTmpl(def) ?? {}), footerText: cfg.pieTicket };
-    printFactura(po, pagos, cfg.negocio, factura?.numero_factura, tmpl);
+    if (!(await imprimirRecibo(po, pagos, cfg.negocio, cfg.impresora))) {
+      printFactura(po, pagos, cfg.negocio, factura?.numero_factura, tmpl);
+    }
   };
 
   const cfg = getEstadoConfig(estadoActual?.codigo);

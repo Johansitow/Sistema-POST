@@ -15,11 +15,14 @@ import { restaurantesService } from '../../services/restaurantes.service';
 import { uiConfigService } from '../../services/ui-config.service';
 import { useRestauranteStore } from '../../store/restauranteStore';
 import type { PrintNegocio } from './ticketRenderer';
+import type { ConfigImpresora } from '../impresion';
 
 export interface ConfigImpresion {
   negocio:       PrintNegocio;
   pieTicket:     string;
   copiasComanda: number;
+  /** Config de impresora (modo térmica/navegador, dispositivo, cajón, ancho). */
+  impresora:     ConfigImpresora;
 }
 
 let cache: { sedeId: number; data: ConfigImpresion } | null = null;
@@ -35,11 +38,15 @@ export async function cargarConfigImpresion(): Promise<ConfigImpresion> {
   const sedeId = activo?.id ?? 0;
   if (cache && cache.sedeId === sedeId) return cache.data;
 
-  const [rest, pie, copias, dian] = await Promise.all([
+  const [rest, pie, copias, dian, modo, impresora, cajon, ancho] = await Promise.all([
     sedeId ? restaurantesService.obtener(sedeId).catch(() => null) : Promise.resolve(null),
     uiConfigService.getConfig('impresion', 'pie_ticket').catch(() => null),
     uiConfigService.getConfig('impresion', 'copias_comanda').catch(() => null),
     uiConfigService.getConfig('impresion', 'resolucion_dian').catch(() => null),
+    uiConfigService.getConfig('impresion', 'modo_impresion').catch(() => null),
+    uiConfigService.getConfig('impresion', 'impresora_nombre').catch(() => null),
+    uiConfigService.getConfig('impresion', 'abrir_cajon').catch(() => null),
+    uiConfigService.getConfig('impresion', 'ancho_papel').catch(() => null),
   ]);
 
   const direccionCompleta = [rest?.direccion, rest?.ciudad].filter(Boolean).join(', ');
@@ -53,10 +60,20 @@ export async function cargarConfigImpresion(): Promise<ConfigImpresion> {
     logoUrl:        rest?.logo_url ?? activo?.logo_url ?? undefined,
   };
 
+  const pieTicket = pie?.valor ? String(pie.valor) : '';
+  const anchoPapel = ancho?.valor ? String(ancho.valor) : '80';
+
   const data: ConfigImpresion = {
     negocio,
-    pieTicket:     pie?.valor ? String(pie.valor) : '',
+    pieTicket,
     copiasComanda: copias?.valor ? Number(copias.valor) : 1,
+    impresora: {
+      modo:         modo?.valor === 'termica' ? 'termica' : 'navegador',
+      impresora:    impresora?.valor ? String(impresora.valor) : undefined,
+      abrir_cajon:  cajon?.valor === true || cajon?.valor === 'true',
+      ancho_papel:  anchoPapel,
+      footerText:   pieTicket,
+    },
   };
 
   cache = { sedeId, data };

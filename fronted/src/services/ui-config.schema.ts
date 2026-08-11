@@ -37,6 +37,12 @@ export interface ImpresionConfig {
   pie_ticket:     string;
   /** Resolución DIAN a imprimir en la factura (opcional; no hay campo en Restaurante). */
   resolucion_dian: string;
+  /** 'navegador' (window.print actual) o 'termica' (ESC/POS vía QZ Tray). */
+  modo_impresion:  'navegador' | 'termica';
+  /** Nombre de la impresora en QZ Tray (modo térmica). */
+  impresora_nombre: string;
+  /** Abrir el cajón monedero al imprimir el recibo (venta en efectivo). */
+  abrir_cajon:     boolean;
 }
 
 // ── Valores por defecto ──────────────────────────────────────────────────────
@@ -62,6 +68,9 @@ export const DEFAULTS: {
     copias_comanda: 1,
     pie_ticket:     '',
     resolucion_dian: '',
+    modo_impresion:  'navegador',
+    impresora_nombre: '',
+    abrir_cajon:     false,
   },
 };
 
