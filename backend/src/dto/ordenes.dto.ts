@@ -249,6 +249,25 @@ export const pagarOrdenGlobalSchema = z.object({
   })).min(1, 'Se requiere al menos un método de pago'),
 });
 
+/** Venta creada offline y sincronizada: orden + pago juntos, idempotente. */
+export const ventaOfflineSchema = z.object({
+  client_uuid:    z.string().uuid('client_uuid debe ser un UUID válido'),
+  fecha_apertura: z.string().datetime({ offset: true }).or(z.string().min(1)), // ISO de la venta real
+  id_grupo:       z.number().int().positive(),
+  tipo_orden:     z.nativeEnum(TipoOrden).default(TipoOrden.local),
+  id_cliente:     z.number().int().positive().optional(), // opcional: "Consumidor final"
+  observaciones:  z.string().max(1000).optional(),
+  propina:        z.number().nonnegative().optional(),
+  descuento:      z.number().nonnegative().optional(),
+  sedes:          z.array(sedeSchema).min(1, 'Debe haber al menos una sede'),
+  pagos: z.array(z.object({
+    id_metodo_pago: z.number().int().positive(),
+    monto:          z.number().positive(),
+    referencia:     z.string().max(100).optional(),
+    notas:          z.string().max(300).optional(),
+  })).min(1, 'La venta offline debe incluir el pago'),
+});
+
 /** Cancelar orden con motivo */
 export const cancelarOrdenSchema = z.object({
   motivo: z.string().max(300).optional(),

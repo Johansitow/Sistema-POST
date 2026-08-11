@@ -881,6 +881,9 @@ model MetodoPago {
 model Orden {
   id              Int       @id @default(autoincrement())
   numero_orden    String    @unique @db.VarChar(50)
+  // Clave de idempotencia generada por el cliente (ventas creadas offline).
+  // Evita duplicar la orden si la cola de sincronización reenvía la misma venta.
+  client_uuid     String?   @unique @db.Uuid
   tipo_orden      TipoOrden @default(local)
   id_estado       Int
   id_usuario      Int

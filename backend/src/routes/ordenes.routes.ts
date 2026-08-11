@@ -44,6 +44,7 @@ import {
   updateDetalleSchema,
   pagarOrdenGlobalSchema,
   cancelarOrdenSchema,
+  ventaOfflineSchema,
 } from '../dto/ordenes.dto';
 
 const qs = (val: unknown): string | undefined => Array.isArray(val) ? val[0] : val as string | undefined;
@@ -165,6 +166,46 @@ router.post('/',
     }, sedesDeOrden(orden, req.restauranteId));
 
     res.status(201).json({ success: true, data: orden, message: 'Orden creada correctamente' });
+  })
+);
+
+/**
+ * POST /ordenes/offline — sincroniza una venta de mostrador creada sin conexión.
+ * Idempotente por client_uuid (reenviar no duplica). Registra orden + pago juntos.
+ */
+router.post('/offline',
+  tenantContext,
+  tenantIsolation,
+  requirePermission('ordenes.crear'),
+  asyncHandler(async (req, res) => {
+    const data = ventaOfflineSchema.parse({
+      ...req.body,
+      id_grupo: req.body.id_grupo ?? (req as any).user?.id_grupo,
+    });
+    const orden = await ordenService.crearVentaOffline({
+      ...data,
+      id_usuario: (req as any).user?.id,
+    });
+
+    registrarAuditoria({
+      id_usuario:           (req as any).user?.id,
+      accion:               'SYNC_VENTA_OFFLINE',
+      modulo:               'ordenes',
+      tabla_afectada:       'ordenes',
+      id_registro_afectado: (orden as any)?.id,
+      datos_nuevos:         { client_uuid: data.client_uuid, total: (orden as any)?.total },
+      ip_address:           req.auditContext?.ip,
+      user_agent:           req.auditContext?.userAgent,
+    });
+
+    socketGateway.emitNuevaOrden({
+      id:           (orden as any).id,
+      numero_orden: (orden as any).numero_orden,
+      tipo_orden:   (orden as any).tipo_orden,
+      total:        (orden as any).total,
+    }, sedesDeOrden(orden, req.restauranteId));
+
+    res.status(201).json({ success: true, data: orden, message: 'Venta offline sincronizada' });
   })
 );
 

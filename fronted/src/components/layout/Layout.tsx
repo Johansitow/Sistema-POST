@@ -39,6 +39,7 @@ import { useBrandingStore } from '../../store/brandingStore';
 import { useMenuStore } from '../../store/menuStore';
 import { usePlanStore, moduloHabilitado } from '../../store/planStore';
 import { MODULO_POR_PATH } from '../../services/planes.service';
+import OfflineBanner from '../common/OfflineBanner';
 import type { MenuGrupoDTO } from '../../services/menu.service';
 import { MODULE_CATALOG, MODULE_MAP, DEFAULT_GROUPS, type ModuloMenu } from '../../config/menuCatalog';
 import { useRestauranteStore, type RestauranteMini, type GrupoMini } from '../../store/restauranteStore';
@@ -628,6 +629,8 @@ export default function Layout() {
 
   return (
     <Box sx={{ display: 'flex' }}>
+      {/* Barra de conexión/sincronización offline (fixed; solo visible si aplica) */}
+      <OfflineBanner />
 
       {/* AppBar — único para ambas secciones */}
       <AppBar

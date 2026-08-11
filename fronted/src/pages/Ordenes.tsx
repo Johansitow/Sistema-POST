@@ -33,6 +33,7 @@ import {
 } from '../services/servicios-gestion';
 import { formatCurrency, formatDateTime, TIPOS_ORDEN as _TIPOS_ORDEN } from '../utils';
 import { configuracionService, cierreCajaService } from '../services/servicios-operacion';
+import { registrarVenta } from '../lib/offline/venta';
 import { useUIStore, toast }    from '../store/uiStore';
 import { ConfirmDialog }        from '../components/common/ConfirmDialog';
 import { useEscapeKey }         from '../hooks/useEscapeKey';
@@ -987,7 +988,8 @@ const CrearOrdenModal: React.FC<{
   // --- Enviar ---
   const handleSubmit = async () => {
     if (detalles.length === 0) { setError('Agrega al menos un producto'); return; }
-    if (!clienteId) { setError('Selecciona o crea un cliente para continuar'); return; }
+    // Offline permite "Consumidor final" (sin cliente); online se mantiene obligatorio.
+    if (!clienteId && navigator.onLine) { setError('Selecciona o crea un cliente para continuar'); return; }
     setSaving(true); setError(null);
     try {
       if (puedeEnviarV2) {
@@ -1019,6 +1021,27 @@ const CrearOrdenModal: React.FC<{
             })),
           })),
         };
+
+        // ── Venta OFFLINE: sin red, se encola (orden + pago efectivo) y sincroniza ──
+        if (!navigator.onLine) {
+          const metodos = await metodoPagoService.getAll().catch(() => [] as MetodoPagoFrontend[]);
+          const efectivo = metodos.find(m => /efectivo/i.test(m.nombre)) ?? metodos.find(m => m.activo) ?? metodos[0];
+          if (!efectivo) throw new Error('No hay métodos de pago en caché. Conéctate una vez para habilitar la venta offline.');
+          const r = await registrarVenta({
+            id_grupo:      grupoActivo!.id,
+            tipo_orden:    tipo,
+            id_cliente:    clienteId ?? undefined,
+            observaciones: observaciones || undefined,
+            sedes:         data.sedes,
+            pagos:         [{ id_metodo_pago: efectivo.id, monto: total }],
+          });
+          toast.success(r.encolada
+            ? 'Venta guardada sin conexión — se sincronizará al reconectar'
+            : 'Venta registrada');
+          onSave();
+          return;
+        }
+
         await ordenesService.createV2(data);
       } else {
         // ── Legado: orden single-restaurante con detalles planos ──

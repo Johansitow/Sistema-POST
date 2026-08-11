@@ -127,6 +127,14 @@ class OrdenRepositoryImpl extends TenantRepository {
     return prisma.orden.findFirst({ orderBy: { numero_orden: 'desc' } });
   }
 
+  /** Lookup por la clave de idempotencia del cliente (ventas offline). */
+  findByClientUuid(client_uuid: string) {
+    return prisma.orden.findUnique({
+      where:   { client_uuid },
+      include: includeOrdenCompleta,
+    });
+  }
+
   // ── Nueva arquitectura ──────────────────────────────────────────────────────
 
   updateEstadoGlobal(id: number, estado_global: EstadoOrdenGlobal, extraData?: Partial<{

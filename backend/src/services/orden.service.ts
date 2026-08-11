@@ -127,8 +127,15 @@ export const ordenService = {
   async crear(data: {
     id_grupo:    number;
     id_usuario:  number;
-    id_cliente:  number;
+    id_cliente?: number;
     tipo_orden:  TipoOrden;
+    // ── Ventas offline ──
+    /** Clave de idempotencia del cliente; evita duplicar al re-sincronizar. */
+    client_uuid?:    string;
+    /** Hora real de la venta offline (si se omite, la del servidor). */
+    fecha_apertura?: string | Date;
+    /** Modo offline: stock best-effort (no lanza) y sin chequeo previo de recetas. */
+    offline?:        boolean;
     // Campos delivery
     direccion_entrega?:   string;
     telefono_contacto?:   string;
@@ -152,15 +159,21 @@ export const ordenService = {
     }>;
   }) {
     // El cliente debe existir y pertenecer al mismo grupo del usuario (evita asociar
-    // por error/ataque el cliente de otro grupo de negocio).
-    await clienteRepository.findByIdScoped(data.id_cliente, { grupoId: data.id_grupo, esSuperAdmin: false });
+    // por error/ataque el cliente de otro grupo de negocio). En ventas offline el
+    // cliente es opcional ("Consumidor final").
+    if (data.id_cliente) {
+      await clienteRepository.findByIdScoped(data.id_cliente, { grupoId: data.id_grupo, esSuperAdmin: false });
+    }
 
-    // Verificar disponibilidad de recetas POR restaurante, antes de abrir TX
-    for (const sede of data.sedes) {
-      await recetaService.verificarDisponibilidadParaDetalles(
-        sede.items.map(i => ({ id_producto: i.id_producto, cantidad: i.cantidad })),
-        sede.id_restaurante,
-      );
+    // Verificar disponibilidad de recetas POR restaurante, antes de abrir TX.
+    // En offline se omite: la venta ya ocurrió, se registra como hecho (best-effort).
+    if (!data.offline) {
+      for (const sede of data.sedes) {
+        await recetaService.verificarDisponibilidadParaDetalles(
+          sede.items.map(i => ({ id_producto: i.id_producto, cantidad: i.cantidad })),
+          sede.id_restaurante,
+        );
+      }
     }
 
     return prisma.$transaction(async (tx) => {
@@ -171,10 +184,12 @@ export const ordenService = {
       const orden = await tx.orden.create({
         data: {
           numero_orden,
+          client_uuid:         data.client_uuid ?? null,
+          ...(data.fecha_apertura ? { fecha_apertura: new Date(data.fecha_apertura) } : {}),
           tipo_orden:          data.tipo_orden,
           id_estado:           1,                 // estado legado — se mantiene para compatibilidad
           id_usuario:          data.id_usuario,
-          id_cliente:          data.id_cliente,
+          id_cliente:          data.id_cliente ?? null,
           id_restaurante:      data.sedes[0].id_restaurante,  // sede principal
           id_grupo:            data.id_grupo,
           estado_global:       EstadoOrdenGlobal.RECIBIDA,
@@ -219,7 +234,8 @@ export const ordenService = {
               where: { id_producto_id_restaurante: { id_producto: item.id_producto, id_restaurante: sedeData.id_restaurante } },
             });
             const stockDisponible = stock ? Number(stock.stock_actual) : Number(producto.stock_actual);
-            if (stockDisponible < item.cantidad) {
+            // Offline: no rechazar una venta ya cobrada por falta de stock (best-effort).
+            if (stockDisponible < item.cantidad && !data.offline) {
               throw new BadRequestError(`Stock insuficiente para ${producto.nombre} en la sede`);
             }
           }
@@ -359,6 +375,77 @@ export const ordenService = {
 
       return ordenFinal;
     });
+  },
+
+  /**
+   * crearVentaOffline — sincroniza una venta de mostrador creada sin conexión.
+   *
+   * Es una venta COMPLETA (orden + pago) que ya ocurrió físicamente: se registra
+   * como hecho, no se valida contra el momento (stock/receta best-effort vía
+   * `offline`). Idempotente por `client_uuid`: reenviar la misma venta NO duplica.
+   * Respeta la hora real de la venta (`fecha_apertura`).
+   */
+  async crearVentaOffline(data: {
+    id_grupo:       number;
+    id_usuario:     number;
+    id_cliente?:    number;
+    tipo_orden:     TipoOrden;
+    client_uuid:    string;
+    fecha_apertura: string | Date;
+    observaciones?: string;
+    propina?:       number;
+    descuento?:     number;
+    sedes: Array<{ id_restaurante: number; items: Array<{ id_producto: number; id_variante?: number; cantidad: number; precio_unitario: number; descuento?: number; notas?: string }> }>;
+    pagos: Array<{ id_metodo_pago: number; monto: number; referencia?: string; notas?: string }>;
+  }) {
+    // Idempotencia: si ya se sincronizó esta venta, devolver la existente.
+    const existente = await ordenRepository.findByClientUuid(data.client_uuid);
+    if (existente) return existente;
+
+    let orden;
+    try {
+      orden = await this.crear({ ...data, offline: true });
+    } catch (err) {
+      // Carrera de reintentos: el @unique de client_uuid pudo disparar P2002.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const ya = await ordenRepository.findByClientUuid(data.client_uuid);
+        if (ya) return ya;
+      }
+      throw err;
+    }
+    if (!orden) throw new BadRequestError('No se pudo crear la venta offline');
+
+    // Registrar el pago y cerrar la venta (entregada/pagada) — sin exigir estado LISTA,
+    // porque es una venta de mostrador ya completada offline.
+    const idOrden = orden.id;
+    const fecha = new Date(data.fecha_apertura);
+    if (data.pagos?.length) {
+      await prisma.$transaction(async (tx) => {
+        for (const pago of data.pagos) {
+          await tx.pagoOrden.create({
+            data: {
+              id_orden:       idOrden,
+              id_metodo_pago: pago.id_metodo_pago,
+              monto:          toDecimal(pago.monto),
+              referencia:     pago.referencia,
+              notas:          pago.notas,
+              estado:         'confirmado',
+            },
+          });
+        }
+        await facturaService.garantizarPagada(idOrden, tx);
+        await tx.orden.update({
+          where: { id: idOrden },
+          data:  { estado_global: EstadoOrdenGlobal.ENTREGADA, fecha_entrega: fecha },
+        });
+        await tx.ordenSede.updateMany({
+          where: { id_orden: idOrden, estado: { not: 'CANCELADA' } },
+          data:  { estado: 'ENTREGADA' },
+        });
+      });
+    }
+
+    return ordenRepository.findById(idOrden);
   },
 
   // ── PAGAR — nueva arquitectura ────────────────────────────────────────────
