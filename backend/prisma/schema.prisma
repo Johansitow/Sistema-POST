@@ -123,6 +123,7 @@ model GrupoNegocio {
   periodos_nomina       PeriodoNomina[]
   documentos            DocumentoEmitido[]
   suscripcion           Suscripcion?
+  facturas_electronicas FacturaElectronica[]
 
   @@map("grupo_negocio")
 }
@@ -190,6 +191,44 @@ model EventoWebhookWompi {
   fecha_creacion DateTime  @default(now())
 
   @@map("eventos_webhook_wompi")
+}
+
+// ── Facturación electrónica DIAN (vía proveedor autorizado, ej. Factus) ────────
+// Documento electrónico emitido para una Orden a solicitud del cliente. El número
+// (prefijo+consecutivo) y el CUFE los asigna el proveedor según la resolución DIAN
+// configurada en su plataforma; aquí guardamos el resultado + snapshot fiscal.
+model FacturaElectronica {
+  id             Int          @id @default(autoincrement())
+  id_grupo       Int
+  id_restaurante Int?
+  id_orden       Int          @unique
+  referencia     String       @unique @db.VarChar(100) // idempotencia; lo que enviamos al proveedor
+  proveedor      String       @db.VarChar(30)          // 'factus'
+  estado         EstadoFacturaElectronica @default(pendiente)
+
+  cufe           String?      @db.VarChar(120)
+  numero         String?      @db.VarChar(60)          // prefijo+consecutivo DIAN
+  qr_url         String?      @db.VarChar(500)
+  pdf_url        String?      @db.VarChar(500)
+  xml            String?      @db.Text
+
+  adquiriente    Json                                   // snapshot fiscal del cliente
+  subtotal       Decimal      @db.Decimal(12, 2)
+  impuestos      Decimal      @db.Decimal(12, 2)
+  total          Decimal      @db.Decimal(12, 2)
+
+  raw_respuesta  Json?
+  mensaje_error  String?      @db.Text
+  reintentos     Int          @default(0)
+  fecha_emision  DateTime?
+  fecha_creacion     DateTime @default(now())
+  fecha_modificacion DateTime @updatedAt
+
+  grupo          GrupoNegocio @relation(fields: [id_grupo], references: [id], onDelete: Cascade)
+  orden          Orden        @relation(fields: [id_orden], references: [id], onDelete: Cascade)
+
+  @@index([id_grupo, estado])
+  @@map("facturas_electronicas")
 }
 
 // ── UsuarioGrupo — relación usuario ↔ grupo con rol ──────────────────────────
@@ -885,6 +924,7 @@ model Orden {
   grupo        GrupoNegocio? @relation(fields: [id_grupo], references: [id])
   detalles     OrdenDetalle[]
   factura      Factura?
+  factura_electronica FacturaElectronica?
   pagos        Pago[]
   puntos       ClientePunto[]
   // Nueva arquitectura
@@ -2012,6 +2052,15 @@ enum EstadoTxWompi {
   rechazada
   error
   anulada
+}
+
+// Estados de una factura electrónica DIAN.
+enum EstadoFacturaElectronica {
+  pendiente  // creada localmente, aún no confirmada por el proveedor/DIAN
+  emitida    // aceptada (con CUFE)
+  rechazada  // rechazada por el proveedor/DIAN
+  error      // fallo técnico al transmitir (reintentable)
+  anulada    // anulada posteriormente
 }
 
 enum RolGrupo {

@@ -108,6 +108,14 @@ export const config = {
     eventsSecret:    env.WOMPI_EVENTS_SECRET,
     integritySecret: env.WOMPI_INTEGRITY_SECRET,
   },
+
+  // Facturación electrónica DIAN — driver `off` (noop) o `factus` (real).
+  // Credenciales del proveedor: POR TENANT (cifradas). Aquí solo plataforma.
+  facturacion: {
+    driver:        env.FACTURACION_DRIVER,
+    factusBaseUrl: env.FACTUS_BASE_URL,
+    encryptionKey: env.FE_ENCRYPTION_KEY,
+  },
 } as const;
 
 export default config;

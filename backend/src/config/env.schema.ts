@@ -75,6 +75,14 @@ export const envSchema = z
     WOMPI_PRIVATE_KEY:      z.string().optional(),
     WOMPI_EVENTS_SECRET:    z.string().optional(), // firma de los webhooks (events)
     WOMPI_INTEGRITY_SECRET: z.string().optional(), // firma de integridad al crear transacciones
+
+    // ── Facturación electrónica DIAN ─────────────────────────────────────────
+    // `off`    → driver noop (simula CUFE, no emite real). `factus` → proveedor real.
+    // Las credenciales del proveedor son POR TENANT (ConfiguracionGrupo cifrado),
+    // no aquí; a nivel plataforma solo el toggle, la URL base y la llave de cifrado.
+    FACTURACION_DRIVER: z.enum(['off', 'factus']).default('off'),
+    FACTUS_BASE_URL:    z.string().url().default('https://api-sandbox.factus.com.co'),
+    FE_ENCRYPTION_KEY:  z.string().optional(), // cifra secretos fiscales por tenant
   })
   .superRefine((val, ctx) => {
     // En producción no se permite arrancar sin SUPER_ADMIN_UUID explícito:
@@ -96,6 +104,18 @@ export const envSchema = z
         path: [k],
         message: `${k} es obligatorio cuando PAGOS_DRIVER=wompi en producción`,
       }));
+    }
+    // Con facturación real (Factus) en producción, la llave de cifrado de secretos
+    // fiscales por tenant es obligatoria (≥32 chars): sin ella no se pueden guardar
+    // ni leer credenciales del proveedor de forma segura.
+    if (val.NODE_ENV === 'production' && val.FACTURACION_DRIVER === 'factus') {
+      if (!val.FE_ENCRYPTION_KEY || val.FE_ENCRYPTION_KEY.length < 32) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['FE_ENCRYPTION_KEY'],
+          message: 'FE_ENCRYPTION_KEY (≥32 chars) es obligatoria cuando FACTURACION_DRIVER=factus en producción',
+        });
+      }
     }
   });
 

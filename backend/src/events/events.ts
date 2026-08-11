@@ -42,6 +42,10 @@ export const EVENTS = {
   SUSCRIPCION_ACTIVADA:     'suscripcion.activada',
   SUSCRIPCION_VENCIDA:      'suscripcion.vencida',
   SUSCRIPCION_PAGO_FALLIDO: 'suscripcion.pago_fallido',
+
+  // Facturación electrónica DIAN
+  FACTURA_EMITIDA:   'factura.emitida',
+  FACTURA_RECHAZADA: 'factura.rechazada',
 } as const;
 
 export type EventName = typeof EVENTS[keyof typeof EVENTS];
@@ -156,6 +160,23 @@ export interface SuscripcionVencidaPayload {
 export interface SuscripcionPagoFallidoPayload {
   idGrupo:    number;
   reintentos: number;
+}
+
+// ── Facturación electrónica DIAN ──────────────────────────────────────────────
+
+export interface FacturaEmitidaPayload {
+  idFactura: number;
+  idOrden:   number;
+  idGrupo:   number;
+  cufe:      string | null;
+  numero:    string | null;
+}
+
+export interface FacturaRechazadaPayload {
+  idFactura: number;
+  idOrden:   number;
+  idGrupo:   number;
+  motivo:    string | null;
 }
 
 // ── Nueva arquitectura ────────────────────────────────────────────────────────

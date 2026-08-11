@@ -3,8 +3,9 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Receipt, DollarSign, Clock, CheckCircle, XCircle, Eye, Filter, Printer, Search } from 'lucide-react';
+import { RefreshCw, Receipt, DollarSign, Clock, CheckCircle, XCircle, Eye, Filter, Printer, Search, FileText } from 'lucide-react';
 import { facturaService, Factura } from '../services/servicios-gestion';
+import { facturacionService, TIPOS_DOCUMENTO_DIAN, type FacturaElectronica, type AdquirienteFiscal } from '../services/facturacion.service';
 import { useRestauranteActivo }    from '../store/restauranteStore';
 import api from '../services/api';
 import { formatCurrency, formatDateTime, buildDateParams } from '../utils';
@@ -46,6 +47,26 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
   const cfg = ESTADO_CFG[factura.estado_factura] || ESTADO_CFG.pendiente;
   const [ordenFull, setOrdenFull] = useState<any | null>(null);
   // Escape, focus trap, scroll lock y devolución del foco los gestiona <Modal>.
+
+  // ── Facturación electrónica DIAN (a solicitud) ──
+  const [feForm, setFeForm]           = useState(false);
+  const [adq, setAdq]                 = useState<AdquirienteFiscal>({ tipo_documento: '13', numero_documento: '', nombre: '' });
+  const [feResultado, setFeResultado] = useState<FacturaElectronica | null>(null);
+  const [feCargando, setFeCargando]   = useState(false);
+  const [feError, setFeError]         = useState<string | null>(null);
+
+  const emitirFE = async () => {
+    setFeError(null);
+    if (!adq.numero_documento || !adq.nombre) { setFeError('Documento y nombre son obligatorios.'); return; }
+    setFeCargando(true);
+    try {
+      const r = await facturacionService.emitir(factura.id_orden, adq);
+      setFeResultado(r);
+      if (r.estado !== 'emitida') setFeError(r.mensaje_error ?? 'La emisión no fue aceptada.');
+    } catch (e: any) {
+      setFeError(e?.response?.data?.error ?? 'No se pudo emitir la factura electrónica.');
+    } finally { setFeCargando(false); }
+  };
 
   useEffect(() => {
     api.get(`/ordenes/${factura.id_orden}`)
@@ -112,6 +133,13 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
               <Printer className="w-3.5 h-3.5" /> Imprimir
             </button>
             <button
+              onClick={() => setFeForm(v => !v)}
+              title="Facturar electrónicamente (DIAN)"
+              className="flex items-center gap-1 text-xs px-2.5 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-colors"
+            >
+              <FileText className="w-3.5 h-3.5" /> Facturar DIAN
+            </button>
+            <button
               onClick={onClose}
               aria-label="Cerrar detalle de factura"
               className="text-white/70 hover:text-white p-1.5 rounded-lg hover:bg-white/20 transition-colors"
@@ -147,6 +175,43 @@ const DetalleFactura: React.FC<{ factura: Factura; onClose: () => void }> = ({ f
               <span>Total</span><span className="text-lg">{formatCurrency(factura.total)}</span>
             </div>
           </div>
+
+          {/* Facturación electrónica DIAN (a solicitud del cliente) */}
+          {feForm && (
+            <div className="bg-slate-50 rounded-xl p-4 space-y-3 border border-slate-200">
+              <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><FileText className="w-4 h-4 text-violet-600" /> Factura electrónica (DIAN)</p>
+              {feResultado?.estado === 'emitida' ? (
+                <div className="text-sm text-emerald-700 space-y-1">
+                  <p className="font-semibold">✓ Emitida {feResultado.numero ? `— ${feResultado.numero}` : ''}</p>
+                  {feResultado.cufe && <p className="text-xs break-all text-slate-500">CUFE: {feResultado.cufe}</p>}
+                  {feResultado.qr_url && <a href={feResultado.qr_url} target="_blank" rel="noreferrer" className="text-xs text-violet-600 underline">Verificar en la DIAN</a>}
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={adq.tipo_documento} onChange={e => setAdq(a => ({ ...a, tipo_documento: e.target.value }))}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-violet-500">
+                      {TIPOS_DOCUMENTO_DIAN.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                    <input placeholder="N° documento" value={adq.numero_documento}
+                      onChange={e => setAdq(a => ({ ...a, numero_documento: e.target.value }))}
+                      className="px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                  </div>
+                  <input placeholder="Nombre / razón social" value={adq.nombre}
+                    onChange={e => setAdq(a => ({ ...a, nombre: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                  <input placeholder="Correo (opcional)" value={adq.email ?? ''}
+                    onChange={e => setAdq(a => ({ ...a, email: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-violet-500" />
+                  {feError && <p className="text-xs text-red-600">{feError}</p>}
+                  <button onClick={emitirFE} disabled={feCargando}
+                    className="w-full py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+                    {feCargando ? 'Emitiendo…' : 'Emitir factura electrónica'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
         </div>
     </Modal>
   );

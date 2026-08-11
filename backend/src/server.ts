@@ -30,6 +30,7 @@ import { restaurantesPlugin }    from './plugins/core/restaurantes.plugin';
 import { categoriasPlugin }      from './plugins/core/categorias.plugin';
 import { startInventarioJob } from './jobs/inventario.job';
 import { startSuscripcionesJob } from './jobs/suscripciones.job';
+import { startFacturacionJob } from './jobs/facturacion.job';
 import logger from './config/logger';
 import { config } from './config/env';
 import prisma from './config/database';
@@ -177,6 +178,7 @@ pluginLoader.loadAll(app).catch((err) =>
 // Iniciar jobs periódicos
 startInventarioJob();
 startSuscripcionesJob();
+startFacturacionJob();
 
 // Iniciar servidor
 server.listen(PORT, () => {

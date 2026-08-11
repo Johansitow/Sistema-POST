@@ -44,6 +44,7 @@ import menuRoutes          from './menu.routes';
 import planesRoutes        from './planes.routes';
 import suscripcionesRoutes from './suscripciones.routes';
 import webhooksRoutes      from './webhooks.routes';
+import facturacionRoutes   from './facturacion.routes';
 
 // ─── Router v1 ────────────────────────────────────────────────────────────────
 const v1 = Router();
@@ -86,6 +87,7 @@ v1.use('/onboarding',     onboardingRoutes);
 v1.use('/menu',           menuRoutes);
 v1.use('/planes',         planesRoutes);
 v1.use('/suscripciones',  suscripcionesRoutes);
+v1.use('/facturacion',    facturacionRoutes);
 
 // ─── Exportado como setupRoutes para que coincida con server.ts ───────────────
 export const setupRoutes = (app: Application): void => {
